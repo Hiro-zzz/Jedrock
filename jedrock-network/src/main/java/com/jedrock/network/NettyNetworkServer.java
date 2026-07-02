@@ -1,25 +1,20 @@
 package com.jedrock.network;
 
 import com.jedrock.api.protocol.ProtocolVersion;
+import com.jedrock.network.pe.PeRakNetServer;
 import com.jedrock.network.pipeline.LazyPacketDecoder;
 import com.jedrock.network.pipeline.VarintFrameDecoder;
 import com.jedrock.network.pipeline.VarintLengthEncoder;
 import com.jedrock.utils.JLogger;
 import com.jedrock.utils.lazy.LazyPacket;
-import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.DatagramPacket;
-import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 
 import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
-import java.util.Map;
-
 import java.net.SocketAddress;
 import java.util.Collection;
 import java.util.Collections;
@@ -49,6 +44,7 @@ public class NettyNetworkServer implements NetworkServer {
 
     private volatile boolean active = false;
     private volatile ConnectionListener listener;
+    private volatile PeRakNetServer peServer;
 
     @Override
     public void setConnectionListener(ConnectionListener listener) {
@@ -58,14 +54,11 @@ public class NettyNetworkServer implements NetworkServer {
     @Override
     public void bind(SocketAddress address, ProtocolVersion protocol) throws Exception {
         if (protocol.isBedrock()) {
-            // RakNet over UDP for Bedrock
-            new Bootstrap()
-                    .group(workerGroup)
-                    .channel(NioDatagramChannel.class)
-                    .handler(new BedrockRakNetHandler(this, protocol))
-                    .bind(address).sync(); // throws if the bind fails
+            // Bedrock: hand the whole RakNet layer to the dedicated PE server.
+            PeRakNetServer pe = new PeRakNetServer((InetSocketAddress) address, protocol);
+            pe.bind();
+            this.peServer = pe;
             active = true;
-            logger.info("Listening on " + address + " for " + protocol.getVersionName() + " (Bedrock/RakNet)");
         } else {
             // Java Edition - TCP
             new ServerBootstrap()
@@ -93,6 +86,11 @@ public class NettyNetworkServer implements NetworkServer {
             } catch (Exception ignored) {}
         }
         connections.clear();
+
+        if (peServer != null) {
+            peServer.close();
+            peServer = null;
+        }
 
         workerGroup.shutdownGracefully();
         bossGroup.shutdownGracefully();
@@ -168,174 +166,6 @@ public class NettyNetworkServer implements NetworkServer {
 
             // Final handler — owns the Connection and lazy packet dispatch
             p.addLast("connection-handler", new ConnectionHandler(NettyNetworkServer.this, protocol));
-        }
-    }
-
-    /**
-     * Minimal RakNet handler for Bedrock 1.1.5.
-     */
-    private static class BedrockRakNetHandler extends SimpleChannelInboundHandler<DatagramPacket> {
-        private static final JLogger logger = JLogger.getLogger(BedrockRakNetHandler.class);
-
-        private final NettyNetworkServer server;
-        private final ProtocolVersion protocol;
-
-        private final Map<InetSocketAddress, RakNetSession> sessions = new ConcurrentHashMap<>();
-
-        BedrockRakNetHandler(NettyNetworkServer server, ProtocolVersion protocol) {
-            this.server = server;
-            this.protocol = protocol;
-        }
-
-        @Override
-        protected void channelRead0(ChannelHandlerContext ctx, DatagramPacket packet) {
-            ByteBuf buf = packet.content();
-            if (buf.readableBytes() < 1) return;
-
-            int id = buf.readUnsignedByte();
-            InetSocketAddress sender = packet.sender();
-
-            if (id == 0x01) {
-                handleUnconnectedPing(ctx, sender, buf);
-            } else if (id == 0x05) {
-                handleOpenConnectionRequest1(ctx, sender, buf);
-            } else if (id == 0x07) {
-                handleOpenConnectionRequest2(ctx, sender, buf);
-            } else if (id == 0x09) {
-                handleConnectionRequest(ctx, sender, buf);
-            } else if (id == 0x13) {
-                handleNewIncomingConnection(sender);
-            } else if ((id & 0x80) != 0) {
-                handleEncapsulated(ctx, sender, buf);
-            }
-        }
-
-        private void handleUnconnectedPing(ChannelHandlerContext ctx, InetSocketAddress sender, ByteBuf in) {
-            in.skipBytes(24);
-
-            String motd = "MCPE;Jedrock PE Server;113;1.1.5;0;10;0;World;Survival;1;19132;19133;";
-
-            ByteBuf out = ctx.alloc().buffer();
-            out.writeByte(0x1C);
-            out.writeLong(System.currentTimeMillis());
-            out.writeLong(0);
-            writeMagic(out);
-            out.writeShort(motd.length());
-            out.writeCharSequence(motd, StandardCharsets.UTF_8);
-
-            ctx.writeAndFlush(new DatagramPacket(out, sender));
-        }
-
-        private void handleOpenConnectionRequest1(ChannelHandlerContext ctx, InetSocketAddress sender, ByteBuf buf) {
-            buf.skipBytes(16); // magic
-            buf.readByte(); // protocol
-            int mtu = Math.min(1400, buf.readableBytes() + 28);
-
-            ByteBuf reply = ctx.alloc().buffer();
-            reply.writeByte(0x06); // Open Connection Reply 1
-            writeMagic(reply);
-            reply.writeLong(0);
-            reply.writeByte(0);
-            reply.writeShort(mtu);
-            ctx.writeAndFlush(new DatagramPacket(reply, sender));
-        }
-
-        private void handleOpenConnectionRequest2(ChannelHandlerContext ctx, InetSocketAddress sender, ByteBuf buf) {
-            buf.skipBytes(16); // magic
-            buf.skipBytes(7); // client address
-            int mtu = buf.readUnsignedShort();
-            long clientGuid = buf.readLong();
-
-            sessions.put(sender, new RakNetSession(sender, clientGuid, mtu));
-
-            ByteBuf reply = ctx.alloc().buffer();
-            reply.writeByte(0x08); // Open Connection Reply 2
-            writeMagic(reply);
-            reply.writeLong(0);
-            reply.writeByte(4);
-            reply.writeInt(0);
-            reply.writeShort(sender.getPort());
-            reply.writeShort(mtu);
-            reply.writeByte(0);
-            ctx.writeAndFlush(new DatagramPacket(reply, sender));
-        }
-
-        private void handleConnectionRequest(ChannelHandlerContext ctx, InetSocketAddress sender, ByteBuf buf) {
-            buf.skipBytes(16); // client guid + time
-
-            ByteBuf reply = ctx.alloc().buffer();
-            reply.writeByte(0x10); // Connection Request Accepted
-            reply.writeByte(4);
-            reply.writeInt(0);
-            reply.writeShort(sender.getPort());
-            reply.writeShort(0);
-            for (int i = 0; i < 10; i++) reply.writeByte(0);
-            reply.writeLong(System.currentTimeMillis());
-            reply.writeLong(0);
-            ctx.writeAndFlush(new DatagramPacket(reply, sender));
-        }
-
-        private void handleNewIncomingConnection(InetSocketAddress sender) {
-            RakNetSession s = sessions.get(sender);
-            if (s != null) {
-                s.fullyConnected = true;
-                logger.info("PE 1.1.5 client fully connected via RakNet: " + sender);
-            }
-        }
-
-        private void handleEncapsulated(ChannelHandlerContext ctx, InetSocketAddress sender, ByteBuf buf) {
-            RakNetSession s = sessions.get(sender);
-            if (s == null || !s.fullyConnected) return;
-
-            // Crude skip for demo
-            if (buf.readableBytes() < 4) return;
-            buf.skipBytes(1);
-            buf.skipBytes(2);
-
-            if (buf.readableBytes() > 0) {
-                byte mcpeId = buf.readByte();
-                logger.info("[PE 1.1.5] MCPE packet 0x" + Integer.toHexString(mcpeId & 0xFF));
-
-                // For demo, when we see Login (typically 0x01 in old Bedrock), send PlayStatus
-                if (mcpeId == 0x01) {
-                    sendPlayStatus(ctx, sender);
-                }
-            }
-        }
-
-        private void sendPlayStatus(ChannelHandlerContext ctx, InetSocketAddress target) {
-            ByteBuf payload = ctx.alloc().buffer();
-            payload.writeInt(0); // LOGIN_SUCCESS
-
-            ByteBuf rak = ctx.alloc().buffer();
-            rak.writeByte(0x84); // unreliable
-            rak.writeByte(0x02); // PlayStatus
-            rak.writeBytes(payload);
-
-            ctx.writeAndFlush(new DatagramPacket(rak, target));
-            logger.info("Sent PlayStatus to PE client - should allow basic join");
-        }
-
-        private void writeMagic(ByteBuf buf) {
-            buf.writeBytes(new byte[]{
-                0x00, (byte)0xff, (byte)0xff, 0x00,
-                (byte)0xfe, (byte)0xfe, (byte)0xfe, (byte)0xfe,
-                (byte)0xfd, (byte)0xfd, (byte)0xfd, (byte)0xfd,
-                0x12, 0x34, 0x56, 0x78
-            });
-        }
-
-        private static class RakNetSession {
-            InetSocketAddress address;
-            long guid;
-            int mtu;
-            boolean fullyConnected = false;
-
-            RakNetSession(InetSocketAddress address, long guid, int mtu) {
-                this.address = address;
-                this.guid = guid;
-                this.mtu = mtu;
-            }
         }
     }
 

@@ -97,11 +97,11 @@ public class JedrockServer implements Server, ConnectionListener {
 
         try {
             // Bind example addresses (in real life load from config)
-            // Java Edition 1.12.2
+            // Java Edition 1.12.2 (TCP)
             networkServer.bind(new InetSocketAddress("0.0.0.0", 25565), ProtocolVersion.JE_1_12_2);
 
-            // MCPE / Bedrock 1.1.5 (note: real PE uses RakNet - this is placeholder)
-            // networkServer.bind(new InetSocketAddress("0.0.0.0", 19132), ProtocolVersion.PE_1_1_5);
+            // MCPE / Bedrock 1.1.5 (RakNet over UDP, handled by the PE server)
+            networkServer.bind(new InetSocketAddress("0.0.0.0", 19132), ProtocolVersion.PE_1_1_5);
 
         } catch (Exception e) {
             LOGGER.error("Failed to bind network", e);

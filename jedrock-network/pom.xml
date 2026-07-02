@@ -39,11 +39,19 @@
         </dependency>
 
         <!-- Proven RakNet transport for Bedrock (handles offline handshake, datagrams,
-             reliability, ACK, splits). We keep the MCPE game logic ourselves. -->
+             reliability, ACK, splits). We keep the MCPE game logic ourselves.
+             Netty transitives (buffer/handler and the heavy native epoll/kqueue jars)
+             are excluded — our netty-all above already provides them and we run on NIO. -->
         <dependency>
             <groupId>com.nukkitx.network</groupId>
             <artifactId>raknet</artifactId>
             <version>1.6.25</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
     </dependencies>
 </project>
