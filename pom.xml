@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.jedrock</groupId>
+    <artifactId>jedrock</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>Jedrock</name>
+    <description>Lightweight, highly abstract Minecraft server core with lazy packet parsing. Supports MCPE 1.1.5 and JE 1.12.2.</description>
+
+    <modules>
+        <module>jedrock-api</module>
+        <module>jedrock-utils</module>
+        <module>jedrock-network</module>
+        <module>jedrock-gameloop</module>
+        <module>jedrock-core</module>
+    </modules>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+
+        <!-- Common versions -->
+        <netty.version>4.1.111.Final</netty.version>
+        <junit.version>5.10.2</junit.version>
+
+        <!-- Project principles -->
+        <jedrock.lightweight>true</jedrock.lightweight>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Self modules -->
+            <dependency>
+                <groupId>com.jedrock</groupId>
+                <artifactId>jedrock-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.jedrock</groupId>
+                <artifactId>jedrock-utils</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.jedrock</groupId>
+                <artifactId>jedrock-network</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.jedrock</groupId>
+                <artifactId>jedrock-gameloop</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- Netty (used primarily by network for high-perf IO) -->
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-all</artifactId>
+                <version>${netty.version}</version>
+            </dependency>
+
+            <!-- Testing -->
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter</artifactId>
+                <version>${junit.version}</version>
+                <scope>test</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.13.0</version>
+                    <configuration>
+                        <source>${maven.compiler.source}</source>
+                        <target>${maven.compiler.target}</target>
+                        <encoding>UTF-8</encoding>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.2.5</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+</project>

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.jedrock</groupId>
+        <artifactId>jedrock</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>jedrock-gameloop</artifactId>
+    <name>jedrock-gameloop</name>
+    <description>Ultra-lightweight dedicated game loop and scheduler. Fixed-tick, low jitter, minimal allocations.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.jedrock</groupId>
+            <artifactId>jedrock-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.jedrock</groupId>
+            <artifactId>jedrock-utils</artifactId>
+        </dependency>
+    </dependencies>
+</project>

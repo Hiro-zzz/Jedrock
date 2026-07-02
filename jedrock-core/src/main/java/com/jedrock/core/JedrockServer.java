@@ -1,0 +1,223 @@
+package com.jedrock.core;
+
+import com.jedrock.api.Jedrock;
+import com.jedrock.api.Server;
+import com.jedrock.api.event.EventBus;
+import com.jedrock.api.event.player.PlayerJoinEvent;
+import com.jedrock.api.event.player.PlayerQuitEvent;
+import com.jedrock.api.player.Player;
+import com.jedrock.api.player.PlayerConnection;
+import com.jedrock.api.protocol.ProtocolVersion;
+import com.jedrock.api.world.Dimension;
+import com.jedrock.api.world.Location;
+import com.jedrock.api.world.World;
+import com.jedrock.core.player.CorePlayer;
+import com.jedrock.core.player.PlayerRegistry;
+import com.jedrock.core.world.CoreWorld;
+import com.jedrock.gameloop.GameLoop;
+import com.jedrock.gameloop.Scheduler;
+import com.jedrock.network.ConnectionListener;
+import com.jedrock.network.NetworkServer;
+import com.jedrock.network.NettyNetworkServer;
+import com.jedrock.utils.JLogger;
+
+import java.net.InetSocketAddress;
+import java.util.Collection;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+
+/**
+ * Reference implementation of the Server interface.
+ *
+ * Design principles applied:
+ * - As little state as possible
+ * - Delegates to specialized modules (gameloop, network)
+ * - Lazy-friendly (no eager world/player loading)
+ */
+public class JedrockServer implements Server, ConnectionListener {
+
+    private static final JLogger LOGGER = JLogger.getLogger(JedrockServer.class);
+
+    private final String name;
+    private final AtomicBoolean running = new AtomicBoolean(false);
+
+    private final EventBus eventBus = new EventBus();
+    private final GameLoop gameLoop = new GameLoop();
+    private final Scheduler scheduler = new Scheduler();
+    private final NetworkServer networkServer;
+
+    // In-memory state layer
+    private final PlayerRegistry playerRegistry = new PlayerRegistry();
+    private final CoreWorld defaultWorld = new CoreWorld("world", Dimension.OVERWORLD);
+
+    private final AtomicLong tickCounter = new AtomicLong(0);
+
+    public JedrockServer() {
+        this.name = Jedrock.NAME;
+
+        // Attach scheduler + core tick to game loop
+        gameLoop.addTickable(scheduler);
+        gameLoop.addTickable(this::serverTick);
+
+        // Default network impl (can be swapped). Register as the state listener before binding.
+        this.networkServer = new NettyNetworkServer();
+        this.networkServer.setConnectionListener(this);
+    }
+
+    private void serverTick(long currentTick) {
+        // Core server-wide per-tick work goes here.
+        // Keep this extremely lean.
+        this.tickCounter.set(currentTick);
+
+        // Tick network (keep-alives, etc.)
+        networkServer.tick(currentTick);
+    }
+
+    @Override
+    public String getName() {
+        return name;
+    }
+
+    @Override
+    public String getVersion() {
+        return Jedrock.VERSION + " (MCPE " + Jedrock.MCPE_VERSION + " / JE " + Jedrock.JE_VERSION + ")";
+    }
+
+    @Override
+    public void start() {
+        if (!running.compareAndSet(false, true)) {
+            LOGGER.warn("Server already running");
+            return;
+        }
+
+        LOGGER.info("Starting " + getVersion());
+
+        try {
+            // Bind example addresses (in real life load from config)
+            // Java Edition 1.12.2
+            networkServer.bind(new InetSocketAddress("0.0.0.0", 25565), ProtocolVersion.JE_1_12_2);
+
+            // MCPE / Bedrock 1.1.5 (note: real PE uses RakNet - this is placeholder)
+            // networkServer.bind(new InetSocketAddress("0.0.0.0", 19132), ProtocolVersion.PE_1_1_5);
+
+        } catch (Exception e) {
+            LOGGER.error("Failed to bind network", e);
+            running.set(false);
+            return;
+        }
+
+        gameLoop.start();
+        LOGGER.info("Jedrock server started successfully.");
+    }
+
+    @Override
+    public void shutdown() {
+        if (!running.compareAndSet(true, false)) return;
+
+        LOGGER.info("Shutting down Jedrock...");
+
+        gameLoop.stop();
+        networkServer.shutdown();
+
+        LOGGER.info("Shutdown complete.");
+    }
+
+    @Override
+    public boolean isRunning() {
+        return running.get();
+    }
+
+    @Override
+    public EventBus getEventBus() {
+        return eventBus;
+    }
+
+    @Override
+    public Collection<Player> getPlayers() {
+        return playerRegistry.all();
+    }
+
+    @Override
+    public Optional<Player> getPlayer(String name) {
+        return playerRegistry.getByName(name);
+    }
+
+    @Override
+    public Collection<World> getWorlds() {
+        return List.of(defaultWorld);
+    }
+
+    @Override
+    public Optional<World> getWorld(String name) {
+        return defaultWorld.getName().equalsIgnoreCase(name) ? Optional.of(defaultWorld) : Optional.empty();
+    }
+
+    // ===== ConnectionListener: network → core state bridge =====
+
+    @Override
+    public void onLogin(PlayerConnection connection, UUID uuid, String username) {
+        Location spawn = defaultWorld.getSpawnLocation();
+        CorePlayer player = new CorePlayer(uuid, username, connection, defaultWorld, spawn);
+
+        playerRegistry.add(player);
+        defaultWorld.addPlayer(player);
+
+        PlayerJoinEvent event = new PlayerJoinEvent(player);
+        eventBus.post(event);
+
+        if (event.isCancelled()) {
+            // A listener refused the join — undo the state we just added and drop the client.
+            defaultWorld.removePlayer(player);
+            playerRegistry.removeByConnection(connection);
+            player.kick(event.getJoinMessage() != null ? event.getJoinMessage() : "Connection refused");
+            return;
+        }
+
+        player.sendMessage("§aWelcome to Jedrock! (JE 1.12.2)");
+        LOGGER.info(username + " joined (" + playerRegistry.size() + " online)");
+    }
+
+    @Override
+    public void onDisconnect(PlayerConnection connection) {
+        CorePlayer player = playerRegistry.removeByConnection(connection);
+        if (player == null) {
+            return; // never fully logged in
+        }
+        defaultWorld.removePlayer(player);
+        eventBus.post(new PlayerQuitEvent(player));
+        LOGGER.info(player.getName() + " disconnected (" + playerRegistry.size() + " online)");
+    }
+
+    @Override
+    public long getCurrentTick() {
+        return tickCounter.get();
+    }
+
+    // Accessors for modules that need to reach internal components
+    public GameLoop getGameLoop() {
+        return gameLoop;
+    }
+
+    public Scheduler getScheduler() {
+        return scheduler;
+    }
+
+    public NetworkServer getNetworkServer() {
+        return networkServer;
+    }
+
+    public static void main(String[] args) {
+        JedrockServer server = new JedrockServer();
+        Runtime.getRuntime().addShutdownHook(new Thread(server::shutdown));
+
+        server.start();
+
+        // Keep the main thread alive
+        try {
+            Thread.currentThread().join();
+        } catch (InterruptedException ignored) {}
+    }
+}
