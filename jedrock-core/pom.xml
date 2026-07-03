@@ -37,10 +37,6 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>com.jedrock</groupId>
-            <artifactId>jedrock-api</artifactId>
-        </dependency>
     </dependencies>
 
     <build>
