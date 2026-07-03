@@ -2,7 +2,13 @@ package com.jedrock.network;
 
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
-import com.jedrock.network.je.packet.*;
+import com.jedrock.network.handler.ProtocolHandler;
+import com.jedrock.network.handler.je.JavaEditionProtocolHandler;
+import com.jedrock.network.je.packet.ClientboundChatMessage;
+import com.jedrock.network.je.packet.ClientboundChunkData;
+import com.jedrock.network.je.packet.ClientboundKeepAlive;
+import com.jedrock.network.je.packet.ClientboundLoginSuccess;
+import com.jedrock.network.je.packet.ClientboundPacket;
 import com.jedrock.network.protocol.ConnectionProtocol;
 import com.jedrock.network.protocol.ProtocolState;
 import com.jedrock.utils.ByteBufUtils;
@@ -12,7 +18,6 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 
 import java.net.SocketAddress;
-import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -24,6 +29,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * - Nothing is parsed unless someone explicitly calls materialize(...).
  * - All heavy work (login, chunk, entity metadata...) stays lazy until needed.
  * - Outbound goes through the pipeline (length framing).
+ *
+ * Protocol-specific logic lives in a {@link ProtocolHandler}.
+ * This class is intentionally kept thin and protocol-agnostic.
  */
 public class JedrockConnection implements Connection, PlayerConnection {
 
@@ -33,20 +41,23 @@ public class JedrockConnection implements Connection, PlayerConnection {
     private final ProtocolVersion protocol;
     private final ConnectionProtocol connectionProtocol;
     private final ConnectionListener listener;
+    private final ProtocolHandler protocolHandler;
 
     private final AtomicBoolean open = new AtomicBoolean(true);
     private volatile boolean loggedIn = false;
 
-    // Very basic keep-alive tracking (better to move to core later)
-    private long lastKeepAliveSent = 0;
+    // Keep-alive tracking (delegated to handler)
+    private volatile long lastKeepAliveSent = 0;
 
     public JedrockConnection(Channel channel, ProtocolVersion protocol, ConnectionListener listener) {
         this.channel = channel;
         this.protocol = protocol;
         this.listener = listener;
         this.connectionProtocol = new ConnectionProtocol(protocol);
-        // New connections always begin in HANDSHAKE for standard flow
-        this.connectionProtocol.setState(ProtocolState.HANDSHAKE);
+
+        // JedrockConnection is the Java Edition (TCP) connection; Bedrock uses PeRakNetServer.
+        this.protocolHandler = new JavaEditionProtocolHandler();
+        this.protocolHandler.onConnectionActive(this);
     }
 
     @Override
@@ -142,11 +153,12 @@ public class JedrockConnection implements Connection, PlayerConnection {
         }
     }
 
-    /** Send Login Success (switches the client to PLAY). */
+    /** Send Login Success (switches the client to PLAY). Primarily called by protocol handlers. */
     public void sendLoginSuccess(UUID uuid, String username) {
         send(new ClientboundLoginSuccess(uuid, username));
     }
 
+    /** Send keep-alive packet. Primarily called by protocol handlers. */
     public void sendKeepAlive(long id) {
         send(new ClientboundKeepAlive(id));
     }
@@ -160,7 +172,10 @@ public class JedrockConnection implements Connection, PlayerConnection {
     /** Radius (in chunks) of the flat terrain sent around spawn so the client can render/spawn. */
     private static final int SPAWN_CHUNK_RADIUS = 5;
 
-    /** Stream a square of flat chunks around the spawn chunk (0,0). */
+    /**
+     * Stream a square of flat chunks around spawn.
+     * Called by protocol handlers during initial join sequence.
+     */
     public void sendSpawnChunks() {
         for (int cx = -SPAWN_CHUNK_RADIUS; cx <= SPAWN_CHUNK_RADIUS; cx++) {
             for (int cz = -SPAWN_CHUNK_RADIUS; cz <= SPAWN_CHUNK_RADIUS; cz++) {
@@ -196,101 +211,30 @@ public class JedrockConnection implements Connection, PlayerConnection {
     @Override
     public void handleInboundPacket(LazyPacket packet) {
         if (packet == null) return;
-
-        int id = packet.getPacketId();
-        ProtocolState state = getState();
-        ByteBuf payload = packet.getPayload(); // read-only view, no ownership transfer
-
-        try {
-            LOGGER.debug(() -> "Inbound 0x" + Integer.toHexString(id) +
-                    " (state=" + state + ", bytes=" + (payload != null ? payload.readableBytes() : 0) + ")");
-
-            if (protocol.isJava()) {
-                handleJavaPacket(id, state, packet, payload);
-            } else {
-                // PE / other — not implemented yet
-                LOGGER.warn("Received packet for unsupported protocol: " + protocol);
-            }
-        } finally {
-            packet.release();
-        }
+        protocolHandler.handleInbound(packet, this);
     }
 
-    private void handleJavaPacket(int id, ProtocolState state, LazyPacket lazy, ByteBuf payload) {
-        switch (state) {
-            case HANDSHAKE -> {
-                if (id == 0x00) {
-                    ServerboundHandshake hs = lazy.materialize(ServerboundHandshake::fromBuffer);
-                    LOGGER.info("Handshake from " + getRemoteAddress() +
-                            " | protocol=" + hs.protocolVersion + " nextState=" + hs.nextState);
+    /**
+     * Protocol handlers call this to mark that the player has fully logged in.
+     * Used so that notifyDisconnected only fires real player quits.
+     */
+    public void setLoggedIn(boolean value) {
+        this.loggedIn = value;
+    }
 
-                    if (hs.nextState == 2) { // Login
-                        setState(ProtocolState.LOGIN);
-                    } else if (hs.nextState == 1) {
-                        setState(ProtocolState.STATUS);
-                        // TODO: proper status ping later
-                    }
-                }
-            }
+    /**
+     * Accessor for protocol handlers (and core via listener).
+     */
+    public ConnectionListener getListener() {
+        return listener;
+    }
 
-            case LOGIN -> {
-                if (id == 0x00) {
-                    ServerboundLoginStart loginStart = lazy.materialize(ServerboundLoginStart::fromBuffer);
-                    String name = loginStart.username;
+    public long getLastKeepAliveSent() {
+        return lastKeepAliveSent;
+    }
 
-                    LOGGER.info("Player " + name + " is logging in from " + getRemoteAddress());
-
-                    // Offline mode login success (no encryption)
-                    UUID uuid = UUID.nameUUIDFromBytes(("OfflinePlayer:" + name).getBytes(StandardCharsets.UTF_8));
-
-                    // 1. Login Success → client switches internally to PLAY
-                    sendLoginSuccess(uuid, name);
-                    setState(ProtocolState.PLAY);
-
-                    // 2. Join Game + the packets a vanilla client expects, in order
-                    send(new ClientboundJoinGame());
-                    send(new ClientboundServerDifficulty());
-                    send(new ClientboundSpawnPosition());
-                    send(new ClientboundPlayerAbilities());
-                    send(new ClientboundHeldItemChange());
-
-                    // 3. Terrain around spawn — without chunks the client hangs on
-                    //    "Downloading terrain" and never actually spawns.
-                    sendSpawnChunks();
-
-                    // 4. Initial position + look. Sent after the chunks so the player's
-                    //    chunk already exists when the client places them.
-                    send(new ClientboundPlayerPositionAndLook());
-
-                    // 5. Keep alive so the client knows the connection is alive
-                    sendKeepAlive(System.currentTimeMillis());
-
-                    LOGGER.info("Player " + name + " has joined the game (PLAY state).");
-
-                    // 6. Hand the fully-joined player up to the core state layer.
-                    //    Any welcome message / game logic is the core's responsibility.
-                    loggedIn = true;
-                    if (listener != null) {
-                        listener.onLogin(this, uuid, name);
-                    }
-                }
-            }
-
-            case PLAY -> {
-                if (id == 0x0B) { // Keep Alive (client response)
-                    ServerboundKeepAlive ka = lazy.materialize(ServerboundKeepAlive::fromBuffer);
-                    LOGGER.debug(() -> "KeepAlive response: " + ka.keepAliveId);
-                } else if (id == 0x00) {
-                    // Teleport Confirm (sent after we sent PlayerPositionAndLook)
-                    LOGGER.debug("Received Teleport Confirm (ignored for now)");
-                }
-                // TODO: Client Settings (0x04), Position (0x0C), etc.
-            }
-
-            case STATUS -> {
-                // TODO: implement server list ping if desired
-            }
-        }
+    public void setLastKeepAliveSent(long time) {
+        this.lastKeepAliveSent = time;
     }
 
     @Override
@@ -299,16 +243,10 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     /**
-     * Called periodically (e.g. from game loop) to send keep-alives.
-     * Very lightweight implementation.
+     * Called periodically (e.g. from game loop).
+     * Delegates timing-sensitive work to the current ProtocolHandler.
      */
     public void tick(long currentTick) {
-        if (!isOpen() || getState() != ProtocolState.PLAY) return;
-
-        long now = System.currentTimeMillis();
-        if (now - lastKeepAliveSent > 15000) { // every 15s
-            sendKeepAlive(now);
-            lastKeepAliveSent = now;
-        }
+        protocolHandler.tick(currentTick, this);
     }
 }

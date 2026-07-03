@@ -5,7 +5,7 @@ import io.netty.buffer.ByteBuf;
 /**
  * Serverbound Keep Alive (0x0B in 1.12.2).
  */
-public final class ServerboundKeepAlive {
+public final class ServerboundKeepAlive implements ServerboundPacket {
 
     public long keepAliveId;
 
@@ -15,7 +15,9 @@ public final class ServerboundKeepAlive {
         return p;
     }
 
+    public static final int PACKET_ID = 0x0B;
+
     public int getPacketId() {
-        return 0x0B;
+        return PACKET_ID;
     }
 }

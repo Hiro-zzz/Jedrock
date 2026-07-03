@@ -82,6 +82,53 @@ public final class ByteBufUtils {
         buf.writeBytes(array);
     }
 
+    // ========== VarLong (Bedrock Edition) ==========
+
+    public static long readVarLong(ByteBuf buf) {
+        long result = 0;
+        int bytesRead = 0;
+        byte current;
+        do {
+            current = buf.readByte();
+            result |= (long) (current & 0x7F) << (bytesRead * 7);
+            bytesRead++;
+            if (bytesRead > 10) {
+                throw new IllegalArgumentException("VarLong too big");
+            }
+        } while ((current & 0x80) != 0);
+        return result;
+    }
+
+    public static void writeVarLong(ByteBuf buf, long value) {
+        while ((value & ~0x7FL) != 0) {
+            buf.writeByte((int) ((value & 0x7F) | 0x80));
+            value >>>= 7;
+        }
+        buf.writeByte((int) value);
+    }
+
+    // ========== ZigZag VarInt/VarLong (Bedrock Edition) ==========
+
+    public static void writeSignedVarInt(ByteBuf buf, int value) {
+        writeVarInt(buf, (value << 1) ^ (value >> 31));
+    }
+
+    public static void writeSignedVarLong(ByteBuf buf, long value) {
+        writeVarLong(buf, (value << 1) ^ (value >> 63));
+    }
+
+    /**
+     * Writes a big-endian 32-bit int regardless of the buffer's byte order.
+     * Some MCPE fields (e.g. PlayStatus.status) are big-endian even though most of
+     * Bedrock is little-endian.
+     */
+    public static void writeIntBE(ByteBuf buf, int value) {
+        buf.writeByte((value >>> 24) & 0xFF);
+        buf.writeByte((value >>> 16) & 0xFF);
+        buf.writeByte((value >>> 8) & 0xFF);
+        buf.writeByte(value & 0xFF);
+    }
+
     // ========== Position (JE packed long) ==========
 
     public static long readPosition(ByteBuf buf) {

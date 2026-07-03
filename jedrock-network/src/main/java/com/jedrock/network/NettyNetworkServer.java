@@ -164,7 +164,7 @@ public class NettyNetworkServer implements NetworkServer {
             // LengthEncoder prepends the total length.
             p.addLast("length-encoder", new VarintLengthEncoder());
 
-            // Final handler — owns the Connection and lazy packet dispatch
+            // Final handler — owns the Connection. Packet dispatch is delegated to ProtocolHandler inside JedrockConnection.
             p.addLast("connection-handler", new ConnectionHandler(NettyNetworkServer.this, protocol));
         }
     }

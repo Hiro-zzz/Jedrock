@@ -156,6 +156,10 @@ public class JedrockServer implements Server, ConnectionListener {
     }
 
     // ===== ConnectionListener: network → core state bridge =====
+    //
+    // The network protocol handler is responsible for sending the protocol-mandatory
+    // packets (LoginSuccess, JoinGame, initial chunks, position) so the client can spawn.
+    // Core receives the player here and can safely do game logic, events, and extra packets.
 
     @Override
     public void onLogin(PlayerConnection connection, UUID uuid, String username) {
@@ -176,7 +180,7 @@ public class JedrockServer implements Server, ConnectionListener {
             return;
         }
 
-        player.sendMessage("§aWelcome to Jedrock! (JE 1.12.2)");
+        player.sendMessage("§aWelcome to Jedrock!");
         LOGGER.info(username + " joined (" + playerRegistry.size() + " online)");
     }
 

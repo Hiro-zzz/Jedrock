@@ -27,6 +27,11 @@ jedrock
 
 ## Design Highlights
 
+### Protocol Handlers (scaling foundation)
+
+Inbound protocol logic lives in `ProtocolHandler` implementations (see `network/handler/je` and `pe`).
+`JedrockConnection` is deliberately thin and delegates to the handler selected by `ProtocolVersion`.
+
 ### Lazy Packet Example
 
 ```java
@@ -68,10 +73,10 @@ Or just run the main class from your IDE.
 
 ## Next Steps / Extension Points
 
-- Proper length-prefixed codec + packet registry per protocol
-- Real RakNet implementation for PE 1.1.5 (or integration with existing RakNet lib)
+- Flesh out `PacketRegistry` + per-state dispatch (foundation stub already present)
+- Complete PE 1.1.5 login (Batch 0xFE + zlib + Login JSON)
+- Wire real `BlockStorage` data into `ClientboundChunkData`
 - World / chunk storage abstraction (lazy chunk loading)
-- Proper player + entity registry in core
 - Config system (tiny)
 - Command system (also behind abstraction)
 

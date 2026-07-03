@@ -7,7 +7,9 @@ import io.netty.buffer.ByteBuf;
  * Serverbound Login Start (0x00 in LOGIN state).
  * Contains the player's username.
  */
-public final class ServerboundLoginStart {
+public final class ServerboundLoginStart implements ServerboundPacket {
+
+    public static final int PACKET_ID = 0x00;
 
     public String username;
 
@@ -18,6 +20,6 @@ public final class ServerboundLoginStart {
     }
 
     public int getPacketId() {
-        return 0x00;
+        return PACKET_ID;
     }
 }

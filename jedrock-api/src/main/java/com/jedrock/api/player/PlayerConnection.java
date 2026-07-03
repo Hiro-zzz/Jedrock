@@ -22,7 +22,11 @@ public interface PlayerConnection {
 
     /**
      * Send a message / packet abstraction.
-     * In practice, higher level modules will use a PacketSender or similar.
+     *
+     * The Object parameter keeps the API 100% protocol-agnostic (no packet types in api module).
+     * Typical usage from core:
+     *   - Pass a ClientboundPacket impl (from network layer)
+     *   - Or a pre-built ByteBuf
      */
     void sendPacket(Object packet); // Object to keep API completely protocol agnostic
 

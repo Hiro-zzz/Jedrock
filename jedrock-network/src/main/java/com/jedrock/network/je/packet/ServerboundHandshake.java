@@ -7,7 +7,7 @@ import io.netty.buffer.ByteBuf;
  * Serverbound Handshake (0x00 in HANDSHAKE state).
  * JE 1.12.2 protocol 340.
  */
-public final class ServerboundHandshake {
+public final class ServerboundHandshake implements ServerboundPacket {
 
     public int protocolVersion;
     public String serverAddress;
@@ -23,7 +23,9 @@ public final class ServerboundHandshake {
         return p;
     }
 
+    public static final int PACKET_ID = 0x00;
+
     public int getPacketId() {
-        return 0x00;
+        return PACKET_ID;
     }
 }
