@@ -157,6 +157,18 @@ public class JedrockConnection implements Connection, PlayerConnection {
         send(new ClientboundChatMessage("{\"text\":\"" + escaped + "\"}"));
     }
 
+    /** Radius (in chunks) of the flat terrain sent around spawn so the client can render/spawn. */
+    private static final int SPAWN_CHUNK_RADIUS = 5;
+
+    /** Stream a square of flat chunks around the spawn chunk (0,0). */
+    public void sendSpawnChunks() {
+        for (int cx = -SPAWN_CHUNK_RADIUS; cx <= SPAWN_CHUNK_RADIUS; cx++) {
+            for (int cz = -SPAWN_CHUNK_RADIUS; cz <= SPAWN_CHUNK_RADIUS; cz++) {
+                send(new ClientboundChunkData(cx, cz));
+            }
+        }
+    }
+
     public ProtocolState getState() {
         return connectionProtocol.getState();
     }
@@ -242,15 +254,20 @@ public class JedrockConnection implements Connection, PlayerConnection {
                     send(new ClientboundPlayerAbilities());
                     send(new ClientboundHeldItemChange());
 
-                    // 3. Initial position + look (MUST be sent to stop "loading terrain")
+                    // 3. Terrain around spawn — without chunks the client hangs on
+                    //    "Downloading terrain" and never actually spawns.
+                    sendSpawnChunks();
+
+                    // 4. Initial position + look. Sent after the chunks so the player's
+                    //    chunk already exists when the client places them.
                     send(new ClientboundPlayerPositionAndLook());
 
-                    // 4. Keep alive so the client knows the connection is alive
+                    // 5. Keep alive so the client knows the connection is alive
                     sendKeepAlive(System.currentTimeMillis());
 
                     LOGGER.info("Player " + name + " has joined the game (PLAY state).");
 
-                    // 5. Hand the fully-joined player up to the core state layer.
+                    // 6. Hand the fully-joined player up to the core state layer.
                     //    Any welcome message / game logic is the core's responsibility.
                     loggedIn = true;
                     if (listener != null) {
