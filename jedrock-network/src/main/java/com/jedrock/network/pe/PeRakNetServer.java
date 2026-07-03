@@ -1,6 +1,7 @@
 package com.jedrock.network.pe;
 
 import com.jedrock.api.protocol.ProtocolVersion;
+import com.jedrock.utils.ByteBufUtils;
 import com.jedrock.utils.JLogger;
 import com.nukkitx.network.raknet.EncapsulatedPacket;
 import com.nukkitx.network.raknet.RakNetServer;
@@ -152,16 +153,61 @@ public final class PeRakNetServer {
 
         @Override
         public void onEncapsulated(EncapsulatedPacket packet) {
-            // First byte of a Bedrock game payload is the wrapper id; 0xFE = batched game packets.
+            // Copy the payload out without consuming the library's buffer.
             ByteBuf buf = packet.getBuffer();
             int size = buf.readableBytes();
-            int id = size > 0 ? buf.getUnsignedByte(buf.readerIndex()) : -1;
-            if (id == 0xFE) {
-                LOGGER.info("[PE] MCPE game batch received (0xFE, " + size + " bytes) — "
-                        + "RakNet connected and Login batch arrived. Decode (zlib) is the next milestone.");
-            } else {
-                LOGGER.info("[PE] encapsulated payload id=0x" + Integer.toHexString(id) + " (" + size + " bytes)");
+            if (size < 1) return;
+            byte[] payload = new byte[size];
+            buf.getBytes(buf.readerIndex(), payload);
+
+            int wrapperId = payload[0] & 0xFF;
+            if (wrapperId != 0xFE) {
+                LOGGER.info("[PE] encapsulated payload id=0x" + Integer.toHexString(wrapperId) + " (" + size + " bytes)");
+                return;
             }
+            decodeBatch(java.util.Arrays.copyOfRange(payload, 1, payload.length));
+        }
+
+        /** Inflate a 0xFE batch and log each inner MCPE packet id/size (foundation for the join flow). */
+        private void decodeBatch(byte[] compressed) {
+            McpeCompression.Inflated inflated = McpeCompression.inflate(compressed);
+            if (inflated == null) {
+                LOGGER.warn("[PE] failed to inflate 0xFE batch (" + compressed.length + " bytes): "
+                        + hexPreview(compressed, 16));
+                return;
+            }
+            LOGGER.info("[PE] batch inflated: " + inflated.data().length + " bytes ("
+                    + (inflated.raw() ? "raw deflate" : "zlib") + ")");
+
+            ByteBuf batch = io.netty.buffer.Unpooled.wrappedBuffer(inflated.data());
+            try {
+                int index = 0;
+                while (batch.isReadable()) {
+                    int len = ByteBufUtils.readVarInt(batch);
+                    if (len <= 0 || len > batch.readableBytes()) {
+                        LOGGER.warn("[PE] malformed batch entry: len=" + len + ", remaining=" + batch.readableBytes());
+                        break;
+                    }
+                    ByteBuf pk = batch.readSlice(len);
+                    int mcpeId = ByteBufUtils.readVarInt(pk);
+                    LOGGER.info("[PE]   packet #" + (index++) + " id=0x" + Integer.toHexString(mcpeId)
+                            + " (len " + len + ")");
+                }
+            } catch (RuntimeException e) {
+                LOGGER.warn("[PE] error parsing batch: " + e.getMessage());
+            } finally {
+                batch.release();
+            }
+        }
+
+        private static String hexPreview(byte[] data, int max) {
+            StringBuilder sb = new StringBuilder();
+            int n = Math.min(max, data.length);
+            for (int i = 0; i < n; i++) {
+                sb.append(String.format("%02x ", data[i]));
+            }
+            if (data.length > n) sb.append("...");
+            return sb.toString().trim();
         }
 
         @Override
