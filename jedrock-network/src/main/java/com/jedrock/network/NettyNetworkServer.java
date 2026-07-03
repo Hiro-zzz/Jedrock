@@ -55,7 +55,7 @@ public class NettyNetworkServer implements NetworkServer {
     public void bind(SocketAddress address, ProtocolVersion protocol) throws Exception {
         if (protocol.isBedrock()) {
             // Bedrock: hand the whole RakNet layer to the dedicated PE server.
-            PeRakNetServer pe = new PeRakNetServer((InetSocketAddress) address, protocol);
+            PeRakNetServer pe = new PeRakNetServer((InetSocketAddress) address, protocol, listener);
             pe.bind();
             this.peServer = pe;
             active = true;

@@ -1,6 +1,8 @@
 package com.jedrock.network.pe;
 
+import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
+import com.jedrock.network.ConnectionListener;
 import com.jedrock.utils.ByteBufUtils;
 import com.jedrock.utils.JLogger;
 import com.nukkitx.network.raknet.EncapsulatedPacket;
@@ -20,8 +22,12 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Bedrock (PE 1.1.5) server built on the nukkitx RakNet transport.
@@ -69,12 +75,14 @@ public final class PeRakNetServer {
 
     private final InetSocketAddress address;
     private final ProtocolVersion protocol;
+    private final ConnectionListener listener;
 
     private RakNetServer server;
 
-    public PeRakNetServer(InetSocketAddress address, ProtocolVersion protocol) {
+    public PeRakNetServer(InetSocketAddress address, ProtocolVersion protocol, ConnectionListener listener) {
         this.address = address;
         this.protocol = protocol;
+        this.listener = listener;
     }
 
     public void bind() {
@@ -134,7 +142,7 @@ public final class PeRakNetServer {
         public void onSessionCreation(RakNetServerSession session) {
             LOGGER.info("[PE] session from " + session.getAddress()
                     + " (mtu=" + session.getMtu() + ", raknet v" + session.getProtocolVersion() + ")");
-            session.setListener(new SessionHandler(session));
+            session.setListener(new SessionHandler(session, listener, protocol));
         }
 
         @Override
@@ -147,14 +155,60 @@ public final class PeRakNetServer {
         }
     }
 
-    /** Per-session callbacks: state changes and the inbound MCPE game batch. */
-    private static final class SessionHandler implements RakNetSessionListener {
+    /**
+     * Per-session callbacks (state changes + inbound MCPE batch) AND the {@link PlayerConnection}
+     * the core sees — so a Bedrock player lands in the same PlayerRegistry as a Java one.
+     */
+    private static final class SessionHandler implements RakNetSessionListener, PlayerConnection {
 
         private final RakNetServerSession session;
+        private final ConnectionListener listener;
+        private final ProtocolVersion protocol;
 
-        SessionHandler(RakNetServerSession session) {
+        private volatile boolean loggedIn = false;
+        private volatile UUID uuid;
+        private volatile String username;
+
+        SessionHandler(RakNetServerSession session, ConnectionListener listener, ProtocolVersion protocol) {
             this.session = session;
+            this.listener = listener;
+            this.protocol = protocol;
         }
+
+        // ===== PlayerConnection (api) — lets the core treat a PE player like any other =====
+
+        @Override
+        public ProtocolVersion getProtocolVersion() {
+            return protocol;
+        }
+
+        @Override
+        public String getAddress() {
+            return String.valueOf(session.getAddress());
+        }
+
+        @Override
+        public boolean isActive() {
+            return !session.isClosed();
+        }
+
+        @Override
+        public void close(String reason) {
+            session.disconnect();
+        }
+
+        @Override
+        public void sendPacket(Object packet) {
+            // Typed outbound PE packets are future work; the core mainly needs identity + lifecycle.
+        }
+
+        @Override
+        public void sendMessage(String message) {
+            // Sending an MCPE Text packet is a later step; the player is still registered/tracked.
+            LOGGER.debug(() -> "[PE] sendMessage (not wired yet): " + message);
+        }
+
+        // ===== RakNet session callbacks =====
 
         @Override
         public void onSessionChangeState(RakNetState state) {
@@ -167,6 +221,9 @@ public final class PeRakNetServer {
         @Override
         public void onDisconnect(DisconnectReason reason) {
             LOGGER.info("[PE] disconnect " + session.getAddress() + " (" + reason + ")");
+            if (loggedIn && listener != null) {
+                listener.onDisconnect(this);
+            }
         }
 
         @Override
@@ -210,7 +267,7 @@ public final class PeRakNetServer {
                     ByteBuf pk = batch.readSlice(len);
                     int id = ByteBufUtils.readVarInt(pk);
                     LOGGER.debug(() -> "[PE] inbound packet id=0x" + Integer.toHexString(id));
-                    handleGamePacket(id, rawDeflate);
+                    handleGamePacket(id, pk, rawDeflate);
                 }
             } catch (RuntimeException e) {
                 LOGGER.warn("[PE] error parsing batch: " + e.getMessage());
@@ -219,11 +276,20 @@ public final class PeRakNetServer {
             }
         }
 
-        private void handleGamePacket(int id, boolean rawDeflate) {
+        private void handleGamePacket(int id, ByteBuf pk, boolean rawDeflate) {
             switch (id) {
                 case ID_LOGIN -> {
-                    LOGGER.info("[PE] Login received → PlayStatus + ResourcePacksInfo");
+                    Identity identity = extractIdentity(pk);
+                    this.uuid = identity.uuid();
+                    this.username = identity.name();
+                    LOGGER.info("[PE] Login: " + username + " (" + uuid + ") → PlayStatus + ResourcePacksInfo");
                     sendLoginResponse(rawDeflate);
+
+                    // Register in the core state layer exactly like a Java player.
+                    loggedIn = true;
+                    if (listener != null) {
+                        listener.onLogin(this, uuid, username);
+                    }
                 }
                 case ID_RESOURCE_PACK_RESPONSE -> {
                     LOGGER.info("[PE] resource packs accepted → StartGame");
@@ -398,6 +464,74 @@ public final class PeRakNetServer {
             } finally {
                 batch.release();
             }
+        }
+
+        // ===== MCPE Login identity extraction =====
+
+        private static final Pattern JWT_TOKEN =
+                Pattern.compile("eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]*");
+        private static final Pattern DISPLAY_NAME =
+                Pattern.compile("\"displayName\"\\s*:\\s*\"([^\"]+)\"");
+        private static final Pattern IDENTITY =
+                Pattern.compile("\"identity\"\\s*:\\s*\"([0-9a-fA-F-]{32,36})\"");
+
+        private record Identity(UUID uuid, String name) {}
+
+        /**
+         * Best-effort extraction of the player's gamertag + UUID from the MCPE Login body
+         * (protocol int, then a connection request holding a chain of JWTs). Falls back to a
+         * generated identity so a parse failure never blocks the join.
+         */
+        private static Identity extractIdentity(ByteBuf loginBody) {
+            String name = null;
+            String identity = null;
+            try {
+                loginBody.readInt(); // MCPE protocol version (big-endian) — not needed here
+                byte[] connectionRequest = ByteBufUtils.readByteArray(loginBody);
+
+                ByteBuf cr = Unpooled.wrappedBuffer(connectionRequest);
+                int chainLength = cr.readIntLE();
+                byte[] chainBytes = new byte[Math.max(0, Math.min(chainLength, cr.readableBytes()))];
+                cr.readBytes(chainBytes);
+                String chainJson = new String(chainBytes, StandardCharsets.UTF_8);
+
+                Matcher tokens = JWT_TOKEN.matcher(chainJson);
+                while (tokens.find() && (name == null || identity == null)) {
+                    String[] parts = tokens.group().split("\\.");
+                    if (parts.length < 2) continue;
+                    String payload;
+                    try {
+                        payload = new String(Base64.getUrlDecoder().decode(pad(parts[1])), StandardCharsets.UTF_8);
+                    } catch (IllegalArgumentException ignored) {
+                        continue;
+                    }
+                    if (name == null) name = firstGroup(DISPLAY_NAME, payload);
+                    if (identity == null) identity = firstGroup(IDENTITY, payload);
+                }
+            } catch (Exception e) {
+                LOGGER.debug(() -> "[PE] could not parse Login identity: " + e);
+            }
+
+            UUID uuid = null;
+            if (identity != null) {
+                try {
+                    uuid = UUID.fromString(identity);
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
+            if (uuid == null) uuid = UUID.randomUUID();
+            if (name == null || name.isBlank()) name = "Bedrock-" + Integer.toHexString(uuid.hashCode());
+            return new Identity(uuid, name);
+        }
+
+        private static String firstGroup(Pattern pattern, String input) {
+            Matcher m = pattern.matcher(input);
+            return m.find() ? m.group(1) : null;
+        }
+
+        private static String pad(String base64Url) {
+            int rem = base64Url.length() % 4;
+            return rem == 0 ? base64Url : base64Url + "====".substring(rem);
         }
     }
 }
