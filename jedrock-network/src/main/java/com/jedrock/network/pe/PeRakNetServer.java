@@ -219,6 +219,16 @@ public final class PeRakNetServer {
             sendGameBatch(text);
         }
 
+        @Override
+        public void addToTab(UUID uuid, String name) {
+            // Bedrock PlayerList needs skin data — implemented together with the PE world step.
+        }
+
+        @Override
+        public void removeFromTab(UUID uuid) {
+            // See addToTab.
+        }
+
         // ===== RakNet session callbacks =====
 
         @Override
@@ -518,30 +528,29 @@ public final class PeRakNetServer {
             String name = null;
             String identity = null;
             try {
-                loginBody.readInt(); // MCPE protocol version (big-endian) — not needed here
-                byte[] connectionRequest = ByteBufUtils.readByteArray(loginBody);
+                // Scan the whole Login body for JWT tokens (ASCII "eyJ..." inside the binary
+                // framing) — robust to the exact packet layout. Decode each payload and look
+                // for the authenticated extraData.
+                byte[] all = new byte[loginBody.readableBytes()];
+                loginBody.getBytes(loginBody.readerIndex(), all);
+                String text = new String(all, StandardCharsets.ISO_8859_1);
 
-                ByteBuf cr = Unpooled.wrappedBuffer(connectionRequest);
-                int chainLength = cr.readIntLE();
-                byte[] chainBytes = new byte[Math.max(0, Math.min(chainLength, cr.readableBytes()))];
-                cr.readBytes(chainBytes);
-                String chainJson = new String(chainBytes, StandardCharsets.UTF_8);
-
-                Matcher tokens = JWT_TOKEN.matcher(chainJson);
+                Matcher tokens = JWT_TOKEN.matcher(text);
                 while (tokens.find() && (name == null || identity == null)) {
                     String[] parts = tokens.group().split("\\.");
                     if (parts.length < 2) continue;
-                    String payload;
+                    byte[] decoded;
                     try {
-                        payload = new String(Base64.getUrlDecoder().decode(pad(parts[1])), StandardCharsets.UTF_8);
+                        decoded = Base64.getUrlDecoder().decode(pad(parts[1]));
                     } catch (IllegalArgumentException ignored) {
                         continue;
                     }
+                    String payload = new String(decoded, StandardCharsets.UTF_8);
                     if (name == null) name = firstGroup(DISPLAY_NAME, payload);
                     if (identity == null) identity = firstGroup(IDENTITY, payload);
                 }
             } catch (Exception e) {
-                LOGGER.debug(() -> "[PE] could not parse Login identity: " + e);
+                LOGGER.warn("[PE] Login identity parse failed: " + e);
             }
 
             UUID uuid = null;

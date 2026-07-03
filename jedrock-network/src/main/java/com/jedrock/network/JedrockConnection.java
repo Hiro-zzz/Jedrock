@@ -9,6 +9,7 @@ import com.jedrock.network.je.packet.ClientboundChunkData;
 import com.jedrock.network.je.packet.ClientboundKeepAlive;
 import com.jedrock.network.je.packet.ClientboundLoginSuccess;
 import com.jedrock.network.je.packet.ClientboundPacket;
+import com.jedrock.network.je.packet.ClientboundPlayerListItem;
 import com.jedrock.network.protocol.ConnectionProtocol;
 import com.jedrock.network.protocol.ProtocolState;
 import com.jedrock.utils.ByteBufUtils;
@@ -81,6 +82,16 @@ public class JedrockConnection implements Connection, PlayerConnection {
     @Override
     public void sendMessage(String message) {
         sendChat(message);
+    }
+
+    @Override
+    public void addToTab(UUID uuid, String name) {
+        send(ClientboundPlayerListItem.add(uuid, name, 1)); // creative gamemode in the tab
+    }
+
+    @Override
+    public void removeFromTab(UUID uuid) {
+        send(ClientboundPlayerListItem.remove(uuid));
     }
 
     @Override

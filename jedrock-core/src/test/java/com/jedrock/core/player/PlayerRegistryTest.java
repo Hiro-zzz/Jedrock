@@ -61,6 +61,8 @@ class PlayerRegistryTest {
         @Override public String getAddress() { return "test"; }
         @Override public void sendPacket(Object packet) { }
         @Override public void sendMessage(String message) { }
+        @Override public void addToTab(java.util.UUID uuid, String name) { }
+        @Override public void removeFromTab(java.util.UUID uuid) { }
         @Override public void close(String reason) { }
         @Override public boolean isActive() { return true; }
     }

@@ -182,6 +182,15 @@ public class JedrockServer implements Server, ConnectionListener {
 
         player.sendMessage("§aWelcome to Jedrock!");
         broadcast("§e" + username + " joined the game", player);
+
+        // Tab list: give the newcomer the whole roster, and add the newcomer to everyone else's.
+        for (Player other : playerRegistry.all()) {
+            connection.addToTab(other.getUniqueId(), other.getName());
+            if (other != player) {
+                other.getConnection().addToTab(uuid, username);
+            }
+        }
+
         LOGGER.info(username + " joined (" + playerRegistry.size() + " online)");
     }
 
@@ -194,6 +203,12 @@ public class JedrockServer implements Server, ConnectionListener {
         defaultWorld.removePlayer(player);
         eventBus.post(new PlayerQuitEvent(player));
         broadcast("§e" + player.getName() + " left the game", null);
+
+        // Tab list: drop the leaver from everyone else's roster.
+        for (Player other : playerRegistry.all()) {
+            other.getConnection().removeFromTab(player.getUniqueId());
+        }
+
         LOGGER.info(player.getName() + " disconnected (" + playerRegistry.size() + " online)");
     }
 

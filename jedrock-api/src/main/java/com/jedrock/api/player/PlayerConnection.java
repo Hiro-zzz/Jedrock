@@ -37,6 +37,12 @@ public interface PlayerConnection {
      */
     void sendMessage(String message);
 
+    /** Add a player entry to this client's tab / player list. */
+    void addToTab(java.util.UUID uuid, String name);
+
+    /** Remove a player entry from this client's tab / player list. */
+    void removeFromTab(java.util.UUID uuid);
+
     /**
      * Close the connection.
      */
