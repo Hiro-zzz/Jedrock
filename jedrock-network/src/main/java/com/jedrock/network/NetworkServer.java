@@ -1,6 +1,7 @@
 package com.jedrock.network;
 
 import com.jedrock.api.protocol.ProtocolVersion;
+import com.jedrock.api.world.World;
 
 import java.net.SocketAddress;
 import java.util.Collection;
@@ -18,6 +19,9 @@ public interface NetworkServer {
      * Should be set before {@link #bind} so no early events are missed.
      */
     void setConnectionListener(ConnectionListener listener);
+
+    /** The world clients read blocks from when serializing chunks. Set before {@link #bind}. */
+    void setWorld(World world);
 
     void shutdown();
 

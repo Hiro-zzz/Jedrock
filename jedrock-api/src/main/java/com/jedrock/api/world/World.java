@@ -35,6 +35,15 @@ public interface World {
     void setBlockAt(int x, int y, int z, BlockState state);
 
     /**
+     * Fast, allocation-free block access using canonical block ids (0 = air).
+     * Protocol layers map these ids to their own palette when serializing chunks,
+     * so Java and Bedrock render the same world.
+     */
+    int getBlockId(int x, int y, int z);
+
+    void setBlockId(int x, int y, int z, int blockId);
+
+    /**
      * Spawn location for this world.
      */
     Location getSpawnLocation();

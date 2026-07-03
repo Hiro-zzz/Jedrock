@@ -65,6 +65,7 @@ public class JedrockServer implements Server, ConnectionListener {
         // Default network impl (can be swapped). Register as the state listener before binding.
         this.networkServer = new NettyNetworkServer();
         this.networkServer.setConnectionListener(this);
+        this.networkServer.setWorld(defaultWorld); // clients serialize chunks from this shared world
     }
 
     private void serverTick(long currentTick) {

@@ -2,6 +2,7 @@ package com.jedrock.network;
 
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
+import com.jedrock.api.world.World;
 import com.jedrock.network.handler.ProtocolHandler;
 import com.jedrock.network.handler.je.JavaEditionProtocolHandler;
 import com.jedrock.network.je.packet.ClientboundChatMessage;
@@ -42,6 +43,7 @@ public class JedrockConnection implements Connection, PlayerConnection {
     private final ProtocolVersion protocol;
     private final ConnectionProtocol connectionProtocol;
     private final ConnectionListener listener;
+    private final World world;
     private final ProtocolHandler protocolHandler;
 
     private final AtomicBoolean open = new AtomicBoolean(true);
@@ -50,10 +52,11 @@ public class JedrockConnection implements Connection, PlayerConnection {
     // Keep-alive tracking (delegated to handler)
     private volatile long lastKeepAliveSent = 0;
 
-    public JedrockConnection(Channel channel, ProtocolVersion protocol, ConnectionListener listener) {
+    public JedrockConnection(Channel channel, ProtocolVersion protocol, ConnectionListener listener, World world) {
         this.channel = channel;
         this.protocol = protocol;
         this.listener = listener;
+        this.world = world;
         this.connectionProtocol = new ConnectionProtocol(protocol);
 
         // JedrockConnection is the Java Edition (TCP) connection; Bedrock uses PeRakNetServer.
@@ -190,7 +193,7 @@ public class JedrockConnection implements Connection, PlayerConnection {
     public void sendSpawnChunks() {
         for (int cx = -SPAWN_CHUNK_RADIUS; cx <= SPAWN_CHUNK_RADIUS; cx++) {
             for (int cz = -SPAWN_CHUNK_RADIUS; cz <= SPAWN_CHUNK_RADIUS; cz++) {
-                send(new ClientboundChunkData(cx, cz));
+                send(new ClientboundChunkData(world, cx, cz));
             }
         }
     }

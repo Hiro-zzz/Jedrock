@@ -2,6 +2,8 @@ package com.jedrock.network.pe;
 
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
+import com.jedrock.api.world.Blocks;
+import com.jedrock.api.world.World;
 import com.jedrock.network.ConnectionListener;
 import com.jedrock.utils.ByteBufUtils;
 import com.jedrock.utils.JLogger;
@@ -81,13 +83,15 @@ public final class PeRakNetServer {
     private final InetSocketAddress address;
     private final ProtocolVersion protocol;
     private final ConnectionListener listener;
+    private final World world;
 
     private RakNetServer server;
 
-    public PeRakNetServer(InetSocketAddress address, ProtocolVersion protocol, ConnectionListener listener) {
+    public PeRakNetServer(InetSocketAddress address, ProtocolVersion protocol, ConnectionListener listener, World world) {
         this.address = address;
         this.protocol = protocol;
         this.listener = listener;
+        this.world = world;
     }
 
     public void bind() {
@@ -147,7 +151,7 @@ public final class PeRakNetServer {
         public void onSessionCreation(RakNetServerSession session) {
             LOGGER.info("[PE] session from " + session.getAddress()
                     + " (mtu=" + session.getMtu() + ", raknet v" + session.getProtocolVersion() + ")");
-            session.setListener(new SessionHandler(session, listener, protocol));
+            session.setListener(new SessionHandler(session, listener, protocol, world));
         }
 
         @Override
@@ -169,6 +173,7 @@ public final class PeRakNetServer {
         private final RakNetServerSession session;
         private final ConnectionListener listener;
         private final ProtocolVersion protocol;
+        private final World world;
 
         private volatile boolean loggedIn = false;
         private volatile UUID uuid;
@@ -176,10 +181,11 @@ public final class PeRakNetServer {
         /** Compression mode observed on inbound batches; reused for outbound (chat etc.). */
         private volatile boolean rawDeflate = false;
 
-        SessionHandler(RakNetServerSession session, ConnectionListener listener, ProtocolVersion protocol) {
+        SessionHandler(RakNetServerSession session, ConnectionListener listener, ProtocolVersion protocol, World world) {
             this.session = session;
             this.listener = listener;
             this.protocol = protocol;
+            this.world = world;
         }
 
         // ===== PlayerConnection (api) — lets the core treat a PE player like any other =====
@@ -445,25 +451,90 @@ public final class PeRakNetServer {
                 ByteBufUtils.writeVarLong(b, 1L); // player entity unique id
             }));
 
-            // 3x3 grid of empty (air) chunks — the flat-world illusion.
+            // 3x3 grid of chunks serialized from the shared world (same blocks as Java sees).
             for (int cx = -1; cx <= 1; cx++) {
                 for (int cz = -1; cz <= 1; cz++) {
                     int chunkX = cx;
                     int chunkZ = cz;
+                    byte[] chunkData = buildChunkPayload(chunkX, chunkZ);
                     packets.add(buildPacket(b -> {
                         ByteBufUtils.writeVarInt(b, ID_FULL_CHUNK_DATA);
                         ByteBufUtils.writeSignedVarInt(b, chunkX);
                         ByteBufUtils.writeSignedVarInt(b, chunkZ);
-                        ByteBufUtils.writeVarInt(b, 1 + 256 + 1); // chunk payload length
-                        b.writeByte(0);                           // 0 sub-chunks (only air)
-                        b.writeZero(256);                         // biome map
-                        ByteBufUtils.writeVarInt(b, 0);           // extra data
+                        ByteBufUtils.writeVarInt(b, chunkData.length);
+                        b.writeBytes(chunkData);
                     }));
                 }
             }
 
             packets.add(playStatus(PLAY_STATUS_PLAYER_SPAWN)); // finally kick the client out of the load screen
             sendGameBatch(packets.toArray(new byte[0][]));
+        }
+
+        /**
+         * Serialize a chunk column's data payload (legacy MCPE 1.1.5 format): a contiguous run of
+         * 16³ sub-chunks from the bottom, then the biome map and extra-data marker. Blocks come
+         * from the shared world, so Bedrock renders the same terrain as Java.
+         */
+        private byte[] buildChunkPayload(int chunkX, int chunkZ) {
+            int baseX = chunkX << 4;
+            int baseZ = chunkZ << 4;
+
+            int topSection = -1;
+            for (int sy = 0; sy < 16; sy++) {
+                if (sectionHasBlocks(baseX, baseZ, sy)) {
+                    topSection = sy;
+                }
+            }
+            int subChunkCount = topSection + 1; // sub-chunks are sent contiguously from y=0
+
+            ByteBuf payload = Unpooled.buffer();
+            try {
+                payload.writeByte(subChunkCount);
+                for (int sy = 0; sy < subChunkCount; sy++) {
+                    payload.writeByte(0); // sub-chunk format version (legacy)
+                    // Block ids in Bedrock XZY order (x outer, y inner).
+                    for (int x = 0; x < 16; x++) {
+                        for (int z = 0; z < 16; z++) {
+                            for (int y = 0; y < 16; y++) {
+                                payload.writeByte(toBedrockId(world.getBlockId(baseX + x, (sy << 4) | y, baseZ + z)));
+                            }
+                        }
+                    }
+                    payload.writeZero(2048); // block metadata nibbles (all 0)
+                }
+                payload.writeZero(256);               // biome map
+                ByteBufUtils.writeVarInt(payload, 0); // extra data
+
+                byte[] out = new byte[payload.readableBytes()];
+                payload.getBytes(payload.readerIndex(), out);
+                return out;
+            } finally {
+                payload.release();
+            }
+        }
+
+        private boolean sectionHasBlocks(int baseX, int baseZ, int sectionY) {
+            for (int x = 0; x < 16; x++) {
+                for (int z = 0; z < 16; z++) {
+                    for (int y = 0; y < 16; y++) {
+                        if (world.getBlockId(baseX + x, (sectionY << 4) | y, baseZ + z) != Blocks.AIR) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        /** Canonical block id → Bedrock 1.1.5 block id. */
+        private static int toBedrockId(int canonical) {
+            return switch (canonical) {
+                case Blocks.STONE -> 1;
+                case Blocks.GRASS -> 2;
+                case Blocks.DIRT -> 3;
+                default -> 0; // air
+            };
         }
 
         private static byte[] playStatus(int status) {

@@ -3,6 +3,7 @@ package com.jedrock.core.world;
 import com.jedrock.api.entity.Entity;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.world.BlockState;
+import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.Dimension;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
@@ -18,6 +19,9 @@ import java.util.concurrent.CopyOnWriteArraySet;
  * it does not simulate physics, light or AI — the client renders the illusion.
  */
 public final class CoreWorld implements World {
+
+    /** Height of the procedural flat stone floor. Matches the spawn (y=64, one block above). */
+    public static final int FLOOR_Y = 63;
 
     private final String name;
     private final UUID uniqueId;
@@ -61,14 +65,14 @@ public final class CoreWorld implements World {
 
     @Override
     public BlockState getBlockAt(int x, int y, int z) {
-        int id = storage.getId(x, y, z);
+        int id = getBlockId(x, y, z);
         // Allocate a BlockState only on this abstract path; hot code uses getBlockId().
-        return id == BlockStorage.AIR ? BlockState.AIR : new BlockState(id, "minecraft:unknown");
+        return id == Blocks.AIR ? BlockState.AIR : new BlockState(id, "minecraft:unknown");
     }
 
     @Override
     public void setBlockAt(int x, int y, int z, BlockState state) {
-        storage.setId(x, y, z, state == null ? BlockStorage.AIR : state.protocolId());
+        setBlockId(x, y, z, state == null ? Blocks.AIR : state.protocolId());
     }
 
     @Override
@@ -76,12 +80,18 @@ public final class CoreWorld implements World {
         return spawnLocation;
     }
 
-    // ===== Fast, allocation-free block access for hot internal paths =====
+    // ===== Fast, allocation-free canonical block access =====
 
+    @Override
     public int getBlockId(int x, int y, int z) {
-        return storage.getId(x, y, z);
+        int stored = storage.getId(x, y, z);
+        if (stored != Blocks.AIR) {
+            return stored;              // a player edit overrides the base terrain
+        }
+        return y == FLOOR_Y ? Blocks.STONE : Blocks.AIR; // procedural flat floor
     }
 
+    @Override
     public void setBlockId(int x, int y, int z, int id) {
         storage.setId(x, y, z, id);
     }
