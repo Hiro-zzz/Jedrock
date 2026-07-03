@@ -18,4 +18,7 @@ public interface ConnectionListener {
 
     /** A connection closed. May fire for connections that never logged in. */
     void onDisconnect(PlayerConnection connection);
+
+    /** An in-game player sent a chat message. The core relays it to everyone. */
+    void onChat(PlayerConnection connection, String message);
 }

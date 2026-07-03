@@ -37,6 +37,11 @@ public final class PlayerRegistry {
         return uuid == null ? Optional.empty() : Optional.ofNullable(byId.get(uuid));
     }
 
+    public Optional<Player> getByConnection(PlayerConnection connection) {
+        UUID uuid = byConnection.get(connection);
+        return uuid == null ? Optional.empty() : Optional.ofNullable(byId.get(uuid));
+    }
+
     /**
      * Remove the player associated with a connection.
      *

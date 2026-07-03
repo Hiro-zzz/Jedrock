@@ -90,11 +90,16 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
         if (id == ServerboundKeepAlive.PACKET_ID) {
             ServerboundKeepAlive ka = lazy.materialize(ServerboundKeepAlive::fromBuffer);
             LOGGER.debug(() -> "KeepAlive response: " + ka.keepAliveId);
+        } else if (id == ServerboundChatMessage.PACKET_ID) {
+            ServerboundChatMessage chat = lazy.materialize(ServerboundChatMessage::fromBuffer);
+            if (connection.getListener() != null) {
+                connection.getListener().onChat(connection, chat.message);
+            }
         } else if (id == 0x00) {
             // Teleport Confirm (sent after PlayerPositionAndLook)
             LOGGER.debug("Received Teleport Confirm (ignored for now)");
         }
-        // TODO: Client Settings (0x04), Position (0x0C), Chat, etc.
+        // TODO: Client Settings (0x04), Position (0x0C), etc.
     }
 
     private void handleStatus(int id, LazyPacket lazy, JedrockConnection connection) {

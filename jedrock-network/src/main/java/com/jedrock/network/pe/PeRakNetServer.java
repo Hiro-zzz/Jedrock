@@ -61,6 +61,7 @@ public final class PeRakNetServer {
     private static final int GAME_PACKET_WRAPPER = 0xFE;
     private static final int ID_LOGIN = 0x01;
     private static final int ID_PLAY_STATUS = 0x02;
+    private static final int ID_TEXT = 0x09;
     private static final int ID_RESOURCE_PACKS_INFO = 0x06;
     private static final int ID_RESOURCE_PACK_RESPONSE = 0x08;
     private static final int ID_START_GAME = 0x0B;
@@ -72,6 +73,10 @@ public final class PeRakNetServer {
 
     private static final int PLAY_STATUS_LOGIN_SUCCESS = 0;
     private static final int PLAY_STATUS_PLAYER_SPAWN = 3;
+
+    // MCPE TextPacket types
+    private static final int TEXT_TYPE_RAW = 0;
+    private static final int TEXT_TYPE_CHAT = 1;
 
     private final InetSocketAddress address;
     private final ProtocolVersion protocol;
@@ -168,6 +173,8 @@ public final class PeRakNetServer {
         private volatile boolean loggedIn = false;
         private volatile UUID uuid;
         private volatile String username;
+        /** Compression mode observed on inbound batches; reused for outbound (chat etc.). */
+        private volatile boolean rawDeflate = false;
 
         SessionHandler(RakNetServerSession session, ConnectionListener listener, ProtocolVersion protocol) {
             this.session = session;
@@ -204,8 +211,12 @@ public final class PeRakNetServer {
 
         @Override
         public void sendMessage(String message) {
-            // Sending an MCPE Text packet is a later step; the player is still registered/tracked.
-            LOGGER.debug(() -> "[PE] sendMessage (not wired yet): " + message);
+            byte[] text = buildPacket(b -> {
+                ByteBufUtils.writeVarInt(b, ID_TEXT);
+                b.writeByte(TEXT_TYPE_RAW);
+                ByteBufUtils.writeString(b, message);
+            });
+            sendGameBatch(text);
         }
 
         // ===== RakNet session callbacks =====
@@ -254,7 +265,7 @@ public final class PeRakNetServer {
                 LOGGER.warn("[PE] failed to inflate game batch (" + compressed.length + " bytes)");
                 return;
             }
-            boolean rawDeflate = inflated.raw();
+            this.rawDeflate = inflated.raw();
 
             ByteBuf batch = Unpooled.wrappedBuffer(inflated.data());
             try {
@@ -267,7 +278,7 @@ public final class PeRakNetServer {
                     ByteBuf pk = batch.readSlice(len);
                     int id = ByteBufUtils.readVarInt(pk);
                     LOGGER.debug(() -> "[PE] inbound packet id=0x" + Integer.toHexString(id));
-                    handleGamePacket(id, pk, rawDeflate);
+                    handleGamePacket(id, pk);
                 }
             } catch (RuntimeException e) {
                 LOGGER.warn("[PE] error parsing batch: " + e.getMessage());
@@ -276,35 +287,56 @@ public final class PeRakNetServer {
             }
         }
 
-        private void handleGamePacket(int id, ByteBuf pk, boolean rawDeflate) {
+        private void handleGamePacket(int id, ByteBuf pk) {
             switch (id) {
                 case ID_LOGIN -> {
                     Identity identity = extractIdentity(pk);
                     this.uuid = identity.uuid();
                     this.username = identity.name();
                     LOGGER.info("[PE] Login: " + username + " (" + uuid + ") → PlayStatus + ResourcePacksInfo");
-                    sendLoginResponse(rawDeflate);
-
-                    // Register in the core state layer exactly like a Java player.
-                    loggedIn = true;
-                    if (listener != null) {
-                        listener.onLogin(this, uuid, username);
-                    }
+                    sendLoginResponse();
                 }
                 case ID_RESOURCE_PACK_RESPONSE -> {
                     LOGGER.info("[PE] resource packs accepted → StartGame");
-                    sendStartGame(rawDeflate);
+                    sendStartGame();
                 }
                 case ID_REQUEST_CHUNK_RADIUS -> {
                     LOGGER.info("[PE] chunk radius requested → deploying world (3x3 chunks + spawn)");
-                    sendWorld(rawDeflate);
+                    sendWorld();
+                    registerPlayer(); // fully in-game now — hand it to the core like a JE player
                 }
-                default -> { /* gameplay packet — nothing to answer yet */ }
+                case ID_TEXT -> handleInboundText(pk);
+                default -> { /* other gameplay packet — nothing to answer yet */ }
+            }
+        }
+
+        /** Register the fully-joined player in the core, exactly once. */
+        private void registerPlayer() {
+            if (loggedIn || uuid == null) return;
+            loggedIn = true;
+            if (listener != null) {
+                listener.onLogin(this, uuid, username);
+            }
+        }
+
+        /** Relay an inbound MCPE chat message to the core so it reaches every platform. */
+        private void handleInboundText(ByteBuf pk) {
+            try {
+                int type = pk.readUnsignedByte();
+                if (type == TEXT_TYPE_CHAT) {
+                    ByteBufUtils.readString(pk); // source name — we use the server-side name instead
+                }
+                String message = ByteBufUtils.readString(pk);
+                if (loggedIn && listener != null && !message.isEmpty()) {
+                    listener.onChat(this, message);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.debug(() -> "[PE] could not parse inbound Text: " + e);
             }
         }
 
         /** Reply to Login: PlayStatus(success) + an empty ResourcePacksInfo. */
-        private void sendLoginResponse(boolean rawDeflate) {
+        private void sendLoginResponse() {
             byte[] playStatus = buildPacket(b -> {
                 ByteBufUtils.writeVarInt(b, ID_PLAY_STATUS);
                 ByteBufUtils.writeIntBE(b, PLAY_STATUS_LOGIN_SUCCESS); // status is a big-endian int32
@@ -315,11 +347,11 @@ public final class PeRakNetServer {
                 b.writeShortLE(0);       // behaviour pack count
                 b.writeShortLE(0);       // resource pack count
             });
-            sendGameBatch(rawDeflate, playStatus, resourcePacksInfo);
+            sendGameBatch(playStatus, resourcePacksInfo);
         }
 
         /** Reply to the resource-pack response with the world's StartGame + a spawn nudge. */
-        private void sendStartGame(boolean rawDeflate) {
+        private void sendStartGame() {
             byte[] startGame = buildPacket(b -> {
                 ByteBufUtils.writeVarInt(b, ID_START_GAME);
 
@@ -375,11 +407,11 @@ public final class PeRakNetServer {
             byte[] spawnStatus = playStatus(PLAY_STATUS_PLAYER_SPAWN);
             // NOTE: canonically PLAYER_SPAWN is sent once, after chunks. We also nudge here
             // (and again in sendWorld) — kept because it is what a 1.1.5 client accepts today.
-            sendGameBatch(rawDeflate, startGame, spawnStatus);
+            sendGameBatch(startGame, spawnStatus);
         }
 
         /** Reply to the chunk-radius request: publish a small flat 3x3 world and spawn the player. */
-        private void sendWorld(boolean rawDeflate) {
+        private void sendWorld() {
             List<byte[]> packets = new ArrayList<>();
 
             packets.add(buildPacket(b -> {
@@ -421,7 +453,7 @@ public final class PeRakNetServer {
             }
 
             packets.add(playStatus(PLAY_STATUS_PLAYER_SPAWN)); // finally kick the client out of the load screen
-            sendGameBatch(rawDeflate, packets.toArray(new byte[0][]));
+            sendGameBatch(packets.toArray(new byte[0][]));
         }
 
         private static byte[] playStatus(int status) {
@@ -445,7 +477,7 @@ public final class PeRakNetServer {
         }
 
         /** Wrap packets in a zlib batch behind the 0xFE game-packet header and send them reliably. */
-        private void sendGameBatch(boolean rawDeflate, byte[]... packets) {
+        private void sendGameBatch(byte[]... packets) {
             ByteBuf batch = Unpooled.buffer();
             try {
                 for (byte[] pk : packets) {

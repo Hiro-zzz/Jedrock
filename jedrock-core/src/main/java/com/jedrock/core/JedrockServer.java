@@ -181,6 +181,7 @@ public class JedrockServer implements Server, ConnectionListener {
         }
 
         player.sendMessage("§aWelcome to Jedrock!");
+        broadcast("§e" + username + " joined the game", player);
         LOGGER.info(username + " joined (" + playerRegistry.size() + " online)");
     }
 
@@ -192,7 +193,30 @@ public class JedrockServer implements Server, ConnectionListener {
         }
         defaultWorld.removePlayer(player);
         eventBus.post(new PlayerQuitEvent(player));
+        broadcast("§e" + player.getName() + " left the game", null);
         LOGGER.info(player.getName() + " disconnected (" + playerRegistry.size() + " online)");
+    }
+
+    @Override
+    public void onChat(PlayerConnection connection, String message) {
+        playerRegistry.getByConnection(connection).ifPresent(sender -> {
+            String line = "<" + sender.getName() + "> " + message;
+            LOGGER.info("[chat] " + line);
+            broadcast(line, null); // relay to everyone, including the sender
+        });
+    }
+
+    /**
+     * Send a system message to every online player — each {@link PlayerConnection} serializes
+     * it in its own protocol, so a JE and a PE player see the same line. This is the core of
+     * cross-platform interaction. Optionally skips one player (e.g. the join announcement's subject).
+     */
+    private void broadcast(String message, Player except) {
+        for (Player p : playerRegistry.all()) {
+            if (p != except) {
+                p.sendMessage(message);
+            }
+        }
     }
 
     @Override
