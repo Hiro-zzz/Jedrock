@@ -41,10 +41,6 @@
             <groupId>com.jedrock</groupId>
             <artifactId>jedrock-api</artifactId>
         </dependency>
-        <dependency>
-            <groupId>com.jedrock</groupId>
-            <artifactId>jedrock-api</artifactId>
-        </dependency>
     </dependencies>
 
     <build>
