@@ -1,86 +1,182 @@
 # Jedrock
 
-**Lightweight Minecraft server core** with absolute abstraction and lazy parsing.
+**A lightweight, cross-platform Minecraft server core written from scratch in Java.**
+
+Jedrock speaks **two protocols natively at once** — Java Edition and Bedrock (Pocket) Edition —
+and treats them as one world. A player on a PC and a player on a phone join the same server,
+share the same chat, the same player list, and the same terrain. The core never learns which
+protocol a player speaks; that stays behind the network layer.
 
 Target versions:
-- **Minecraft: Java Edition 1.12.2**
-- **Minecraft: Bedrock Edition (PE) 1.1.5**
 
-## Philosophy
+| Edition | Version | Protocol | Transport |
+|---------|---------|----------|-----------|
+| Java Edition | **1.12.2** | 340 | Netty TCP |
+| Bedrock / Pocket Edition | **1.1.5** | 113 | RakNet over UDP |
 
-Jedrock is built around three core ideas:
+> ⚠️ **Status: early but real.** This is a from-scratch experiment, not a production server.
+> What works today is listed below — and it genuinely works with real, unmodified clients.
 
-1. **Lightweight** — minimal memory, minimal dependencies, minimal allocations on hot paths.
-2. **Absolute Abstraction** — the API contains **zero** knowledge of concrete packets, block states, or network details. Everything is behind interfaces.
-3. **Lazy Parsing** — packets and data structures are **not** fully decoded until something actually needs the value. Most packets in the wild are never fully inspected.
+---
 
-## Module Structure
+## What works today
+
+- ✅ **Java 1.12.2 client joins** into a flat world (login → join game → chunks → spawn).
+- ✅ **Bedrock 1.1.5 client joins** the same server over real RakNet (offline handshake →
+  MCPE Login → Resource Packs → StartGame → chunks → spawn).
+- ✅ **One shared world** — Java and Bedrock render the **same blocks**, serialized from a single
+  `CoreWorld` (canonical block ids mapped per protocol).
+- ✅ **Cross-platform chat** — a message typed on Java shows up on Bedrock and vice versa.
+- ✅ **Presence** — join/leave announcements reach every player, on both platforms.
+- ✅ **Shared player registry** — Java and Bedrock players live in the same core state and fire
+  the same `PlayerJoinEvent` / `PlayerQuitEvent`.
+- ✅ **Java tab list** shows every online player, Java and Bedrock alike.
+- ✅ **Real gamertags** for Bedrock players (extracted from the MCPE Login JWT chain).
+
+Not yet: block placing/breaking, player avatars/movement, the Bedrock-side player list (needs
+skins), movement validation, config files, scripting. See [Roadmap](#roadmap).
+
+---
+
+## Philosophy — the illusionist server
+
+Jedrock is not a faithful re-implementation of Mojang's world simulator. It is a **high-throughput
+packet switch that spends CPU and memory only when it absolutely must**. Five pillars:
+
+1. **Lazy everything.** The fastest code is code that never runs. Inbound bytes stay as raw
+   `ByteBuf`; nothing is parsed until game logic actually needs a value (`LazyPacket`, `Lazy<T>`).
+2. **The world is an illusion.** A block is just an id. The world is a flat matrix of primitive
+   ids addressed with bit operations, lazily allocated. Physics, lighting, pathfinding and
+   collisions are left to the client. We don't simulate an honest world — we render a convincing
+   one in the player's mind.
+3. **The blind judge.** Instead of a heavy server physics engine, validation is a lazy
+   approximation at the points that matter (movement deltas, interaction spheres) — *planned*.
+4. **The two-headed monster.** The network layer isolates the core from both protocols' nightmares
+   (RakNet, zlib batches, differing block palettes). To the core, a PC player and a phone player
+   are identical `Player` objects.
+5. **Scriptable API.** Custom logic is meant to live in fast, hot-reloadable scripts rather than
+   compiled jars — *planned*.
+
+Concretely, the codebase holds to three rules: **lightweight** (few deps, few allocations),
+**absolute abstraction** (the `api` module knows nothing about packets or wire formats), and
+**lazy parsing**.
+
+---
+
+## Module structure
 
 ```
 jedrock
-├── jedrock-api          # Public contracts only. No impl.
-├── jedrock-utils        # Low-level helpers, Lazy<T>, ByteBufUtils, logging
-├── jedrock-network      # Transport + packet abstraction (Netty based skeleton)
-├── jedrock-gameloop     # Dedicated 20 TPS loop + lightweight scheduler
-└── jedrock-core         # Glue. The actual server implementation.
+├── jedrock-api          # Pure contracts: Server, Player, World, events. No implementation deps.
+├── jedrock-utils        # Lazy<T>, LazyPacket, ByteBufUtils (VarInt/VarLong/zigzag), logging, ticks
+├── jedrock-network      # Transport + protocol handling for both editions
+│   ├── handler/         # ProtocolHandler strategy (je/JavaEditionProtocolHandler)
+│   ├── je/packet/       # Java Edition packets (Serverbound* / Clientbound*)
+│   ├── pipeline/        # Netty codecs: VarInt framing, lazy packet decoding
+│   └── pe/              # Bedrock: PeRakNetServer + McpeCompression (0xFE zlib batches)
+├── jedrock-gameloop     # Dedicated 20 TPS drift-correcting loop + Scheduler (Tickable)
+└── jedrock-core         # The server: PlayerRegistry, CoreWorld/BlockStorage, JedrockServer
 ```
 
-## Design Highlights
+Dependency direction: `network → api`, `core → api + network + gameloop + utils`. The network
+layer never depends on the core; it reaches it only through the `ConnectionListener` hook.
 
-### Protocol Handlers (scaling foundation)
+---
 
-Inbound protocol logic lives in `ProtocolHandler` implementations (see `network/handler/je` and `pe`).
-`JedrockConnection` is deliberately thin and delegates to the handler selected by `ProtocolVersion`.
+## How it works
 
-### Lazy Packet Example
+### Java Edition path
+Raw TCP → `VarintFrameDecoder` → `LazyPacketDecoder` (id + raw payload) → `JedrockConnection`,
+which delegates to `JavaEditionProtocolHandler`. On login it sends the packets a vanilla client
+needs to spawn (Join Game, Player Abilities, chunk data, Position & Look) and hands the player up
+to the core.
+
+### Bedrock path
+`PeRakNetServer` runs the RakNet transport (via the proven `com.nukkitx.network:raknet` library),
+which handles the offline handshake, datagram reliability, ACKs and split reassembly. On top of it
+Jedrock implements just enough of the MCPE 1.1.5 game layer to reach the world:
+
+```
+Login (0x01)                -> PlayStatus(LOGIN_SUCCESS) + ResourcePacksInfo
+ResourcePackResponse (0x08) -> StartGame + PlayStatus(PLAYER_SPAWN)
+RequestChunkRadius (0x45)   -> ChunkRadiusUpdated + AdventureSettings + chunks + PlayStatus(spawn)
+```
+
+Game packets travel as a `0xFE` wrapper around a zlib-compressed batch of VarInt-length-prefixed
+packets.
+
+### The bridge to the core
+Both connection types implement the api `PlayerConnection` and fire a shared `ConnectionListener`
+(`onLogin` / `onDisconnect` / `onChat`). The core registers every player — regardless of edition —
+in one `PlayerRegistry`, so broadcasting a chat line or a tab update is a single loop over
+`Player`s; each `PlayerConnection` serializes it in its own protocol.
+
+### The shared world
+`CoreWorld` exposes canonical, protocol-agnostic block ids (`World.getBlockId`, see `Blocks`) over
+a procedural flat floor, with `BlockStorage` — a lazily-allocated flat matrix of `short` ids — as
+the edit overlay. Each protocol maps canonical ids to its own palette when serializing chunks
+(Java global state vs. Bedrock id + meta), so both clients see identical terrain.
+
+---
+
+## Key abstractions
+
+| Concept | Where | Purpose |
+|---------|-------|---------|
+| `LazyPacket` / `Lazy<T>` | utils | Hold raw bytes; parse only on demand |
+| `ProtocolHandler` | network/handler | Per-edition inbound state machine; keeps `JedrockConnection` thin |
+| `PlayerConnection` | api | Protocol-agnostic handle the core talks to (message, tab, close) |
+| `World` / `BlockStorage` | api / core | Flat block matrix; canonical ids; the "illusion" |
+| `PlayerRegistry` | core | Thread-safe roster indexed by uuid / name / connection |
+| `EventBus` | api | Zero-reflection listener registration |
+| `GameLoop` / `Scheduler` | gameloop | 20 TPS heartbeat, run-later / repeating tasks |
 
 ```java
-LazyPacket incoming = ...;
-SomePacket p = incoming.materialize(buf -> SomePacket.read(buf));
+// Lazy: if you never materialize, the expensive payload is never parsed.
+ServerboundHandshake hs = incoming.materialize(ServerboundHandshake::fromBuffer);
 
-// If you never call materialize(), the expensive NBT/chunk data is never parsed.
+// Events: no annotations, no reflection in the hot path.
+server.getEventBus().register(PlayerJoinEvent.class, e -> log(e.getPlayer().getName() + " joined"));
 ```
 
-### Event System
+---
 
-Extremely simple registration:
+## Building & running
 
-```java
-server.getEventBus().register(PlayerJoinEvent.class, event -> { ... });
-```
-
-No annotations, no reflection in the hot path.
-
-### Game Loop
-
-- Single high-priority thread
-- Drift-correcting fixed tick rate
-- `Tickable` + `Scheduler` (run later / repeating)
-
-## Building
+Requires **JDK 21**. Multi-module Maven build:
 
 ```bash
-mvn clean install
+mvn clean install      # build + run tests
+mvn -o clean test      # offline (deps are cached after the first resolve)
 ```
 
-## Running (current skeleton)
+The Bedrock RakNet dependency comes from the OpenCollab repository (not Maven Central) — the
+network module declares it. Run the server from your IDE (`com.jedrock.core.JedrockServer#main`),
+which binds:
 
-```bash
-mvn -pl jedrock-core -am exec:java -Dexec.mainClass="com.jedrock.core.JedrockServer"
-```
+- **Java Edition** on TCP `0.0.0.0:25565`
+- **Bedrock** on UDP `0.0.0.0:19132`
 
-Or just run the main class from your IDE.
+The RakNet protocol version defaults to `8` (MCPE 1.1.5) and can be overridden with
+`-Djedrock.pe.raknetProtocolVersion=N` for other client builds.
 
-## Next Steps / Extension Points
+> **Testing a Bedrock client locally (Windows 10 Edition):** UWP apps cannot reach `localhost` by
+> default. Add a loopback exemption once:
+> `CheckNetIsolation LoopbackExempt -a -n=Microsoft.MinecraftUWP_8wekyb3d8bbwe`
 
-- Flesh out `PacketRegistry` + per-state dispatch (foundation stub already present)
-- Complete PE 1.1.5 login (Batch 0xFE + zlib + Login JSON)
-- Wire real `BlockStorage` data into `ClientboundChunkData`
-- World / chunk storage abstraction (lazy chunk loading)
-- Config system (tiny)
-- Command system (also behind abstraction)
+Tests are plain JUnit 5 (`mvn test`) covering the block matrix, player registry, chunk encoding
+and MCPE compression — no client required.
 
-Pull requests and ideas that respect the three principles (lightweight + abstraction + lazy) are welcome.
+---
+
+## Roadmap
+
+- **Block editing** — place/break on both editions → update `BlockStorage` → broadcast the change.
+- **Player visibility** — spawn other players as entities and relay movement across editions.
+- **Bedrock player list** — `PlayerList` packet with skin data (the Java tab already works).
+- **The blind judge** — movement-delta and interaction-sphere validation.
+- **Config** — bind addresses, world settings, MOTD from a file.
+- **Scripting** — embedded JS (GraalJS) plugins with hot reload.
 
 ---
 
