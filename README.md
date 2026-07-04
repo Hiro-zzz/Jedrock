@@ -21,20 +21,32 @@ Target versions:
 
 ## What works today
 
-- ✅ **Java 1.12.2 client joins** into a flat world (login → join game → chunks → spawn).
+- ✅ **Java 1.12.2 client joins** into a procedurally generated world (login → join game → chunks → spawn).
+- ✅ **Procedural terrain** — a deterministic value-noise heightmap (rolling hills, grass/dirt/stone
+  layers) generated as a pure function of a seed; players spawn standing on the surface.
+- ✅ **Collision** — comes for free: the client collides against the solid ground we serialize to it;
+  the server runs no physics (see the philosophy below).
 - ✅ **Bedrock 1.1.5 client joins** the same server over real RakNet (offline handshake →
   MCPE Login → Resource Packs → StartGame → chunks → spawn).
-- ✅ **One shared world** — Java and Bedrock render the **same blocks**, serialized from a single
-  `CoreWorld` (canonical block ids mapped per protocol).
+- ✅ **One shared world** — Java and Bedrock render the **same blocks** from a single `CoreWorld`;
+  the Bedrock side serializes chunks in the MCPE 1.0/1.1 network format (blocks + metadata + sky/block
+  light + heightmap), so a Bedrock client stands on exactly the terrain a Java client sees.
 - ✅ **Cross-platform chat** — a message typed on Java shows up on Bedrock and vice versa.
 - ✅ **Presence** — join/leave announcements reach every player, on both platforms.
 - ✅ **Shared player registry** — Java and Bedrock players live in the same core state and fire
   the same `PlayerJoinEvent` / `PlayerQuitEvent`.
 - ✅ **Java tab list** shows every online player, Java and Bedrock alike.
 - ✅ **Real gamertags** for Bedrock players (extracted from the MCPE Login JWT chain).
+- ✅ **Cross-platform avatars** — every player spawns as a visible entity on both editions;
+  a Java player and a Bedrock player see each other and each other's movement in real time.
+- ✅ **Client-authoritative movement** — clients report position; the core relays it to everyone
+  and never simulates physics (see the philosophy below).
+- ✅ **Bedrock player list** — Bedrock players now appear in the PE pause-menu list.
 
-Not yet: block placing/breaking, player avatars/movement, the Bedrock-side player list (needs
-skins), movement validation, config files, scripting. See [Roadmap](#roadmap).
+Not yet: block placing/breaking, **real skins** (avatars render with placeholder textures —
+Bedrock players show as a solid colour, and on Java as Steve/Alex), dynamic chunk streaming
+(only a fixed patch around spawn is sent, so the Bedrock render distance is short and walking far
+runs into unloaded void), movement validation, config files, scripting. See [Roadmap](#roadmap).
 
 ---
 
@@ -113,9 +125,11 @@ in one `PlayerRegistry`, so broadcasting a chat line or a tab update is a single
 
 ### The shared world
 `CoreWorld` exposes canonical, protocol-agnostic block ids (`World.getBlockId`, see `Blocks`) over
-a procedural flat floor, with `BlockStorage` — a lazily-allocated flat matrix of `short` ids — as
-the edit overlay. Each protocol maps canonical ids to its own palette when serializing chunks
-(Java global state vs. Bedrock id + meta), so both clients see identical terrain.
+a procedural heightmap (`TerrainGenerator` — deterministic value noise, computed on demand and
+cached per column, never stored), with `BlockStorage` — a lazily-allocated flat matrix of `short`
+ids — as the edit overlay. Each protocol maps canonical ids to its own palette when serializing
+chunks (Java global state vs. Bedrock id + meta), so both clients see — and collide against — the
+same terrain.
 
 ---
 
@@ -162,7 +176,7 @@ The RakNet protocol version defaults to `8` (MCPE 1.1.5) and can be overridden w
 
 > **Testing a Bedrock client locally (Windows 10 Edition):** UWP apps cannot reach `localhost` by
 > default. Add a loopback exemption once:
-> `CheckNetIsolation LoopbackExempt -a -n=Microsoft.MinecraftUWP_8wekyb3d8bbwe`
+> `CheckNetIsolation LoopbackExempt -a -n=Microsoft.MinecraftUWP_yourid`
 
 Tests are plain JUnit 5 (`mvn test`) covering the block matrix, player registry, chunk encoding
 and MCPE compression — no client required.
@@ -172,9 +186,12 @@ and MCPE compression — no client required.
 ## Roadmap
 
 - **Block editing** — place/break on both editions → update `BlockStorage` → broadcast the change.
-- **Player visibility** — spawn other players as entities and relay movement across editions.
-- **Bedrock player list** — `PlayerList` packet with skin data (the Java tab already works).
-- **The blind judge** — movement-delta and interaction-sphere validation.
+- **Chunk streaming** — send chunks dynamically as players move (and a wider radius) instead of a
+  fixed patch around spawn, so the world doesn't end a few chunks out — most visible on Bedrock.
+- **Real skins** — relay a Bedrock player's actual skin (it's already in the Login JWT we parse)
+  into the PE `PlayerList`; cross-edition skin fidelity is limited by JE's signed-texture model
+  (see below). Avatars render with placeholder textures today.
+- **The blind judge** — movement-delta and interaction-sphere validation, now that movement is live.
 - **Config** — bind addresses, world settings, MOTD from a file.
 - **Scripting** — embedded JS (GraalJS) plugins with hot reload.
 

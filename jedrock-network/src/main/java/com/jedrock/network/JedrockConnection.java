@@ -2,15 +2,22 @@ package com.jedrock.network;
 
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
+import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
 import com.jedrock.network.handler.ProtocolHandler;
 import com.jedrock.network.handler.je.JavaEditionProtocolHandler;
 import com.jedrock.network.je.packet.ClientboundChatMessage;
 import com.jedrock.network.je.packet.ClientboundChunkData;
+import com.jedrock.network.je.packet.ClientboundDestroyEntities;
+import com.jedrock.network.je.packet.ClientboundEntityHeadLook;
+import com.jedrock.network.je.packet.ClientboundEntityTeleport;
 import com.jedrock.network.je.packet.ClientboundKeepAlive;
 import com.jedrock.network.je.packet.ClientboundLoginSuccess;
 import com.jedrock.network.je.packet.ClientboundPacket;
 import com.jedrock.network.je.packet.ClientboundPlayerListItem;
+import com.jedrock.network.je.packet.ClientboundPlayerPositionAndLook;
+import com.jedrock.network.je.packet.ClientboundSpawnPlayer;
+import com.jedrock.network.je.packet.ClientboundSpawnPosition;
 import com.jedrock.network.protocol.ConnectionProtocol;
 import com.jedrock.network.protocol.ProtocolState;
 import com.jedrock.utils.ByteBufUtils;
@@ -52,12 +59,24 @@ public class JedrockConnection implements Connection, PlayerConnection {
     // Keep-alive tracking (delegated to handler)
     private volatile long lastKeepAliveSent = 0;
 
+    // Last client-reported position/look. JE splits movement into three packets
+    // (position / look / both), so we merge them here before notifying the core.
+    // Initialized to the world spawn the join sequence teleports the client to.
+    private volatile double lastX, lastY, lastZ;
+    private volatile float lastYaw = 0f, lastPitch = 0f;
+
     public JedrockConnection(Channel channel, ProtocolVersion protocol, ConnectionListener listener, World world) {
         this.channel = channel;
         this.protocol = protocol;
         this.listener = listener;
         this.world = world;
         this.connectionProtocol = new ConnectionProtocol(protocol);
+
+        // Seed the movement-merge state with the world spawn we'll teleport the client to.
+        Location spawn = world.getSpawnLocation();
+        this.lastX = spawn.x();
+        this.lastY = spawn.y();
+        this.lastZ = spawn.z();
 
         // JedrockConnection is the Java Edition (TCP) connection; Bedrock uses PeRakNetServer.
         this.protocolHandler = new JavaEditionProtocolHandler();
@@ -95,6 +114,24 @@ public class JedrockConnection implements Connection, PlayerConnection {
     @Override
     public void removeFromTab(UUID uuid) {
         send(ClientboundPlayerListItem.remove(uuid));
+    }
+
+    @Override
+    public void showPlayer(UUID uuid, String name, long entityId,
+                           double x, double y, double z, float yaw, float pitch) {
+        // The uuid is already in the tab (core adds it first), which 1.12.2 requires to render.
+        send(new ClientboundSpawnPlayer((int) entityId, uuid, x, y, z, yaw, pitch));
+    }
+
+    @Override
+    public void hidePlayer(UUID uuid, long entityId) {
+        send(new ClientboundDestroyEntities((int) entityId));
+    }
+
+    @Override
+    public void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch) {
+        send(new ClientboundEntityTeleport((int) entityId, x, y, z, yaw, pitch));
+        send(new ClientboundEntityHeadLook((int) entityId, yaw));
     }
 
     @Override
@@ -183,7 +220,19 @@ public class JedrockConnection implements Connection, PlayerConnection {
         send(new ClientboundChatMessage("{\"text\":\"" + escaped + "\"}"));
     }
 
-    /** Radius (in chunks) of the flat terrain sent around spawn so the client can render/spawn. */
+    /** Send the world's spawn as the client's compass/respawn point. */
+    public void sendSpawnPosition() {
+        Location s = world.getSpawnLocation();
+        send(new ClientboundSpawnPosition(s.getBlockX(), s.getBlockY(), s.getBlockZ()));
+    }
+
+    /** Teleport the client to the world spawn (feet on the generated ground). */
+    public void sendSpawnPositionAndLook() {
+        Location s = world.getSpawnLocation();
+        send(new ClientboundPlayerPositionAndLook(s.x(), s.y(), s.z(), s.yaw(), s.pitch()));
+    }
+
+    /** Radius (in chunks) of the terrain sent around spawn so the client can render/spawn. */
     private static final int SPAWN_CHUNK_RADIUS = 5;
 
     /**
@@ -241,6 +290,25 @@ public class JedrockConnection implements Connection, PlayerConnection {
      */
     public ConnectionListener getListener() {
         return listener;
+    }
+
+    /**
+     * Merge a client movement update (either half may be absent) into the tracked state
+     * and relay the full position to the core. Called by the protocol handler.
+     */
+    public void clientMoved(Double x, Double y, Double z, Float yaw, Float pitch) {
+        if (x != null) {
+            lastX = x;
+            lastY = y;
+            lastZ = z;
+        }
+        if (yaw != null) {
+            lastYaw = yaw;
+            lastPitch = pitch;
+        }
+        if (loggedIn && listener != null) {
+            listener.onMove(this, lastX, lastY, lastZ, lastYaw, lastPitch);
+        }
     }
 
     public long getLastKeepAliveSent() {

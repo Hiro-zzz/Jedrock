@@ -129,6 +129,13 @@ public final class ByteBufUtils {
         buf.writeByte(value & 0xFF);
     }
 
+    // ========== Angle (JE: 1/256th of a full turn) ==========
+
+    /** Writes a rotation in degrees as the single-byte JE angle unit (256 steps per turn). */
+    public static void writeAngle(ByteBuf buf, float degrees) {
+        buf.writeByte((int) (degrees * 256.0f / 360.0f));
+    }
+
     // ========== Position (JE packed long) ==========
 
     public static long readPosition(ByteBuf buf) {

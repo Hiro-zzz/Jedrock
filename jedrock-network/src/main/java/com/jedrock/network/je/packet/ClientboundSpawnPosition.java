@@ -10,9 +10,13 @@ public final class ClientboundSpawnPosition implements ClientboundPacket {
     public int x, y, z;
 
     public ClientboundSpawnPosition() {
-        this.x = 0;
-        this.y = 64;
-        this.z = 0;
+        this(0, 64, 0);
+    }
+
+    public ClientboundSpawnPosition(int x, int y, int z) {
+        this.x = x;
+        this.y = y;
+        this.z = z;
     }
 
     public void write(ByteBuf buf) {

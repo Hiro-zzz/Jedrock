@@ -95,11 +95,20 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
             if (connection.getListener() != null) {
                 connection.getListener().onChat(connection, chat.message);
             }
+        } else if (id == ServerboundPlayerPosition.PACKET_ID) {
+            ServerboundPlayerPosition p = lazy.materialize(ServerboundPlayerPosition::fromBuffer);
+            connection.clientMoved(p.x, p.y, p.z, null, null);
+        } else if (id == ServerboundPlayerPositionAndLook.PACKET_ID) {
+            ServerboundPlayerPositionAndLook p = lazy.materialize(ServerboundPlayerPositionAndLook::fromBuffer);
+            connection.clientMoved(p.x, p.y, p.z, p.yaw, p.pitch);
+        } else if (id == ServerboundPlayerLook.PACKET_ID) {
+            ServerboundPlayerLook p = lazy.materialize(ServerboundPlayerLook::fromBuffer);
+            connection.clientMoved(null, null, null, p.yaw, p.pitch);
         } else if (id == 0x00) {
             // Teleport Confirm (sent after PlayerPositionAndLook)
             LOGGER.debug("Received Teleport Confirm (ignored for now)");
         }
-        // TODO: Client Settings (0x04), Position (0x0C), etc.
+        // TODO: Client Settings (0x04), Player flying flag (0x0C), etc.
     }
 
     private void handleStatus(int id, LazyPacket lazy, JedrockConnection connection) {
@@ -112,15 +121,15 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
     private void sendInitialJoinSequence(JedrockConnection connection) {
         connection.send(new ClientboundJoinGame());
         connection.send(new ClientboundServerDifficulty());
-        connection.send(new ClientboundSpawnPosition());
+        connection.sendSpawnPosition();
         connection.send(new ClientboundPlayerAbilities());
         connection.send(new ClientboundHeldItemChange());
 
         // Terrain around spawn — without chunks the client hangs on "Downloading terrain"
         connection.sendSpawnChunks();
 
-        // Initial position + look. Sent after chunks.
-        connection.send(new ClientboundPlayerPositionAndLook());
+        // Initial position + look on top of the generated ground. Sent after chunks.
+        connection.sendSpawnPositionAndLook();
 
         // Keep alive so the client knows the connection is alive
         connection.sendKeepAlive(System.currentTimeMillis());

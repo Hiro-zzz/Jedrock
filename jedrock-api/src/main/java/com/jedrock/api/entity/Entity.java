@@ -12,6 +12,13 @@ public interface Entity {
 
     UUID getUniqueId();
 
+    /**
+     * Server-assigned numeric id, unique per entity for the lifetime of the server.
+     * Protocols address the entity with it on the wire (JE entity id / PE runtime id),
+     * so it must never collide with another live entity's id.
+     */
+    long getEntityId();
+
     World getWorld();
 
     Location getLocation();

@@ -8,6 +8,7 @@ import com.jedrock.api.world.World;
 import com.jedrock.core.world.CoreWorld;
 
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * In-memory player state. A thin wrapper over the abstract {@link PlayerConnection};
@@ -15,9 +16,16 @@ import java.util.UUID;
  */
 public final class CorePlayer implements Player {
 
+    /**
+     * Avatar entity ids start above the self-ids the protocol handlers hardcode for the
+     * client's own player (JE JoinGame / PE StartGame both use 1), so they never collide.
+     */
+    private static final AtomicLong ENTITY_IDS = new AtomicLong(1000);
+
     private final UUID uniqueId;
     private final String name;
     private final PlayerConnection connection;
+    private final long entityId = ENTITY_IDS.getAndIncrement();
 
     private volatile CoreWorld world;
     private volatile Location location;
@@ -35,6 +43,11 @@ public final class CorePlayer implements Player {
     @Override
     public UUID getUniqueId() {
         return uniqueId;
+    }
+
+    @Override
+    public long getEntityId() {
+        return entityId;
     }
 
     @Override

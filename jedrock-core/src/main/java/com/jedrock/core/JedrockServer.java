@@ -185,11 +185,22 @@ public class JedrockServer implements Server, ConnectionListener {
         broadcast("§e" + username + " joined the game", player);
 
         // Tab list: give the newcomer the whole roster, and add the newcomer to everyone else's.
+        // Tab entries must land before the avatar spawns below (JE renders only listed uuids).
         for (Player other : playerRegistry.all()) {
             connection.addToTab(other.getUniqueId(), other.getName());
             if (other != player) {
                 other.getConnection().addToTab(uuid, username);
             }
+        }
+
+        // Avatars: show the existing roster to the newcomer, and the newcomer to everyone else.
+        for (Player other : playerRegistry.all()) {
+            if (other == player) continue;
+            Location loc = other.getLocation();
+            connection.showPlayer(other.getUniqueId(), other.getName(), other.getEntityId(),
+                    loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
+            other.getConnection().showPlayer(uuid, username, player.getEntityId(),
+                    spawn.x(), spawn.y(), spawn.z(), spawn.yaw(), spawn.pitch());
         }
 
         LOGGER.info(username + " joined (" + playerRegistry.size() + " online)");
@@ -205,12 +216,26 @@ public class JedrockServer implements Server, ConnectionListener {
         eventBus.post(new PlayerQuitEvent(player));
         broadcast("§e" + player.getName() + " left the game", null);
 
-        // Tab list: drop the leaver from everyone else's roster.
+        // Drop the leaver from everyone else's tab and world.
         for (Player other : playerRegistry.all()) {
             other.getConnection().removeFromTab(player.getUniqueId());
+            other.getConnection().hidePlayer(player.getUniqueId(), player.getEntityId());
         }
 
         LOGGER.info(player.getName() + " disconnected (" + playerRegistry.size() + " online)");
+    }
+
+    @Override
+    public void onMove(PlayerConnection connection, double x, double y, double z, float yaw, float pitch) {
+        playerRegistry.getByConnection(connection).ifPresent(player -> {
+            player.setLocation(new Location(player.getWorld(), x, y, z, yaw, pitch));
+            // Relay at the sender's own rate; both clients interpolate between updates.
+            for (Player other : playerRegistry.all()) {
+                if (other != player) {
+                    other.getConnection().moveAvatar(player.getEntityId(), x, y, z, yaw, pitch);
+                }
+            }
+        });
     }
 
     @Override

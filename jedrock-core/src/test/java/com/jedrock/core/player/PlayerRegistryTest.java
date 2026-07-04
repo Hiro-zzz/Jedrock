@@ -50,6 +50,17 @@ class PlayerRegistryTest {
     }
 
     @Test
+    void entityIdsAreUniqueAndAboveSelfIds() {
+        CorePlayer a = newPlayer("Alice", new FakeConnection());
+        CorePlayer b = newPlayer("Bob", new FakeConnection());
+        // Protocol handlers hardcode entity id 1 for the client's own player;
+        // avatar ids must never collide with it or with each other.
+        assertTrue(a.getEntityId() >= 1000);
+        assertTrue(b.getEntityId() >= 1000);
+        assertTrue(a.getEntityId() != b.getEntityId());
+    }
+
+    @Test
     void removeByUnknownConnectionReturnsNull() {
         PlayerRegistry registry = new PlayerRegistry();
         assertNull(registry.removeByConnection(new FakeConnection()));
@@ -63,6 +74,10 @@ class PlayerRegistryTest {
         @Override public void sendMessage(String message) { }
         @Override public void addToTab(java.util.UUID uuid, String name) { }
         @Override public void removeFromTab(java.util.UUID uuid) { }
+        @Override public void showPlayer(java.util.UUID uuid, String name, long entityId,
+                                         double x, double y, double z, float yaw, float pitch) { }
+        @Override public void hidePlayer(java.util.UUID uuid, long entityId) { }
+        @Override public void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch) { }
         @Override public void close(String reason) { }
         @Override public boolean isActive() { return true; }
     }

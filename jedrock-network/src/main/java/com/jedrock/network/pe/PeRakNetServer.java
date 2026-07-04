@@ -3,6 +3,7 @@ package com.jedrock.network.pe;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Blocks;
+import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
 import com.jedrock.network.ConnectionListener;
 import com.jedrock.utils.ByteBufUtils;
@@ -22,10 +23,8 @@ import io.netty.channel.socket.DatagramPacket;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
-import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -67,11 +66,14 @@ public final class PeRakNetServer {
     private static final int ID_RESOURCE_PACKS_INFO = 0x06;
     private static final int ID_RESOURCE_PACK_RESPONSE = 0x08;
     private static final int ID_START_GAME = 0x0B;
+    private static final int ID_ADD_PLAYER = 0x0C;
+    private static final int ID_REMOVE_ENTITY = 0x0E;
+    private static final int ID_MOVE_PLAYER = 0x13;
     private static final int ID_ADVENTURE_SETTINGS = 0x37;
+    private static final int ID_PLAYER_LIST = 0x3F;
     private static final int ID_FULL_CHUNK_DATA = 0x3A;
     private static final int ID_REQUEST_CHUNK_RADIUS = 0x45;
     private static final int ID_CHUNK_RADIUS_UPDATED = 0x46;
-    private static final int ID_NETWORK_CHUNK_PUBLISHER_UPDATE = 0x79;
 
     private static final int PLAY_STATUS_LOGIN_SUCCESS = 0;
     private static final int PLAY_STATUS_PLAYER_SPAWN = 3;
@@ -79,6 +81,17 @@ public final class PeRakNetServer {
     // MCPE TextPacket types
     private static final int TEXT_TYPE_RAW = 0;
     private static final int TEXT_TYPE_CHAT = 1;
+
+    // MCPE PlayerList actions
+    private static final int PLAYER_LIST_ADD = 0;
+    private static final int PLAYER_LIST_REMOVE = 1;
+
+    /**
+     * MCPE MovePlayer carries the <em>eye</em> position (feet + 1.62), while AddPlayer and StartGame
+     * use feet. Confirmed by a standing client reporting y=59.62 while its feet were on a block top
+     * at 58 (fractional .62 = the eye offset). The core works in feet, so convert on MovePlayer only.
+     */
+    private static final float EYE_HEIGHT = 1.62f;
 
     private final InetSocketAddress address;
     private final ProtocolVersion protocol;
@@ -227,12 +240,135 @@ public final class PeRakNetServer {
 
         @Override
         public void addToTab(UUID uuid, String name) {
-            // Bedrock PlayerList needs skin data — implemented together with the PE world step.
+            // The PE pause-menu list is fed by showPlayer's PlayerList entry (it needs an
+            // entity id + skin, which this signature doesn't carry). No separate tab packet.
         }
 
         @Override
         public void removeFromTab(UUID uuid) {
-            // See addToTab.
+            // See addToTab; hidePlayer removes the PlayerList entry.
+        }
+
+        @Override
+        public void showPlayer(UUID uuid, String name, long entityId,
+                               double x, double y, double z, float yaw, float pitch) {
+            // PlayerList ADD must precede AddPlayer — it carries the skin the avatar renders with.
+            byte[] playerList = buildPacket(b -> {
+                ByteBufUtils.writeVarInt(b, ID_PLAYER_LIST);
+                b.writeByte(PLAYER_LIST_ADD);
+                ByteBufUtils.writeVarInt(b, 1);                    // entry count
+                writeUuid(b, uuid);
+                ByteBufUtils.writeSignedVarLong(b, entityId);      // entity unique id
+                ByteBufUtils.writeString(b, name);
+                ByteBufUtils.writeString(b, "Standard_Custom");    // skin model
+                ByteBufUtils.writeByteArray(b, syntheticSkin(uuid));
+            });
+            byte[] addPlayer = buildPacket(b -> {
+                ByteBufUtils.writeVarInt(b, ID_ADD_PLAYER);
+                writeUuid(b, uuid);
+                ByteBufUtils.writeString(b, name);
+                ByteBufUtils.writeSignedVarLong(b, entityId);      // entity unique id
+                ByteBufUtils.writeVarLong(b, entityId);            // entity runtime id
+                b.writeFloatLE((float) x);
+                b.writeFloatLE((float) y);                         // AddPlayer takes feet y
+                b.writeFloatLE((float) z);
+                b.writeFloatLE(0f);                                // motion x
+                b.writeFloatLE(0f);                                // motion y
+                b.writeFloatLE(0f);                                // motion z
+                b.writeFloatLE(pitch);
+                b.writeFloatLE(yaw);                               // head yaw
+                b.writeFloatLE(yaw);
+                ByteBufUtils.writeSignedVarInt(b, 0);              // held item: air
+                ByteBufUtils.writeVarInt(b, 0);                    // entity metadata: empty
+            });
+            sendGameBatch(playerList, addPlayer);
+        }
+
+        @Override
+        public void hidePlayer(UUID uuid, long entityId) {
+            byte[] removeEntity = buildPacket(b -> {
+                ByteBufUtils.writeVarInt(b, ID_REMOVE_ENTITY);
+                ByteBufUtils.writeSignedVarLong(b, entityId);
+            });
+            byte[] playerListRemove = buildPacket(b -> {
+                ByteBufUtils.writeVarInt(b, ID_PLAYER_LIST);
+                b.writeByte(PLAYER_LIST_REMOVE);
+                ByteBufUtils.writeVarInt(b, 1);
+                writeUuid(b, uuid);
+            });
+            sendGameBatch(removeEntity, playerListRemove);
+        }
+
+        @Override
+        public void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch) {
+            byte[] move = buildPacket(b -> {
+                ByteBufUtils.writeVarInt(b, ID_MOVE_PLAYER);
+                ByteBufUtils.writeVarLong(b, entityId);
+                b.writeFloatLE((float) x);
+                b.writeFloatLE((float) (y + EYE_HEIGHT));          // MovePlayer takes eye y
+                b.writeFloatLE((float) z);
+                b.writeFloatLE(pitch);
+                b.writeFloatLE(yaw);                               // head yaw
+                b.writeFloatLE(yaw);
+                b.writeByte(0);                                    // mode: normal (interpolated)
+                b.writeBoolean(true);                              // on ground
+                ByteBufUtils.writeVarLong(b, 0);                   // riding runtime id: none
+            });
+            sendGameBatch(move);
+        }
+
+        /** MCPE UUIDs travel as two little-endian longs (msb, lsb). */
+        private static void writeUuid(ByteBuf b, UUID uuid) {
+            b.writeLongLE(uuid.getMostSignificantBits());
+            b.writeLongLE(uuid.getLeastSignificantBits());
+        }
+
+        /** A small palette of clearly distinct colours so avatars are easy to tell apart. */
+        private static final int[] SKIN_PALETTE = {
+                0xE64A3B, // red
+                0x3B82E6, // blue
+                0x2EA044, // green
+                0xE6B02E, // amber
+                0x8E44C4, // purple
+                0x16A0A0, // teal
+                0xE66AB0, // pink
+                0xE67E22, // orange
+                0x7FB31B, // lime
+                0x5D6D7E, // slate
+                0xC0392B, // crimson
+                0x2C3E50, // navy
+        };
+
+        /**
+         * MCPE 1.1 has no signed-skin requirement, but the data must be a valid RGBA
+         * texture (64x32 = 8192 bytes). Until real skins are relayed, build a simple
+         * two-tone humanoid placeholder: a per-player palette colour on the body and a
+         * lighter shade on the head, so remote players are distinct and read as characters
+         * rather than flat blobs. Head occupies the top 16 rows of a standard 64x32 skin.
+         */
+        private static byte[] syntheticSkin(UUID uuid) {
+            int rgb = SKIN_PALETTE[Math.floorMod(uuid.hashCode(), SKIN_PALETTE.length)];
+            int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+            byte[] data = new byte[64 * 32 * 4];
+            for (int y = 0; y < 32; y++) {
+                boolean head = y < 16;
+                int pr = head ? lighten(r) : r;
+                int pg = head ? lighten(g) : g;
+                int pb = head ? lighten(b) : b;
+                for (int x = 0; x < 64; x++) {
+                    int i = (y * 64 + x) * 4;
+                    data[i] = (byte) pr;
+                    data[i + 1] = (byte) pg;
+                    data[i + 2] = (byte) pb;
+                    data[i + 3] = (byte) 0xFF;
+                }
+            }
+            return data;
+        }
+
+        /** Shift a channel ~40% toward white — used to tint the head lighter than the body. */
+        private static int lighten(int c) {
+            return c + (255 - c) * 2 / 5;
         }
 
         // ===== RakNet session callbacks =====
@@ -322,6 +458,7 @@ public final class PeRakNetServer {
                     registerPlayer(); // fully in-game now — hand it to the core like a JE player
                 }
                 case ID_TEXT -> handleInboundText(pk);
+                case ID_MOVE_PLAYER -> handleInboundMove(pk);
                 default -> { /* other gameplay packet — nothing to answer yet */ }
             }
         }
@@ -351,6 +488,27 @@ public final class PeRakNetServer {
             }
         }
 
+        /**
+         * Relay the client-authoritative MovePlayer to the core. MovePlayer y is the eye
+         * position, so subtract the eye height to get the feet the core (and Java) work with.
+         */
+        private void handleInboundMove(ByteBuf pk) {
+            try {
+                ByteBufUtils.readVarLong(pk); // runtime id — the client's own, ignored
+                float x = pk.readFloatLE();
+                float y = pk.readFloatLE() - EYE_HEIGHT;
+                float z = pk.readFloatLE();
+                float pitch = pk.readFloatLE();
+                pk.readFloatLE();             // head yaw
+                float yaw = pk.readFloatLE();
+                if (loggedIn && listener != null) {
+                    listener.onMove(this, x, y, z, yaw, pitch);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.debug(() -> "[PE] could not parse inbound MovePlayer: " + e);
+            }
+        }
+
         /** Reply to Login: PlayStatus(success) + an empty ResourcePacksInfo. */
         private void sendLoginResponse() {
             byte[] playStatus = buildPacket(b -> {
@@ -368,6 +526,7 @@ public final class PeRakNetServer {
 
         /** Reply to the resource-pack response with the world's StartGame + a spawn nudge. */
         private void sendStartGame() {
+            Location spawn = world.getSpawnLocation();
             byte[] startGame = buildPacket(b -> {
                 ByteBufUtils.writeVarInt(b, ID_START_GAME);
 
@@ -376,10 +535,10 @@ public final class PeRakNetServer {
                 ByteBufUtils.writeVarLong(b, 1L);       // entity runtime id
                 ByteBufUtils.writeSignedVarInt(b, 1);   // gamemode (creative)
 
-                // Position + rotation (little-endian floats)
-                b.writeFloatLE(0.0f);   // x
-                b.writeFloatLE(70.0f);  // y
-                b.writeFloatLE(0.0f);   // z
+                // Position + rotation (little-endian floats) — feet on the generated ground
+                b.writeFloatLE((float) spawn.x());
+                b.writeFloatLE((float) spawn.y());
+                b.writeFloatLE((float) spawn.z());
                 b.writeFloatLE(0.0f);   // pitch
                 b.writeFloatLE(0.0f);   // yaw
 
@@ -391,9 +550,9 @@ public final class PeRakNetServer {
                 ByteBufUtils.writeSignedVarInt(b, 1);     // difficulty (easy)
 
                 // World spawn block coords
-                ByteBufUtils.writeSignedVarInt(b, 0);   // spawn x
-                ByteBufUtils.writeSignedVarInt(b, 70);  // spawn y
-                ByteBufUtils.writeSignedVarInt(b, 0);   // spawn z
+                ByteBufUtils.writeSignedVarInt(b, spawn.getBlockX()); // spawn x
+                ByteBufUtils.writeSignedVarInt(b, spawn.getBlockY()); // spawn y
+                ByteBufUtils.writeSignedVarInt(b, spawn.getBlockZ()); // spawn z
 
                 // Flags + environment
                 b.writeBoolean(true);                   // achievements disabled
@@ -426,38 +585,36 @@ public final class PeRakNetServer {
             sendGameBatch(startGame, spawnStatus);
         }
 
-        /** Reply to the chunk-radius request: publish a small flat 3x3 world and spawn the player. */
+        /** Reply to the chunk-radius request: publish a small 3x3 world and spawn the player. */
         private void sendWorld() {
-            List<byte[]> packets = new ArrayList<>();
+            // Setup batch. Note: NetworkChunkPublisherUpdate is a 1.2+ packet and is deliberately
+            // NOT sent to a 1.1.5 client — an unknown/misparsed id here can abort the join batch
+            // before the chunks are applied, leaving the client in an empty, floor-less world.
+            sendGameBatch(
+                    buildPacket(b -> {
+                        ByteBufUtils.writeVarInt(b, ID_CHUNK_RADIUS_UPDATED);
+                        ByteBufUtils.writeSignedVarInt(b, 2); // keep the radius small
+                    }),
+                    buildPacket(b -> {
+                        ByteBufUtils.writeVarInt(b, ID_ADVENTURE_SETTINGS);
+                        ByteBufUtils.writeVarInt(b, 0);   // flags
+                        ByteBufUtils.writeVarInt(b, 2);   // command permission (OP)
+                        ByteBufUtils.writeVarInt(b, 0);   // action permissions
+                        ByteBufUtils.writeVarInt(b, 2);   // permission level (OP)
+                        ByteBufUtils.writeVarInt(b, 0);   // custom extension flags
+                        ByteBufUtils.writeVarLong(b, 1L); // player entity unique id
+                    })
+            );
 
-            packets.add(buildPacket(b -> {
-                ByteBufUtils.writeVarInt(b, ID_CHUNK_RADIUS_UPDATED);
-                ByteBufUtils.writeSignedVarInt(b, 2); // keep the radius small
-            }));
-            packets.add(buildPacket(b -> {
-                ByteBufUtils.writeVarInt(b, ID_NETWORK_CHUNK_PUBLISHER_UPDATE);
-                ByteBufUtils.writeSignedVarInt(b, 0);   // center x
-                ByteBufUtils.writeSignedVarInt(b, 70);  // center y
-                ByteBufUtils.writeSignedVarInt(b, 0);   // center z
-                ByteBufUtils.writeVarInt(b, 2 * 16);    // publish radius in blocks
-            }));
-            packets.add(buildPacket(b -> {
-                ByteBufUtils.writeVarInt(b, ID_ADVENTURE_SETTINGS);
-                ByteBufUtils.writeVarInt(b, 0);   // flags
-                ByteBufUtils.writeVarInt(b, 2);   // command permission (OP)
-                ByteBufUtils.writeVarInt(b, 0);   // action permissions
-                ByteBufUtils.writeVarInt(b, 2);   // permission level (OP)
-                ByteBufUtils.writeVarInt(b, 0);   // custom extension flags
-                ByteBufUtils.writeVarLong(b, 1L); // player entity unique id
-            }));
-
-            // 3x3 grid of chunks serialized from the shared world (same blocks as Java sees).
+            // Each chunk in its own game batch — one 220 KB batch of 9 full chunks is large and
+            // fragile once split across RakNet fragments; small per-chunk batches are robust.
             for (int cx = -1; cx <= 1; cx++) {
                 for (int cz = -1; cz <= 1; cz++) {
                     int chunkX = cx;
                     int chunkZ = cz;
                     byte[] chunkData = buildChunkPayload(chunkX, chunkZ);
-                    packets.add(buildPacket(b -> {
+                    LOGGER.debug(() -> "[PE] chunk (" + chunkX + "," + chunkZ + ") = " + chunkData.length + " bytes");
+                    sendGameBatch(buildPacket(b -> {
                         ByteBufUtils.writeVarInt(b, ID_FULL_CHUNK_DATA);
                         ByteBufUtils.writeSignedVarInt(b, chunkX);
                         ByteBufUtils.writeSignedVarInt(b, chunkZ);
@@ -467,14 +624,38 @@ public final class PeRakNetServer {
                 }
             }
 
-            packets.add(playStatus(PLAY_STATUS_PLAYER_SPAWN)); // finally kick the client out of the load screen
-            sendGameBatch(packets.toArray(new byte[0][]));
+            // Terrain is in; kick the client out of the load screen.
+            sendGameBatch(playStatus(PLAY_STATUS_PLAYER_SPAWN));
+        }
+
+        /** 2048 nibble-bytes of full light (0xF per cell) — a lit sub-chunk so the world isn't dark. */
+        private static final byte[] FULL_LIGHT = new byte[2048];
+        static {
+            Arrays.fill(FULL_LIGHT, (byte) 0xFF);
         }
 
         /**
-         * Serialize a chunk column's data payload (legacy MCPE 1.1.5 format): a contiguous run of
-         * 16³ sub-chunks from the bottom, then the biome map and extra-data marker. Blocks come
-         * from the shared world, so Bedrock renders the same terrain as Java.
+         * Serialize a chunk column payload in the MCPE 1.0/1.1 (protocol 113) network format:
+         * a run of 16³ sub-chunks from y=0, each carrying block ids + metadata + sky light +
+         * block light, then a heightmap, biome map, border and extra-data markers.
+         *
+         * <p>Layout per the MCPE 1.0 network chunk spec (dktapps):
+         * <pre>
+         *   byte  subChunkCount
+         *   per sub-chunk:
+         *     byte      version (0)
+         *     byte[4096] block ids   (XZY order)
+         *     byte[2048] block meta  (4-bit)
+         *     byte[2048] sky light   (4-bit)
+         *     byte[2048] block light (4-bit)
+         *   byte[512] heightmap (256 shorts)
+         *   byte[256] biome ids
+         *   byte      border block count
+         *   varint    extra-data count
+         * </pre>
+         *
+         * <p>The earlier version omitted the two light arrays and the heightmap, which desynced the
+         * client's read pointer after the first sub-chunk and rendered the whole column as garbage.
          */
         private byte[] buildChunkPayload(int chunkX, int chunkZ) {
             int baseX = chunkX << 4;
@@ -501,10 +682,14 @@ public final class PeRakNetServer {
                             }
                         }
                     }
-                    payload.writeZero(2048); // block metadata nibbles (all 0)
+                    payload.writeZero(2048);        // block metadata nibbles (all 0)
+                    payload.writeBytes(FULL_LIGHT); // sky light (full daylight)
+                    payload.writeZero(2048);        // block light (none)
                 }
+                payload.writeZero(512);               // heightmap (256 shorts; client recomputes)
                 payload.writeZero(256);               // biome map
-                ByteBufUtils.writeVarInt(payload, 0); // extra data
+                payload.writeByte(0);                 // border block count
+                ByteBufUtils.writeVarInt(payload, 0); // extra data count
 
                 byte[] out = new byte[payload.readableBytes()];
                 payload.getBytes(payload.readerIndex(), out);

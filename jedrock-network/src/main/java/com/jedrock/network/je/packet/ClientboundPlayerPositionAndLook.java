@@ -16,13 +16,16 @@ public final class ClientboundPlayerPositionAndLook implements ClientboundPacket
     public int teleportId;
 
     public ClientboundPlayerPositionAndLook() {
-        // Spawn at reasonable height
-        this.x = 0.5;
-        this.y = 64;
-        this.z = 0.5;
-        this.yaw = 0f;
-        this.pitch = 0f;
-        this.flags = 0;
+        this(0.5, 64, 0.5, 0f, 0f);
+    }
+
+    public ClientboundPlayerPositionAndLook(double x, double y, double z, float yaw, float pitch) {
+        this.x = x;
+        this.y = y;
+        this.z = z;
+        this.yaw = yaw;
+        this.pitch = pitch;
+        this.flags = 0;        // all absolute
         this.teleportId = 1;
     }
 

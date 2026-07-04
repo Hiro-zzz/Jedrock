@@ -44,6 +44,21 @@ public interface PlayerConnection {
     void removeFromTab(java.util.UUID uuid);
 
     /**
+     * Spawn another player's avatar in this client's world. The entry must already be
+     * in the tab / player list (JE requires it for the avatar to render).
+     *
+     * @param entityId server-assigned id of the avatar's subject ({@code Entity#getEntityId})
+     */
+    void showPlayer(java.util.UUID uuid, String name, long entityId,
+                    double x, double y, double z, float yaw, float pitch);
+
+    /** Despawn a player avatar previously shown via {@link #showPlayer}. */
+    void hidePlayer(java.util.UUID uuid, long entityId);
+
+    /** Move a player avatar previously shown via {@link #showPlayer} to an absolute position. */
+    void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch);
+
+    /**
      * Close the connection.
      */
     void close(String reason);

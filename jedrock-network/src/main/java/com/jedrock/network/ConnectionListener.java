@@ -21,4 +21,11 @@ public interface ConnectionListener {
 
     /** An in-game player sent a chat message. The core relays it to everyone. */
     void onChat(PlayerConnection connection, String message);
+
+    /**
+     * An in-game player reported a new position/look (client-authoritative movement).
+     * Fires at the client's own rate (~20/s while moving) — keep implementations lean.
+     * {@code y} is the feet position in both editions.
+     */
+    void onMove(PlayerConnection connection, double x, double y, double z, float yaw, float pitch);
 }
