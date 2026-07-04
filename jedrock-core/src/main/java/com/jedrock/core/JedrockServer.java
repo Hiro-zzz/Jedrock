@@ -203,7 +203,8 @@ public class JedrockServer implements Server, ConnectionListener {
                     spawn.x(), spawn.y(), spawn.z(), spawn.yaw(), spawn.pitch());
         }
 
-        LOGGER.info(username + " joined (" + playerRegistry.size() + " online)");
+        LOGGER.info(username + " joined [" + connection.getProtocolVersion().getVersionName()
+                + "] (" + playerRegistry.size() + " online)");
     }
 
     @Override
@@ -236,6 +237,16 @@ public class JedrockServer implements Server, ConnectionListener {
                 }
             }
         });
+    }
+
+    @Override
+    public void onBlockChange(PlayerConnection connection, int x, int y, int z, int blockId) {
+        // Apply to the shared world, then push the edit to every client (including the editor,
+        // so the server stays authoritative). Each connection serializes it in its own protocol.
+        defaultWorld.setBlockId(x, y, z, blockId);
+        for (Player p : playerRegistry.all()) {
+            p.getConnection().sendBlockChange(x, y, z, blockId);
+        }
     }
 
     @Override

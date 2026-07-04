@@ -51,4 +51,15 @@ class CoreWorldTerrainTest {
         world.setBlockId(3, surface + 5, 3, Blocks.STONE); // place a floating block
         assertEquals(Blocks.STONE, world.getBlockId(3, surface + 5, 3));
     }
+
+    @Test
+    void breakingNaturalTerrainSticks() {
+        int surface = world.surfaceHeight(2, 2);
+        assertEquals(Blocks.GRASS, world.getBlockId(2, surface, 2), "natural grass surface");
+
+        world.setBlockId(2, surface, 2, Blocks.AIR); // break the natural block
+
+        assertEquals(Blocks.AIR, world.getBlockId(2, surface, 2), "broken natural block stays gone");
+        assertEquals(Blocks.DIRT, world.getBlockId(2, surface - 1, 2), "layer below untouched");
+    }
 }

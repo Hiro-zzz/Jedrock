@@ -97,11 +97,21 @@ public final class CoreWorld implements World {
 
     // ===== Fast, allocation-free canonical block access =====
 
+    /**
+     * Overlay sentinel for a block a player explicitly removed. Plain air in the overlay means
+     * "nothing stored" (fall through to terrain), so breaking a natural block needs a distinct
+     * marker or the generator would just put it back. Out of the real block-id range.
+     */
+    private static final int REMOVED = 0x0FFF;
+
     @Override
     public int getBlockId(int x, int y, int z) {
         int stored = storage.getId(x, y, z);
+        if (stored == REMOVED) {
+            return Blocks.AIR;          // a player broke a (possibly natural) block here
+        }
         if (stored != Blocks.AIR) {
-            return stored;              // a player edit overrides the base terrain
+            return stored;              // a player placed a block here
         }
         return generatedBlock(x, y, z); // procedural terrain
     }
@@ -132,7 +142,9 @@ public final class CoreWorld implements World {
 
     @Override
     public void setBlockId(int x, int y, int z, int id) {
-        storage.setId(x, y, z, id);
+        // Store the explicit-air sentinel so a broken natural block stays broken (plain air in the
+        // overlay reads as "not stored" and would fall through to the generated terrain again).
+        storage.setId(x, y, z, id == Blocks.AIR ? REMOVED : id);
     }
 
     // ===== Player membership (managed by the server on join/quit) =====

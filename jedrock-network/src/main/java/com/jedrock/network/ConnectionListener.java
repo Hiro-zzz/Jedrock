@@ -28,4 +28,10 @@ public interface ConnectionListener {
      * {@code y} is the feet position in both editions.
      */
     void onMove(PlayerConnection connection, double x, double y, double z, float yaw, float pitch);
+
+    /**
+     * An in-game player edited a block (break or place). The core applies it to the shared world
+     * and relays it to everyone. {@code blockId} is the new canonical id (0 = air = a break).
+     */
+    void onBlockChange(PlayerConnection connection, int x, int y, int z, int blockId);
 }

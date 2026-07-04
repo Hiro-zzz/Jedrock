@@ -113,6 +113,11 @@ public final class ByteBufUtils {
         writeVarInt(buf, (value << 1) ^ (value >> 31));
     }
 
+    public static int readSignedVarInt(ByteBuf buf) {
+        int raw = readVarInt(buf);
+        return (raw >>> 1) ^ -(raw & 1); // undo zigzag
+    }
+
     public static void writeSignedVarLong(ByteBuf buf, long value) {
         writeVarLong(buf, (value << 1) ^ (value >> 63));
     }

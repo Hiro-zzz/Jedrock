@@ -1,6 +1,5 @@
 package com.jedrock.network.je.packet;
 
-import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.World;
 import com.jedrock.utils.ByteBufUtils;
 import io.netty.buffer.ByteBuf;
@@ -109,14 +108,12 @@ public final class ClientboundChunkData implements ClientboundPacket {
         return true;
     }
 
-    /** Canonical block id → JE 1.12.2 global palette state (blockId << 4 | meta). */
+    /**
+     * Canonical block id → JE 1.12.2 global palette state (blockId &lt;&lt; 4 | meta). Canonical
+     * ids are the classic numeric block ids, so meta-0 blocks map by {@code id << 4}.
+     */
     private static int toJavaState(int canonical) {
-        return switch (canonical) {
-            case Blocks.STONE -> 1 << 4;
-            case Blocks.GRASS -> 2 << 4;
-            case Blocks.DIRT -> 3 << 4;
-            default -> 0; // air
-        };
+        return canonical << 4;
     }
 
     @Override

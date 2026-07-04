@@ -1,5 +1,6 @@
 package com.jedrock.network.handler.je;
 
+import com.jedrock.api.world.Blocks;
 import com.jedrock.network.JedrockConnection;
 import com.jedrock.network.handler.ProtocolHandler;
 import com.jedrock.network.je.packet.*;
@@ -20,6 +21,11 @@ import java.util.UUID;
 public final class JavaEditionProtocolHandler implements ProtocolHandler {
 
     private static final JLogger LOGGER = JLogger.getLogger(JavaEditionProtocolHandler.class);
+
+    // Per-connection creative inventory state (one handler instance per connection, single-threaded
+    // inbound), used to know which block a placement should place.
+    private int heldSlot = 0;
+    private final int[] hotbarItemId = new int[9]; // classic item ids; 0 = empty
 
     @Override
     public void handleInbound(LazyPacket packet, JedrockConnection connection) {
@@ -104,6 +110,24 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
         } else if (id == ServerboundPlayerLook.PACKET_ID) {
             ServerboundPlayerLook p = lazy.materialize(ServerboundPlayerLook::fromBuffer);
             connection.clientMoved(null, null, null, p.yaw, p.pitch);
+        } else if (id == ServerboundPlayerDigging.PACKET_ID) {
+            ServerboundPlayerDigging dig = lazy.materialize(ServerboundPlayerDigging::fromBuffer);
+            if (dig.isBreak() && connection.getListener() != null) {
+                connection.getListener().onBlockChange(connection, dig.x, dig.y, dig.z, 0); // 0 = air
+            }
+        } else if (id == ServerboundHeldItemChange.PACKET_ID) {
+            ServerboundHeldItemChange h = lazy.materialize(ServerboundHeldItemChange::fromBuffer);
+            if (h.slot >= 0 && h.slot < 9) heldSlot = h.slot;
+        } else if (id == ServerboundCreativeInventoryAction.PACKET_ID) {
+            ServerboundCreativeInventoryAction c = lazy.materialize(ServerboundCreativeInventoryAction::fromBuffer);
+            if (c.slot >= 36 && c.slot <= 44) hotbarItemId[c.slot - 36] = Math.max(0, c.itemId);
+        } else if (id == ServerboundPlayerBlockPlacement.PACKET_ID) {
+            ServerboundPlayerBlockPlacement place = lazy.materialize(ServerboundPlayerBlockPlacement::fromBuffer);
+            int canonical = hotbarItemId[heldSlot];
+            if (Blocks.isKnown(canonical) && canonical != Blocks.AIR && connection.getListener() != null) {
+                connection.getListener().onBlockChange(connection,
+                        place.placeX(), place.placeY(), place.placeZ(), canonical);
+            }
         } else if (id == 0x00) {
             // Teleport Confirm (sent after PlayerPositionAndLook)
             LOGGER.debug("Received Teleport Confirm (ignored for now)");

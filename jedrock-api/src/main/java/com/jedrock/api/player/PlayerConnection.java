@@ -59,6 +59,12 @@ public interface PlayerConnection {
     void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch);
 
     /**
+     * Push a single block change to this client so an edit made by any player becomes visible.
+     * @param blockId the new canonical block id (0 = air, i.e. a break)
+     */
+    void sendBlockChange(int x, int y, int z, int blockId);
+
+    /**
      * Close the connection.
      */
     void close(String reason);

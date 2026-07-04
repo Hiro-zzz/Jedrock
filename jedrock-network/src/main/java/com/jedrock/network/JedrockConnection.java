@@ -6,6 +6,7 @@ import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
 import com.jedrock.network.handler.ProtocolHandler;
 import com.jedrock.network.handler.je.JavaEditionProtocolHandler;
+import com.jedrock.network.je.packet.ClientboundBlockChange;
 import com.jedrock.network.je.packet.ClientboundChatMessage;
 import com.jedrock.network.je.packet.ClientboundChunkData;
 import com.jedrock.network.je.packet.ClientboundDestroyEntities;
@@ -18,6 +19,8 @@ import com.jedrock.network.je.packet.ClientboundPlayerListItem;
 import com.jedrock.network.je.packet.ClientboundPlayerPositionAndLook;
 import com.jedrock.network.je.packet.ClientboundSpawnPlayer;
 import com.jedrock.network.je.packet.ClientboundSpawnPosition;
+import com.jedrock.network.je.packet.ClientboundUnloadChunk;
+import com.jedrock.network.chunk.ChunkView;
 import com.jedrock.network.protocol.ConnectionProtocol;
 import com.jedrock.network.protocol.ProtocolState;
 import com.jedrock.utils.ByteBufUtils;
@@ -135,6 +138,11 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void sendBlockChange(int x, int y, int z, int blockId) {
+        send(new ClientboundBlockChange(x, y, z, blockId));
+    }
+
+    @Override
     public void close(String reason) {
         // Disconnect packet with a reason is a future improvement; for now just drop the channel.
         LOGGER.debug(() -> "Closing connection " + getAddress() + (reason != null ? " (" + reason + ")" : ""));
@@ -232,19 +240,22 @@ public class JedrockConnection implements Connection, PlayerConnection {
         send(new ClientboundPlayerPositionAndLook(s.x(), s.y(), s.z(), s.yaw(), s.pitch()));
     }
 
-    /** Radius (in chunks) of the terrain sent around spawn so the client can render/spawn. */
-    private static final int SPAWN_CHUNK_RADIUS = 5;
+    /** View distance (in chunks) streamed around the player. */
+    private static final int VIEW_RADIUS = 6;
+
+    private final ChunkView chunkView = new ChunkView(VIEW_RADIUS);
+    private final ChunkView.Sink chunkSink = new ChunkView.Sink() {
+        @Override public void load(int cx, int cz) { send(new ClientboundChunkData(world, cx, cz)); }
+        @Override public void unload(int cx, int cz) { send(new ClientboundUnloadChunk(cx, cz)); }
+    };
 
     /**
-     * Stream a square of flat chunks around spawn.
-     * Called by protocol handlers during initial join sequence.
+     * Send the initial window of chunks around spawn. Called by the protocol handler during the
+     * join sequence; subsequent movement streams new chunks via {@link #clientMoved}.
      */
     public void sendSpawnChunks() {
-        for (int cx = -SPAWN_CHUNK_RADIUS; cx <= SPAWN_CHUNK_RADIUS; cx++) {
-            for (int cz = -SPAWN_CHUNK_RADIUS; cz <= SPAWN_CHUNK_RADIUS; cz++) {
-                send(new ClientboundChunkData(world, cx, cz));
-            }
-        }
+        Location s = world.getSpawnLocation();
+        chunkView.recenter(s.getBlockX() >> 4, s.getBlockZ() >> 4, chunkSink);
     }
 
     public ProtocolState getState() {
@@ -305,6 +316,10 @@ public class JedrockConnection implements Connection, PlayerConnection {
         if (yaw != null) {
             lastYaw = yaw;
             lastPitch = pitch;
+        }
+        if (x != null) {
+            // Stream chunks around the new position (no-op unless the player crossed a boundary).
+            chunkView.recenter(((int) Math.floor(lastX)) >> 4, ((int) Math.floor(lastZ)) >> 4, chunkSink);
         }
         if (loggedIn && listener != null) {
             listener.onMove(this, lastX, lastY, lastZ, lastYaw, lastPitch);

@@ -78,6 +78,7 @@ class PlayerRegistryTest {
                                          double x, double y, double z, float yaw, float pitch) { }
         @Override public void hidePlayer(java.util.UUID uuid, long entityId) { }
         @Override public void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch) { }
+        @Override public void sendBlockChange(int x, int y, int z, int blockId) { }
         @Override public void close(String reason) { }
         @Override public boolean isActive() { return true; }
     }

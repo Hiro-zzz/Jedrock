@@ -42,11 +42,16 @@ Target versions:
 - ✅ **Client-authoritative movement** — clients report position; the core relays it to everyone
   and never simulates physics (see the philosophy below).
 - ✅ **Bedrock player list** — Bedrock players now appear in the PE pause-menu list.
+- ✅ **Dynamic chunk streaming** — each connection has a `ChunkView` that loads chunks around the
+  player and unloads them behind, so the world follows you instead of ending a few chunks out.
+- ✅ **Block editing** — a Java player places and breaks blocks (stone, dirt, cobblestone, planks,
+  sand, log, glass); the change lands in the shared world and shows up on every client, Bedrock
+  included (a broken natural block stays broken via an explicit-air overlay marker).
 
-Not yet: block placing/breaking, **real skins** (avatars render with placeholder textures —
-Bedrock players show as a solid colour, and on Java as Steve/Alex), dynamic chunk streaming
-(only a fixed patch around spawn is sent, so the Bedrock render distance is short and walking far
-runs into unloaded void), movement validation, config files, scripting. See [Roadmap](#roadmap).
+Not yet: **Bedrock-initiated** editing (a Bedrock player breaking/placing — needs the
+`InventoryTransaction` decode), **real skins** (avatars render with placeholder textures — Bedrock
+players show as a solid colour, and on Java as Steve/Alex), movement validation, config files,
+scripting. See [Roadmap](#roadmap).
 
 ---
 
@@ -185,9 +190,9 @@ and MCPE compression — no client required.
 
 ## Roadmap
 
-- **Block editing** — place/break on both editions → update `BlockStorage` → broadcast the change.
-- **Chunk streaming** — send chunks dynamically as players move (and a wider radius) instead of a
-  fixed patch around spawn, so the world doesn't end a few chunks out — most visible on Bedrock.
+- **Bedrock-initiated editing** — decode the PE `InventoryTransaction` so a Bedrock player can
+  break/place too (Java-initiated edits already propagate to both editions). Then a typed PE
+  `UpdateBlock` to replace the current re-send-the-chunk reflection.
 - **Real skins** — relay a Bedrock player's actual skin (it's already in the Login JWT we parse)
   into the PE `PlayerList`; cross-edition skin fidelity is limited by JE's signed-texture model
   (see below). Avatars render with placeholder textures today.

@@ -6,6 +6,7 @@ import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
 import com.jedrock.network.ConnectionListener;
+import com.jedrock.network.chunk.ChunkView;
 import com.jedrock.utils.ByteBufUtils;
 import com.jedrock.utils.JLogger;
 import com.nukkitx.network.raknet.EncapsulatedPacket;
@@ -92,6 +93,9 @@ public final class PeRakNetServer {
      * at 58 (fractional .62 = the eye offset). The core works in feet, so convert on MovePlayer only.
      */
     private static final float EYE_HEIGHT = 1.62f;
+
+    /** Max chunk view radius we honour from the client's RequestChunkRadius (join cost vs. distance). */
+    private static final int MAX_VIEW_RADIUS = 4;
 
     private final InetSocketAddress address;
     private final ProtocolVersion protocol;
@@ -193,6 +197,13 @@ public final class PeRakNetServer {
         private volatile String username;
         /** Compression mode observed on inbound batches; reused for outbound (chat etc.). */
         private volatile boolean rawDeflate = false;
+
+        /** Chunk streaming state; created once the client's requested radius is known. */
+        private ChunkView chunkView;
+        private final ChunkView.Sink chunkSink = new ChunkView.Sink() {
+            @Override public void load(int cx, int cz) { sendChunk(cx, cz); }
+            @Override public void unload(int cx, int cz) { /* PE 1.1.5 client culls by distance */ }
+        };
 
         SessionHandler(RakNetServerSession session, ConnectionListener listener, ProtocolVersion protocol, World world) {
             this.session = session;
@@ -297,6 +308,16 @@ public final class PeRakNetServer {
                 writeUuid(b, uuid);
             });
             sendGameBatch(removeEntity, playerListRemove);
+        }
+
+        @Override
+        public void sendBlockChange(int x, int y, int z, int blockId) {
+            // Until a typed UpdateBlock is verified for protocol 113, reflect edits by re-sending
+            // the affected chunk (the world already holds the new block). Heavier than a single
+            // block packet, but reuses the proven chunk path. Only if the client has that chunk.
+            if (chunkView != null) {
+                sendChunk(x >> 4, z >> 4);
+            }
         }
 
         @Override
@@ -453,8 +474,10 @@ public final class PeRakNetServer {
                     sendStartGame();
                 }
                 case ID_REQUEST_CHUNK_RADIUS -> {
-                    LOGGER.info("[PE] chunk radius requested → deploying world (3x3 chunks + spawn)");
-                    sendWorld();
+                    int requested = ByteBufUtils.readSignedVarInt(pk);
+                    int radius = Math.max(2, Math.min(requested, MAX_VIEW_RADIUS));
+                    LOGGER.info("[PE] chunk radius requested (" + requested + ") → streaming r=" + radius + " + spawn");
+                    sendWorld(radius);
                     registerPlayer(); // fully in-game now — hand it to the core like a JE player
                 }
                 case ID_TEXT -> handleInboundText(pk);
@@ -503,6 +526,9 @@ public final class PeRakNetServer {
                 float yaw = pk.readFloatLE();
                 if (loggedIn && listener != null) {
                     listener.onMove(this, x, y, z, yaw, pitch);
+                }
+                if (chunkView != null) {
+                    chunkView.recenter(((int) Math.floor(x)) >> 4, ((int) Math.floor(z)) >> 4, chunkSink);
                 }
             } catch (RuntimeException e) {
                 LOGGER.debug(() -> "[PE] could not parse inbound MovePlayer: " + e);
@@ -585,15 +611,15 @@ public final class PeRakNetServer {
             sendGameBatch(startGame, spawnStatus);
         }
 
-        /** Reply to the chunk-radius request: publish a small 3x3 world and spawn the player. */
-        private void sendWorld() {
+        /** Reply to the chunk-radius request: set the radius, stream the initial window, spawn. */
+        private void sendWorld(int radius) {
             // Setup batch. Note: NetworkChunkPublisherUpdate is a 1.2+ packet and is deliberately
             // NOT sent to a 1.1.5 client — an unknown/misparsed id here can abort the join batch
             // before the chunks are applied, leaving the client in an empty, floor-less world.
             sendGameBatch(
                     buildPacket(b -> {
                         ByteBufUtils.writeVarInt(b, ID_CHUNK_RADIUS_UPDATED);
-                        ByteBufUtils.writeSignedVarInt(b, 2); // keep the radius small
+                        ByteBufUtils.writeSignedVarInt(b, radius);
                     }),
                     buildPacket(b -> {
                         ByteBufUtils.writeVarInt(b, ID_ADVENTURE_SETTINGS);
@@ -606,26 +632,29 @@ public final class PeRakNetServer {
                     })
             );
 
-            // Each chunk in its own game batch — one 220 KB batch of 9 full chunks is large and
-            // fragile once split across RakNet fragments; small per-chunk batches are robust.
-            for (int cx = -1; cx <= 1; cx++) {
-                for (int cz = -1; cz <= 1; cz++) {
-                    int chunkX = cx;
-                    int chunkZ = cz;
-                    byte[] chunkData = buildChunkPayload(chunkX, chunkZ);
-                    LOGGER.debug(() -> "[PE] chunk (" + chunkX + "," + chunkZ + ") = " + chunkData.length + " bytes");
-                    sendGameBatch(buildPacket(b -> {
-                        ByteBufUtils.writeVarInt(b, ID_FULL_CHUNK_DATA);
-                        ByteBufUtils.writeSignedVarInt(b, chunkX);
-                        ByteBufUtils.writeSignedVarInt(b, chunkZ);
-                        ByteBufUtils.writeVarInt(b, chunkData.length);
-                        b.writeBytes(chunkData);
-                    }));
-                }
-            }
+            // Stream the initial window around spawn; movement extends it via ChunkView.
+            Location spawn = world.getSpawnLocation();
+            this.chunkView = new ChunkView(radius);
+            chunkView.recenter(spawn.getBlockX() >> 4, spawn.getBlockZ() >> 4, chunkSink);
 
             // Terrain is in; kick the client out of the load screen.
             sendGameBatch(playStatus(PLAY_STATUS_PLAYER_SPAWN));
+        }
+
+        /**
+         * Serialize and send one chunk column in its own game batch — one big batch of many full
+         * chunks is fragile once split across RakNet fragments, so we keep each chunk small.
+         */
+        private void sendChunk(int chunkX, int chunkZ) {
+            byte[] chunkData = buildChunkPayload(chunkX, chunkZ);
+            LOGGER.debug(() -> "[PE] chunk (" + chunkX + "," + chunkZ + ") = " + chunkData.length + " bytes");
+            sendGameBatch(buildPacket(b -> {
+                ByteBufUtils.writeVarInt(b, ID_FULL_CHUNK_DATA);
+                ByteBufUtils.writeSignedVarInt(b, chunkX);
+                ByteBufUtils.writeSignedVarInt(b, chunkZ);
+                ByteBufUtils.writeVarInt(b, chunkData.length);
+                b.writeBytes(chunkData);
+            }));
         }
 
         /** 2048 nibble-bytes of full light (0xF per cell) — a lit sub-chunk so the world isn't dark. */
@@ -712,14 +741,12 @@ public final class PeRakNetServer {
             return false;
         }
 
-        /** Canonical block id → Bedrock 1.1.5 block id. */
+        /**
+         * Canonical block id → Bedrock 1.1.5 block id. Canonical ids are the classic numeric ids,
+         * which legacy Bedrock shares for basic blocks, so this is an identity (clamped to a byte).
+         */
         private static int toBedrockId(int canonical) {
-            return switch (canonical) {
-                case Blocks.STONE -> 1;
-                case Blocks.GRASS -> 2;
-                case Blocks.DIRT -> 3;
-                default -> 0; // air
-            };
+            return canonical & 0xFF;
         }
 
         private static byte[] playStatus(int status) {
