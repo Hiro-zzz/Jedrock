@@ -70,8 +70,30 @@ public final class PeRakNetServer {
     private static final int ID_ADD_PLAYER = 0x0C;
     private static final int ID_REMOVE_ENTITY = 0x0E;
     private static final int ID_MOVE_PLAYER = 0x13;
+    private static final int ID_INVENTORY_TRANSACTION = 0x1E;
+    private static final int ID_USE_ITEM = 0x23;  // Win10 1.1.5 carries block placement here
+    private static final int ID_PLAYER_ACTION = 0x24;
     private static final int ID_ADVENTURE_SETTINGS = 0x37;
     private static final int ID_PLAYER_LIST = 0x3F;
+
+    // PlayerAction action ids (protocol 113). In creative the client reports a break with
+    // CONTINUE_BREAK carrying the block position, so we break on that.
+    private static final int ACTION_START_BREAK = 0;
+    private static final int ACTION_CONTINUE_BREAK = 18;
+
+    // InventoryTransaction: transaction types + UseItem action types + inventory-action sources.
+    private static final int TRANSACTION_USE_ITEM = 2;
+    private static final int USE_ITEM_CLICK_BLOCK = 0; // place
+    private static final int USE_ITEM_BREAK_BLOCK = 2; // break
+    private static final int SOURCE_CONTAINER = 0;
+    private static final int SOURCE_WORLD = 2;
+    private static final int SOURCE_CREATIVE = 3;
+    private static final int SOURCE_TODO = 99999;
+
+    /** Block-face offsets (Bedrock uses the same order as Java): down,up,north,south,west,east. */
+    private static final int[] FACE_DX = {0, 0, 0, 0, -1, 1};
+    private static final int[] FACE_DY = {-1, 1, 0, 0, 0, 0};
+    private static final int[] FACE_DZ = {0, 0, -1, 1, 0, 0};
     private static final int ID_FULL_CHUNK_DATA = 0x3A;
     private static final int ID_REQUEST_CHUNK_RADIUS = 0x45;
     private static final int ID_CHUNK_RADIUS_UPDATED = 0x46;
@@ -86,6 +108,10 @@ public final class PeRakNetServer {
     // MCPE PlayerList actions
     private static final int PLAYER_LIST_ADD = 0;
     private static final int PLAYER_LIST_REMOVE = 1;
+
+    // MCPE movement + inventory init
+    private static final int ID_UPDATE_ATTRIBUTES = 0x1D; // movement-speed fix
+    private static final int ID_INVENTORY_CONTENT = 0x31; // creative hotbar init
 
     /**
      * MCPE MovePlayer carries the <em>eye</em> position (feet + 1.62), while AddPlayer and StartGame
@@ -392,6 +418,55 @@ public final class PeRakNetServer {
             return c + (255 - c) * 2 / 5;
         }
 
+        /** Send the standard movement-speed attribute (0.1) to stop the PE client's runaway acceleration. */
+        private void sendAttributes() {
+            byte[] attributesPacket = buildPacket(b -> {
+                ByteBufUtils.writeVarInt(b, ID_UPDATE_ATTRIBUTES);
+                ByteBufUtils.writeVarLong(b, 1L);  // player runtime id
+                ByteBufUtils.writeVarInt(b, 1);    // attribute count
+
+                b.writeFloatLE(0.0f);              // min
+                b.writeFloatLE(3.4028235E38f);     // max
+                b.writeFloatLE(0.1f);              // current (vanilla walk speed)
+                b.writeFloatLE(0.1f);              // default
+                ByteBufUtils.writeString(b, "minecraft:movement");
+
+                ByteBufUtils.writeVarInt(b, 0);    // modifier count
+            });
+            sendGameBatch(attributesPacket);
+        }
+
+        /** Placeable blocks handed to a joining Bedrock player's hotbar (creative). */
+        private static final int[] HOTBAR = {
+                Blocks.STONE, Blocks.DIRT, Blocks.GRASS, Blocks.COBBLESTONE,
+                Blocks.PLANKS, Blocks.SAND, Blocks.LOG, Blocks.GLASS,
+        };
+
+        /** Populate the player inventory: the first slots (hotbar) with placeable blocks, the rest empty. */
+        private void sendInventory() {
+            byte[] inventoryPacket = buildPacket(b -> {
+                ByteBufUtils.writeVarInt(b, ID_INVENTORY_CONTENT);
+                ByteBufUtils.writeVarInt(b, 0);    // container id 0 = player inventory
+                ByteBufUtils.writeVarInt(b, 36);   // 36 slots (inventory + hotbar)
+                for (int slot = 0; slot < 36; slot++) {
+                    writeSlot(b, slot < HOTBAR.length ? HOTBAR[slot] : Blocks.AIR, 64);
+                }
+            });
+            sendGameBatch(inventoryPacket);
+        }
+
+        /** Write one network Item slot (id, aux = meta&lt;&lt;8 | count, no NBT / can-place / can-destroy). */
+        private static void writeSlot(ByteBuf b, int id, int count) {
+            ByteBufUtils.writeSignedVarInt(b, id);
+            if (id == Blocks.AIR) {
+                return; // air carries no further fields
+            }
+            ByteBufUtils.writeSignedVarInt(b, count & 0xFF); // meta 0, count in the low byte
+            b.writeShortLE(0);                               // NBT length
+            ByteBufUtils.writeVarInt(b, 0);                  // can place on: none
+            ByteBufUtils.writeVarInt(b, 0);                  // can destroy: none
+        }
+
         // ===== RakNet session callbacks =====
 
         @Override
@@ -475,13 +550,16 @@ public final class PeRakNetServer {
                 }
                 case ID_REQUEST_CHUNK_RADIUS -> {
                     int requested = ByteBufUtils.readSignedVarInt(pk);
-                    int radius = Math.max(2, Math.min(requested, MAX_VIEW_RADIUS));
+                    int radius = Math.clamp(requested, 2, MAX_VIEW_RADIUS);
                     LOGGER.info("[PE] chunk radius requested (" + requested + ") → streaming r=" + radius + " + spawn");
                     sendWorld(radius);
                     registerPlayer(); // fully in-game now — hand it to the core like a JE player
                 }
                 case ID_TEXT -> handleInboundText(pk);
                 case ID_MOVE_PLAYER -> handleInboundMove(pk);
+                case ID_INVENTORY_TRANSACTION -> handleInventoryTransaction(pk);
+                case ID_USE_ITEM -> handleUseItemPlace(pk);
+                case ID_PLAYER_ACTION -> handlePlayerAction(pk);
                 default -> { /* other gameplay packet — nothing to answer yet */ }
             }
         }
@@ -535,6 +613,142 @@ public final class PeRakNetServer {
             }
         }
 
+        /**
+         * Decode the Win10 1.1.5 block-placement packet (0x23). Layout, decoded from captured
+         * bytes: block position (x svarint, y uvarint, z svarint), clicked face (svarint), hotbar
+         * slot (svarint), player + click Vector3f (6 floats) and one flag byte, then the held Item.
+         * The new block goes at the clicked block offset by the face. A paired (0,0,0) packet is a
+         * sync echo and is filtered out.
+         */
+        private void handleUseItemPlace(ByteBuf pk) {
+            try {
+                int bx = ByteBufUtils.readSignedVarInt(pk);
+                int by = ByteBufUtils.readVarInt(pk);   // block y is unsigned
+                int bz = ByteBufUtils.readSignedVarInt(pk);
+                int face = ByteBufUtils.readSignedVarInt(pk);
+                ByteBufUtils.readSignedVarInt(pk);      // hotbar slot — unused
+                pk.skipBytes(25);                       // player + click Vector3f (24) + 1 flag
+                int itemId = readSlotItemId(pk);        // block in hand
+
+                boolean atOrigin = bx == 0 && by == 0 && bz == 0;
+                if (!atOrigin && Blocks.isKnown(itemId) && itemId != Blocks.AIR
+                        && loggedIn && listener != null) {
+                    int f = (face >= 0 && face < 6) ? face : 1;
+                    listener.onBlockChange(this, bx + FACE_DX[f], by + FACE_DY[f], bz + FACE_DZ[f], itemId);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.debug(() -> "[PE] could not parse UseItem place: " + e);
+            }
+        }
+
+        /**
+         * Decode a Bedrock PlayerAction (protocol 113): entity runtime id, action, block position,
+         * face. In creative, breaking a block is instant, so a start/stop-break action on a block
+         * means "remove it". This is how the 1.1.5 Win10 client reports breaks (not via transaction).
+         */
+        private void handlePlayerAction(ByteBuf pk) {
+            try {
+                ByteBufUtils.readVarLong(pk);          // entity runtime id (unsigned)
+                int action = ByteBufUtils.readSignedVarInt(pk);
+                int bx = ByteBufUtils.readSignedVarInt(pk);
+                int by = ByteBufUtils.readVarInt(pk);  // block y is unsigned
+                int bz = ByteBufUtils.readSignedVarInt(pk);
+                ByteBufUtils.readSignedVarInt(pk);     // face — unused
+                // Creative: break instantly on the action that carries the block position.
+                boolean isBreak = action == ACTION_START_BREAK || action == ACTION_CONTINUE_BREAK;
+                if (isBreak && loggedIn && listener != null) {
+                    listener.onBlockChange(this, bx, by, bz, Blocks.AIR);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.debug(() -> "[PE] could not parse PlayerAction: " + e);
+            }
+        }
+
+        /**
+         * Decode a Bedrock InventoryTransaction (protocol 113 layout) and, if it is a block
+         * place or break, relay it to the core. The packet crams several concepts together:
+         * a transaction type, a list of inventory actions (each with two nested items), then the
+         * UseItem data (action type, block position, face, held item, positions). We must parse the
+         * item format exactly to skip the actions and reach the UseItem block coordinates.
+         */
+        private void handleInventoryTransaction(ByteBuf pk) {
+            try {
+                int transactionType = ByteBufUtils.readVarInt(pk); // unsigned
+                int actionCount = ByteBufUtils.readVarInt(pk);     // unsigned
+                for (int i = 0; i < actionCount; i++) {
+                    if (!skipInventoryAction(pk)) {
+                        return; // unknown source type — can't skip safely, bail before misaligning
+                    }
+                }
+                if (transactionType != TRANSACTION_USE_ITEM) {
+                    return; // normal/mismatch/use-on-entity/release — not a world edit
+                }
+
+                int actionType = ByteBufUtils.readVarInt(pk);   // unsigned
+                int bx = ByteBufUtils.readSignedVarInt(pk);
+                int by = ByteBufUtils.readVarInt(pk);           // block y is an unsigned varint
+                int bz = ByteBufUtils.readSignedVarInt(pk);
+                int face = ByteBufUtils.readSignedVarInt(pk);
+                ByteBufUtils.readSignedVarInt(pk);              // hotbar slot — unused
+                int itemId = readSlotItemId(pk);               // block in hand (for placement)
+                // Remaining player/click Vector3f are not needed.
+
+                if (!loggedIn || listener == null) return;
+
+                if (actionType == USE_ITEM_BREAK_BLOCK) {
+                    listener.onBlockChange(this, bx, by, bz, Blocks.AIR);
+                } else if (actionType == USE_ITEM_CLICK_BLOCK && Blocks.isKnown(itemId) && itemId != Blocks.AIR) {
+                    int f = (face >= 0 && face < 6) ? face : 1;
+                    listener.onBlockChange(this, bx + FACE_DX[f], by + FACE_DY[f], bz + FACE_DZ[f], itemId);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.debug(() -> "[PE] could not parse InventoryTransaction: " + e);
+            }
+        }
+
+        /**
+         * Parse (to skip) one NetworkInventoryAction. Returns false if the source type is unknown,
+         * in which case the caller must stop — we can no longer track the read position.
+         */
+        private boolean skipInventoryAction(ByteBuf pk) {
+            int sourceType = ByteBufUtils.readVarInt(pk); // unsigned
+            switch (sourceType) {
+                case SOURCE_CONTAINER, SOURCE_TODO -> ByteBufUtils.readSignedVarInt(pk); // windowId
+                case SOURCE_WORLD -> ByteBufUtils.readVarInt(pk);                        // source flags
+                case SOURCE_CREATIVE -> { /* no extra field */ }
+                default -> {
+                    LOGGER.debug(() -> "[PE] unknown inventory action source " + sourceType);
+                    return false;
+                }
+            }
+            ByteBufUtils.readVarInt(pk); // inventory slot (unsigned)
+            readSlotItemId(pk);          // old item
+            readSlotItemId(pk);          // new item
+            return true;
+        }
+
+        /**
+         * Read one network Item (protocol 113) and return its id (0 = air). Consumes the whole
+         * item so the read position stays aligned: id, aux (meta/count), optional NBT, and the
+         * can-place-on / can-destroy string lists.
+         */
+        private static int readSlotItemId(ByteBuf pk) {
+            int id = ByteBufUtils.readSignedVarInt(pk);
+            if (id == 0) {
+                return 0; // air — no further fields
+            }
+            ByteBufUtils.readSignedVarInt(pk);        // aux value (meta << 8 | count)
+            int nbtLen = pk.readShortLE() & 0xFFFF;   // NBT length (little-endian)
+            if (nbtLen > 0) {
+                pk.skipBytes(nbtLen);
+            }
+            int canPlaceOn = ByteBufUtils.readVarInt(pk);
+            for (int i = 0; i < canPlaceOn; i++) ByteBufUtils.readString(pk);
+            int canDestroy = ByteBufUtils.readVarInt(pk);
+            for (int i = 0; i < canDestroy; i++) ByteBufUtils.readString(pk);
+            return id;
+        }
+
         /** Reply to Login: PlayStatus(success) + an empty ResourcePacksInfo. */
         private void sendLoginResponse() {
             byte[] playStatus = buildPacket(b -> {
@@ -550,72 +764,65 @@ public final class PeRakNetServer {
             sendGameBatch(playStatus, resourcePacksInfo);
         }
 
-        /** Reply to the resource-pack response with the world's StartGame + a spawn nudge. */
+        /** Reply to the resource-pack response with the world's StartGame. */
         private void sendStartGame() {
             Location spawn = world.getSpawnLocation();
             byte[] startGame = buildPacket(b -> {
                 ByteBufUtils.writeVarInt(b, ID_START_GAME);
 
                 // Player entity ids + gamemode
-                ByteBufUtils.writeSignedVarLong(b, 1L); // entity unique id
-                ByteBufUtils.writeVarLong(b, 1L);       // entity runtime id
-                ByteBufUtils.writeSignedVarInt(b, 1);   // gamemode (creative)
+                ByteBufUtils.writeSignedVarLong(b, 1L);
+                ByteBufUtils.writeVarLong(b, 1L);
+                ByteBufUtils.writeSignedVarInt(b, 1);   // creative
 
-                // Position + rotation (little-endian floats) — feet on the generated ground
+                // Position + rotation
                 b.writeFloatLE((float) spawn.x());
                 b.writeFloatLE((float) spawn.y());
                 b.writeFloatLE((float) spawn.z());
-                b.writeFloatLE(0.0f);   // pitch
-                b.writeFloatLE(0.0f);   // yaw
+                b.writeFloatLE(0.0f);
+                b.writeFloatLE(0.0f);
 
                 // World generation basics
-                ByteBufUtils.writeSignedVarInt(b, 12345); // seed
-                ByteBufUtils.writeSignedVarInt(b, 0);     // dimension (overworld)
-                ByteBufUtils.writeSignedVarInt(b, 1);     // generator (infinite)
-                ByteBufUtils.writeSignedVarInt(b, 1);     // world gamemode (creative)
-                ByteBufUtils.writeSignedVarInt(b, 1);     // difficulty (easy)
+                ByteBufUtils.writeSignedVarInt(b, 12345);
+                ByteBufUtils.writeSignedVarInt(b, 0);
+                ByteBufUtils.writeSignedVarInt(b, 1);
+                ByteBufUtils.writeSignedVarInt(b, 1);
+                ByteBufUtils.writeSignedVarInt(b, 1);
 
                 // World spawn block coords
-                ByteBufUtils.writeSignedVarInt(b, spawn.getBlockX()); // spawn x
-                ByteBufUtils.writeSignedVarInt(b, spawn.getBlockY()); // spawn y
-                ByteBufUtils.writeSignedVarInt(b, spawn.getBlockZ()); // spawn z
+                ByteBufUtils.writeSignedVarInt(b, spawn.getBlockX());
+                ByteBufUtils.writeSignedVarInt(b, spawn.getBlockY());
+                ByteBufUtils.writeSignedVarInt(b, spawn.getBlockZ());
 
-                // Flags + environment
-                b.writeBoolean(true);                   // achievements disabled
-                ByteBufUtils.writeSignedVarInt(b, 0);   // day cycle stop time
-                b.writeBoolean(false);                  // edu mode
-                b.writeFloatLE(0.0f);                   // rain level
-                b.writeFloatLE(0.0f);                   // lightning level
+                b.writeBoolean(true);
+                ByteBufUtils.writeSignedVarInt(b, 0);
+                b.writeBoolean(false);
+                b.writeFloatLE(0.0f);
+                b.writeFloatLE(0.0f);
 
-                // Multiplayer settings
-                b.writeBoolean(true);                   // is multiplayer
-                b.writeBoolean(true);                   // broadcast to LAN
-                b.writeBoolean(false);                  // broadcast to Xbox Live
+                b.writeBoolean(true);
+                b.writeBoolean(true);
+                b.writeBoolean(false);
 
-                // Extra flags
-                b.writeBoolean(true);                   // commands enabled
-                b.writeBoolean(false);                  // texture packs required
+                b.writeBoolean(true);
+                b.writeBoolean(false);
 
-                ByteBufUtils.writeVarInt(b, 0);         // game rules count
+                ByteBufUtils.writeVarInt(b, 0);
 
                 ByteBufUtils.writeString(b, "jedrock_level");
                 ByteBufUtils.writeString(b, "Jedrock PE World");
-                ByteBufUtils.writeString(b, "");        // premium world template id
+                ByteBufUtils.writeString(b, "");
 
-                b.writeBoolean(false);                  // is trial
-                b.writeLongLE(0L);                      // current world tick
+                b.writeBoolean(false);
+                b.writeLongLE(0L);
             });
-            byte[] spawnStatus = playStatus(PLAY_STATUS_PLAYER_SPAWN);
-            // NOTE: canonically PLAYER_SPAWN is sent once, after chunks. We also nudge here
-            // (and again in sendWorld) — kept because it is what a 1.1.5 client accepts today.
-            sendGameBatch(startGame, spawnStatus);
+
+            // Send only StartGame here; the spawn PlayStatus is sent once, after the chunks.
+            sendGameBatch(startGame);
         }
 
         /** Reply to the chunk-radius request: set the radius, stream the initial window, spawn. */
         private void sendWorld(int radius) {
-            // Setup batch. Note: NetworkChunkPublisherUpdate is a 1.2+ packet and is deliberately
-            // NOT sent to a 1.1.5 client — an unknown/misparsed id here can abort the join batch
-            // before the chunks are applied, leaving the client in an empty, floor-less world.
             sendGameBatch(
                     buildPacket(b -> {
                         ByteBufUtils.writeVarInt(b, ID_CHUNK_RADIUS_UPDATED);
@@ -623,22 +830,26 @@ public final class PeRakNetServer {
                     }),
                     buildPacket(b -> {
                         ByteBufUtils.writeVarInt(b, ID_ADVENTURE_SETTINGS);
-                        ByteBufUtils.writeVarInt(b, 0);   // flags
-                        ByteBufUtils.writeVarInt(b, 2);   // command permission (OP)
-                        ByteBufUtils.writeVarInt(b, 0);   // action permissions
-                        ByteBufUtils.writeVarInt(b, 2);   // permission level (OP)
-                        ByteBufUtils.writeVarInt(b, 0);   // custom extension flags
-                        ByteBufUtils.writeVarLong(b, 1L); // player entity unique id
+                        ByteBufUtils.writeVarInt(b, 0x08 | 0x40); // flags: allow flight | world builder
+                        ByteBufUtils.writeVarInt(b, 2);           // command permission (OP)
+                        ByteBufUtils.writeVarInt(b, 0);           // action permissions
+                        ByteBufUtils.writeVarInt(b, 2);           // permission level (OP)
+                        ByteBufUtils.writeVarInt(b, 0);           // custom extension flags
+                        ByteBufUtils.writeVarLong(b, 1L);         // player entity unique id
                     })
             );
 
-            // Stream the initial window around spawn; movement extends it via ChunkView.
+            // Movement-speed + hotbar fixes before streaming chunks.
+            sendAttributes();
+            sendInventory();
+
+            // Stream the initial window around spawn
             Location spawn = world.getSpawnLocation();
             this.chunkView = new ChunkView(radius);
             chunkView.recenter(spawn.getBlockX() >> 4, spawn.getBlockZ() >> 4, chunkSink);
 
-            // Terrain is in; kick the client out of the load screen.
-            sendGameBatch(playStatus(PLAY_STATUS_PLAYER_SPAWN));
+            // Terrain is in; kick the client out of the load screen
+            sendGameBatch(playStatus());
         }
 
         /**
@@ -749,10 +960,10 @@ public final class PeRakNetServer {
             return canonical & 0xFF;
         }
 
-        private static byte[] playStatus(int status) {
+        private static byte[] playStatus() {
             return buildPacket(b -> {
                 ByteBufUtils.writeVarInt(b, ID_PLAY_STATUS);
-                ByteBufUtils.writeIntBE(b, status);
+                ByteBufUtils.writeIntBE(b, PeRakNetServer.PLAY_STATUS_PLAYER_SPAWN);
             });
         }
 

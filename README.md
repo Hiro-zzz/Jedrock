@@ -44,14 +44,18 @@ Target versions:
 - ✅ **Bedrock player list** — Bedrock players now appear in the PE pause-menu list.
 - ✅ **Dynamic chunk streaming** — each connection has a `ChunkView` that loads chunks around the
   player and unloads them behind, so the world follows you instead of ending a few chunks out.
-- ✅ **Block editing** — a Java player places and breaks blocks (stone, dirt, cobblestone, planks,
-  sand, log, glass); the change lands in the shared world and shows up on every client, Bedrock
-  included (a broken natural block stays broken via an explicit-air overlay marker).
+- ✅ **Cross-platform block editing** — a player on **either** edition places and breaks blocks
+  (stone, dirt, grass, cobblestone, planks, sand, log, glass); the change lands in the shared world
+  and shows up on every client, cross-edition (a broken natural block stays broken via an
+  explicit-air overlay marker). Java speaks Player Digging / Block Placement; Bedrock's Win10 1.1.5
+  client reports breaks via `PlayerAction` and places via its own use-item packet, both decoded
+  from captured bytes.
+- ✅ **Bedrock spawn polish** — a movement-speed attribute (kills the runaway acceleration) and a
+  starter creative hotbar so a joining Bedrock player can build right away.
 
-Not yet: **Bedrock-initiated** editing (a Bedrock player breaking/placing — needs the
-`InventoryTransaction` decode), **real skins** (avatars render with placeholder textures — Bedrock
-players show as a solid colour, and on Java as Steve/Alex), movement validation, config files,
-scripting. See [Roadmap](#roadmap).
+Not yet: **real skins** (avatars render with placeholder textures — Bedrock players show as a solid
+colour, and on Java as Steve/Alex), movement validation, config files, scripting.
+See [Roadmap](#roadmap).
 
 ---
 
@@ -190,9 +194,9 @@ and MCPE compression — no client required.
 
 ## Roadmap
 
-- **Bedrock-initiated editing** — decode the PE `InventoryTransaction` so a Bedrock player can
-  break/place too (Java-initiated edits already propagate to both editions). Then a typed PE
-  `UpdateBlock` to replace the current re-send-the-chunk reflection.
+- **Typed PE `UpdateBlock`** — reflect an edit to Bedrock with a single block packet instead of
+  re-sending the whole affected chunk (works, but heavy). Plus a wider-than-4-bit JE chunk palette
+  so many distinct placed block types in one section can't overflow it.
 - **Real skins** — relay a Bedrock player's actual skin (it's already in the Login JWT we parse)
   into the PE `PlayerList`; cross-edition skin fidelity is limited by JE's signed-texture model
   (see below). Avatars render with placeholder textures today.
