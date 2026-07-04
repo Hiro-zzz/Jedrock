@@ -3,8 +3,7 @@ package com.jedrock.gameloop;
 import com.jedrock.utils.JLogger;
 import com.jedrock.utils.TickUtil;
 
-import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -23,19 +22,42 @@ public final class GameLoop implements Runnable {
 
     private static final JLogger LOGGER = JLogger.getLogger(GameLoop.class);
 
-    private final List<Tickable> tickables = new CopyOnWriteArrayList<>();
+    /**
+     * Copy-on-write array of tickables. Registration is rare (startup) and rebuilds the array under
+     * the lock; the 20 TPS loop reads the {@code volatile} reference and iterates by index, so a tick
+     * allocates no iterator. Same visibility guarantees as {@link java.util.concurrent.CopyOnWriteArrayList},
+     * without its per-iteration allocation.
+     */
+    private volatile Tickable[] tickables = new Tickable[0];
     private final AtomicLong currentTick = new AtomicLong(0);
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     private Thread thread;
     private long targetTickNanos = TickUtil.MILLIS_PER_TICK * 1_000_000L;
 
-    public void addTickable(Tickable tickable) {
-        tickables.add(tickable);
+    public synchronized void addTickable(Tickable tickable) {
+        Tickable[] current = tickables;
+        Tickable[] next = Arrays.copyOf(current, current.length + 1);
+        next[current.length] = tickable;
+        tickables = next;
     }
 
-    public void removeTickable(Tickable tickable) {
-        tickables.remove(tickable);
+    public synchronized void removeTickable(Tickable tickable) {
+        Tickable[] current = tickables;
+        int idx = -1;
+        for (int i = 0; i < current.length; i++) {
+            if (current[i] == tickable) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx < 0) {
+            return;
+        }
+        Tickable[] next = new Tickable[current.length - 1];
+        System.arraycopy(current, 0, next, 0, idx);
+        System.arraycopy(current, idx + 1, next, idx, current.length - idx - 1);
+        tickables = next;
     }
 
     public long getCurrentTick() {
@@ -70,10 +92,11 @@ public final class GameLoop implements Runnable {
             if (now >= nextTickTime) {
                 long tick = currentTick.incrementAndGet();
 
-                // Tick everything
-                for (Tickable t : tickables) {
+                // Tick everything. Read the volatile array once and iterate by index — no iterator.
+                Tickable[] snapshot = tickables;
+                for (int i = 0; i < snapshot.length; i++) {
                     try {
-                        t.tick(tick);
+                        snapshot[i].tick(tick);
                     } catch (Throwable ex) {
                         LOGGER.error("Error during tick " + tick, ex);
                     }

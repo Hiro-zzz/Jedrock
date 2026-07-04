@@ -12,7 +12,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
@@ -34,8 +33,6 @@ public final class CoreWorld implements World {
     private final Location spawnLocation;
     private final BlockStorage storage = new BlockStorage();
     private final TerrainGenerator terrain;
-    /** Lazily-remembered surface height per column (x,z) — computed once, then reused. */
-    private final ConcurrentHashMap<Long, Integer> heightCache = new ConcurrentHashMap<>();
     private final Set<Player> players = new CopyOnWriteArraySet<>();
 
     public CoreWorld(String name, Dimension dimension) {
@@ -118,10 +115,14 @@ public final class CoreWorld implements World {
 
     /** Classify a coordinate into a block from the surface height: grass / dirt / stone / air. */
     private int generatedBlock(int x, int y, int z) {
+        return generatedBlock(y, surfaceHeight(x, z));
+    }
+
+    /** Same classification, but with the column's surface height already known (hot-path helper). */
+    private static int generatedBlock(int y, int surface) {
         if (y < 0 || y > 255) {
             return Blocks.AIR;
         }
-        int surface = surfaceHeight(x, z);
         if (y > surface) {
             return Blocks.AIR;
         }
@@ -131,13 +132,50 @@ public final class CoreWorld implements World {
         return y >= surface - DIRT_DEPTH ? Blocks.DIRT : Blocks.STONE;
     }
 
-    /** Surface height at a column, computed once by the generator and then cached. */
-    public int surfaceHeight(int x, int z) {
-        return heightCache.computeIfAbsent(columnKey(x, z), k -> terrain.surfaceHeight(x, z));
+    /**
+     * Fast bulk section read: one storage lookup for the whole section and one terrain-height
+     * evaluation per column (reused across the 16 y-layers), with no per-block map lookup or
+     * boxing. Equivalent to calling {@link #getBlockId} for every cell, overlay sentinel included.
+     */
+    @Override
+    public boolean fillSection(int chunkX, int sectionY, int chunkZ, short[] out) {
+        short[] stored = storage.section(chunkX, sectionY, chunkZ);
+        int baseX = chunkX << 4;
+        int baseY = sectionY << 4;
+        int baseZ = chunkZ << 4;
+        boolean any = false;
+        for (int z = 0; z < 16; z++) {
+            for (int x = 0; x < 16; x++) {
+                // One height eval per column (reused across the 16 y-layers); noise is allocation-free.
+                int surface = terrain.surfaceHeight(baseX + x, baseZ + z);
+                for (int y = 0; y < 16; y++) {
+                    int idx = BlockStorage.index(x, y, z);
+                    int s = stored == null ? Blocks.AIR : (stored[idx] & 0xFFFF);
+                    int id;
+                    if (s == REMOVED) {
+                        id = Blocks.AIR;            // a player broke a (possibly natural) block here
+                    } else if (s != Blocks.AIR) {
+                        id = s;                     // a player placed a block here
+                    } else {
+                        id = generatedBlock(baseY + y, surface); // procedural terrain
+                    }
+                    out[idx] = (short) id;
+                    if (id != Blocks.AIR) {
+                        any = true;
+                    }
+                }
+            }
+        }
+        return any;
     }
 
-    private static long columnKey(int x, int z) {
-        return ((long) x << 32) | (z & 0xFFFFFFFFL);
+    /**
+     * Surface height at a column. Recomputed on demand from the generator — the noise is cheap and
+     * allocation-free, so this stores nothing (no cache to box keys into or leak memory through).
+     * The chunk-serialization hot path calls the generator directly via {@link #fillSection}.
+     */
+    public int surfaceHeight(int x, int z) {
+        return terrain.surfaceHeight(x, z);
     }
 
     @Override

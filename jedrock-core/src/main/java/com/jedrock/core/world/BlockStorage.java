@@ -75,6 +75,17 @@ public final class BlockStorage {
         section[index(x, y, z)] = (short) id;
     }
 
+    /**
+     * Raw backing array for a whole section, or {@code null} if unallocated (all air). Lets a caller
+     * read an entire 16³ section after a <b>single</b> map lookup instead of one per block (which
+     * would box the column key 4096 times). Indexed by {@link #index}; not a copy — treat as
+     * read-only. Reading concurrently with a write is a benign race, same as {@link #getId}.
+     */
+    public short[] section(int chunkX, int sectionY, int chunkZ) {
+        short[][] column = columns.get(columnKey(chunkX, chunkZ));
+        return column == null ? null : column[sectionY];
+    }
+
     /** Number of currently allocated sections — useful for tests and introspection. */
     public int loadedSections() {
         int count = 0;
@@ -87,7 +98,8 @@ public final class BlockStorage {
     }
 
     // Index inside a 16×16×16 section: y is the outer axis, then z, then x.
-    private static int index(int x, int y, int z) {
+    // Package-visible so CoreWorld addresses a raw section() array with the same scheme.
+    static int index(int x, int y, int z) {
         return ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
     }
 

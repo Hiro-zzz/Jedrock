@@ -53,10 +53,19 @@ public final class McpeCompression {
 
     /** Deflate a batch payload, matching the mode detected on the way in. */
     public static byte[] deflate(byte[] input, boolean raw) {
+        return deflate(input, 0, input.length, raw);
+    }
+
+    /**
+     * Deflate {@code length} bytes of {@code input} starting at {@code offset}. The offset form lets
+     * callers compress straight out of a ByteBuf's backing array without first copying the payload
+     * into a fresh {@code byte[]}.
+     */
+    public static byte[] deflate(byte[] input, int offset, int length, boolean raw) {
         Deflater deflater = new Deflater(Deflater.DEFAULT_COMPRESSION, raw);
-        deflater.setInput(input);
+        deflater.setInput(input, offset, length);
         deflater.finish();
-        ByteArrayOutputStream out = new ByteArrayOutputStream(Math.max(64, input.length / 2));
+        ByteArrayOutputStream out = new ByteArrayOutputStream(Math.max(64, length / 2));
         byte[] chunk = new byte[8192];
         while (!deflater.finished()) {
             int n = deflater.deflate(chunk);

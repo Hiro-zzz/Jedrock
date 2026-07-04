@@ -94,7 +94,10 @@ jedrock
 │   ├── handler/         # ProtocolHandler strategy (je/JavaEditionProtocolHandler)
 │   ├── je/packet/       # Java Edition packets (Serverbound* / Clientbound*)
 │   ├── pipeline/        # Netty codecs: VarInt framing, lazy packet decoding
-│   └── pe/              # Bedrock: PeRakNetServer + McpeCompression (0xFE zlib batches)
+│   └── pe/              # Bedrock, split by concern: PeRakNetServer (RakNet transport) +
+│                        #   PeSession (per-session MCPE game layer) delegating to McpeProtocol,
+│                        #   McpeCodec, McpeChunkSerializer, McpeLoginIdentity, McpeSkin,
+│                        #   PeBlockEditDecoder, McpeCompression (0xFE zlib batches)
 ├── jedrock-gameloop     # Dedicated 20 TPS drift-correcting loop + Scheduler (Tickable)
 └── jedrock-core         # The server: PlayerRegistry, CoreWorld/BlockStorage, JedrockServer
 ```
@@ -134,11 +137,15 @@ in one `PlayerRegistry`, so broadcasting a chat line or a tab update is a single
 
 ### The shared world
 `CoreWorld` exposes canonical, protocol-agnostic block ids (`World.getBlockId`, see `Blocks`) over
-a procedural heightmap (`TerrainGenerator` — deterministic value noise, computed on demand and
-cached per column, never stored), with `BlockStorage` — a lazily-allocated flat matrix of `short`
-ids — as the edit overlay. Each protocol maps canonical ids to its own palette when serializing
-chunks (Java global state vs. Bedrock id + meta), so both clients see — and collide against — the
-same terrain.
+a procedural heightmap (`TerrainGenerator` — deterministic value noise, computed on demand, never
+stored), with `BlockStorage` — a lazily-allocated flat matrix of `short` ids — as the edit overlay.
+Each protocol maps canonical ids to its own palette when serializing chunks (Java global state vs.
+Bedrock id + meta), so both clients see — and collide against — the same terrain.
+
+For the chunk hot path, both editions bulk-read a section through `World.fillSection`, which resolves
+terrain + overlay for a whole 16³ section with a single storage lookup and one height evaluation per
+column (no per-block map lookup or boxing). Serializers reuse per-thread scratch buffers, so encoding
+a chunk allocates nothing per section.
 
 ---
 
@@ -150,6 +157,7 @@ same terrain.
 | `ProtocolHandler` | network/handler | Per-edition inbound state machine; keeps `JedrockConnection` thin |
 | `PlayerConnection` | api | Protocol-agnostic handle the core talks to (message, tab, close) |
 | `World` / `BlockStorage` | api / core | Flat block matrix; canonical ids; the "illusion" |
+| `World.fillSection` | api / core | Bulk 16³ section read for zero-allocation chunk serialization |
 | `PlayerRegistry` | core | Thread-safe roster indexed by uuid / name / connection |
 | `EventBus` | api | Zero-reflection listener registration |
 | `GameLoop` / `Scheduler` | gameloop | 20 TPS heartbeat, run-later / repeating tasks |

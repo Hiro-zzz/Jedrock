@@ -228,15 +228,20 @@ public class JedrockServer implements Server, ConnectionListener {
 
     @Override
     public void onMove(PlayerConnection connection, double x, double y, double z, float yaw, float pitch) {
-        playerRegistry.getByConnection(connection).ifPresent(player -> {
-            player.setLocation(new Location(player.getWorld(), x, y, z, yaw, pitch));
-            // Relay at the sender's own rate; both clients interpolate between updates.
-            for (Player other : playerRegistry.all()) {
-                if (other != player) {
-                    other.getConnection().moveAvatar(player.getEntityId(), x, y, z, yaw, pitch);
-                }
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player == null) {
+            return;
+        }
+        player.setLocation(new Location(player.getWorld(), x, y, z, yaw, pitch));
+        // Relay at the sender's own rate; both clients interpolate between updates. Iterate the live
+        // roster view directly and skip the Optional/capturing lambda, so a move packet allocates
+        // only the immutable Location snapshot (kept immutable so getLocation stays an atomic swap).
+        long entityId = player.getEntityId();
+        for (CorePlayer other : playerRegistry.online()) {
+            if (other != player) {
+                other.getConnection().moveAvatar(entityId, x, y, z, yaw, pitch);
             }
-        });
+        }
     }
 
     @Override
@@ -251,11 +256,13 @@ public class JedrockServer implements Server, ConnectionListener {
 
     @Override
     public void onChat(PlayerConnection connection, String message) {
-        playerRegistry.getByConnection(connection).ifPresent(sender -> {
-            String line = "<" + sender.getName() + "> " + message;
-            LOGGER.info("[chat] " + line);
-            broadcast(line, null); // relay to everyone, including the sender
-        });
+        CorePlayer sender = playerRegistry.getByConnectionOrNull(connection);
+        if (sender == null) {
+            return;
+        }
+        String line = "<" + sender.getName() + "> " + message;
+        LOGGER.info("[chat] " + line);
+        broadcast(line, null); // relay to everyone, including the sender
     }
 
     /**

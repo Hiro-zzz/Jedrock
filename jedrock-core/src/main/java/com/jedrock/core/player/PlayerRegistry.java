@@ -43,6 +43,24 @@ public final class PlayerRegistry {
     }
 
     /**
+     * Hot-path variant of {@link #getByConnection}: returns the player or {@code null}, allocating
+     * no {@link Optional}. Used on per-packet paths (movement) where the Optional is pure garbage.
+     */
+    public CorePlayer getByConnectionOrNull(PlayerConnection connection) {
+        UUID uuid = byConnection.get(connection);
+        return uuid == null ? null : byId.get(uuid);
+    }
+
+    /**
+     * Live view of the online players for internal hot-path iteration. Unlike {@link #all()} it
+     * returns the map's cached values view directly, so calling it per packet allocates no
+     * unmodifiable wrapper. Read-only by convention — do not mutate.
+     */
+    public Collection<CorePlayer> online() {
+        return byId.values();
+    }
+
+    /**
      * Remove the player associated with a connection.
      *
      * @return the removed player, or {@code null} if the connection never registered

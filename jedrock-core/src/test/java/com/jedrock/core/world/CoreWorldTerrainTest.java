@@ -53,6 +53,33 @@ class CoreWorldTerrainTest {
     }
 
     @Test
+    void fillSectionMatchesScalarGetBlockId() {
+        // Include edits so the overlay paths (placed block + broken-natural sentinel) are exercised.
+        int surface = world.surfaceHeight(1, 1);
+        world.setBlockId(1, surface + 20, 1, Blocks.STONE); // floating placed block (upper section)
+        world.setBlockId(2, surface, 2, Blocks.AIR);        // break a natural block (REMOVED sentinel)
+
+        short[] out = new short[4096];
+        // Sections that straddle the surface (3, 4) plus one holding only an edit (higher up).
+        for (int sectionY : new int[]{3, 4, (surface + 20) >> 4}) {
+            boolean any = world.fillSection(0, sectionY, 0, out);
+
+            boolean expectedAny = false;
+            for (int y = 0; y < 16; y++) {
+                for (int z = 0; z < 16; z++) {
+                    for (int x = 0; x < 16; x++) {
+                        int expected = world.getBlockId(x, (sectionY << 4) | y, z);
+                        assertEquals(expected, out[(y << 8) | (z << 4) | x] & 0xFFFF,
+                                "cell " + x + "," + ((sectionY << 4) | y) + "," + z);
+                        if (expected != Blocks.AIR) expectedAny = true;
+                    }
+                }
+            }
+            assertEquals(expectedAny, any, "non-air flag for section " + sectionY);
+        }
+    }
+
+    @Test
     void breakingNaturalTerrainSticks() {
         int surface = world.surfaceHeight(2, 2);
         assertEquals(Blocks.GRASS, world.getBlockId(2, surface, 2), "natural grass surface");
