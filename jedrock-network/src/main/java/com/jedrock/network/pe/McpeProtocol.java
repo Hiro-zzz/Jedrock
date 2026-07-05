@@ -27,7 +27,10 @@ final class McpeProtocol {
     static final int ID_INVENTORY_TRANSACTION = 0x1E;
     static final int ID_USE_ITEM = 0x23;          // Win10 1.1.5 carries block placement here
     static final int ID_PLAYER_ACTION = 0x24;
-    static final int ID_INVENTORY_CONTENT = 0x31; // creative hotbar init
+    // MCPE 1.1 (protocol 113) uses ContainerSetContent (0x34) for inventory/creative content — NOT
+    // the InventoryContent (0x31) of 1.2+. Its layout is: windowId, targetEid (entity id), slot count,
+    // slots, then a hotbar-link count. Verified against PocketMine-MP at CURRENT_PROTOCOL = 113.
+    static final int ID_CONTAINER_SET_CONTENT = 0x34;
     static final int ID_ADVENTURE_SETTINGS = 0x37;
     static final int ID_FULL_CHUNK_DATA = 0x3A;
     static final int ID_PLAYER_LIST = 0x3F;
@@ -45,6 +48,13 @@ final class McpeProtocol {
     // --- PlayerList actions ---
     static final int PLAYER_LIST_ADD = 0;
     static final int PLAYER_LIST_REMOVE = 1;
+
+    // --- Inventory window ids (InventoryContent) ---
+    static final int WINDOW_ID_PLAYER = 0;   // the player's own inventory (fills the hotbar)
+    static final int WINDOW_ID_CREATIVE = 121; // the creative menu's item palette
+
+    // --- AdventureSettings flags (protocol 113) ---
+    static final int ADVENTURE_ALLOW_FLIGHT = 0x40;
 
     // --- PlayerAction action ids ---
     // In creative the client reports a break with CONTINUE_BREAK carrying the block position.

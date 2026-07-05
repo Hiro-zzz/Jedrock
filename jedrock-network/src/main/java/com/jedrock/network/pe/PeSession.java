@@ -22,33 +22,7 @@ import java.util.Arrays;
 import java.util.UUID;
 import java.util.function.Consumer;
 
-import static com.jedrock.network.pe.McpeProtocol.EYE_HEIGHT;
-import static com.jedrock.network.pe.McpeProtocol.GAME_PACKET_WRAPPER;
-import static com.jedrock.network.pe.McpeProtocol.ID_ADD_PLAYER;
-import static com.jedrock.network.pe.McpeProtocol.ID_ADVENTURE_SETTINGS;
-import static com.jedrock.network.pe.McpeProtocol.ID_CHUNK_RADIUS_UPDATED;
-import static com.jedrock.network.pe.McpeProtocol.ID_FULL_CHUNK_DATA;
-import static com.jedrock.network.pe.McpeProtocol.ID_INVENTORY_CONTENT;
-import static com.jedrock.network.pe.McpeProtocol.ID_INVENTORY_TRANSACTION;
-import static com.jedrock.network.pe.McpeProtocol.ID_LOGIN;
-import static com.jedrock.network.pe.McpeProtocol.ID_MOVE_PLAYER;
-import static com.jedrock.network.pe.McpeProtocol.ID_PLAYER_ACTION;
-import static com.jedrock.network.pe.McpeProtocol.ID_PLAYER_LIST;
-import static com.jedrock.network.pe.McpeProtocol.ID_PLAY_STATUS;
-import static com.jedrock.network.pe.McpeProtocol.ID_REMOVE_ENTITY;
-import static com.jedrock.network.pe.McpeProtocol.ID_REQUEST_CHUNK_RADIUS;
-import static com.jedrock.network.pe.McpeProtocol.ID_RESOURCE_PACKS_INFO;
-import static com.jedrock.network.pe.McpeProtocol.ID_RESOURCE_PACK_RESPONSE;
-import static com.jedrock.network.pe.McpeProtocol.ID_START_GAME;
-import static com.jedrock.network.pe.McpeProtocol.ID_TEXT;
-import static com.jedrock.network.pe.McpeProtocol.ID_UPDATE_ATTRIBUTES;
-import static com.jedrock.network.pe.McpeProtocol.ID_USE_ITEM;
-import static com.jedrock.network.pe.McpeProtocol.PLAYER_LIST_ADD;
-import static com.jedrock.network.pe.McpeProtocol.PLAYER_LIST_REMOVE;
-import static com.jedrock.network.pe.McpeProtocol.PLAY_STATUS_LOGIN_SUCCESS;
-import static com.jedrock.network.pe.McpeProtocol.PLAY_STATUS_PLAYER_SPAWN;
-import static com.jedrock.network.pe.McpeProtocol.TEXT_TYPE_CHAT;
-import static com.jedrock.network.pe.McpeProtocol.TEXT_TYPE_RAW;
+import static com.jedrock.network.pe.McpeProtocol.*;
 
 /**
  * One Bedrock (PE 1.1.5) player session: the RakNet session callbacks, the MCPE game-layer state
@@ -77,6 +51,8 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     private volatile String username;
     /** Compression mode observed on inbound batches; reused for outbound (chat etc.). */
     private volatile boolean rawDeflate = false;
+    /** The creative palette is sent lazily on the first post-spawn packet; this guards the one-shot. */
+    private volatile boolean creativeSent = false;
 
     /** Chunk streaming state; created once the client's requested radius is known. */
     private ChunkView chunkView;
@@ -364,9 +340,22 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             if (chunkView != null) {
                 chunkView.recenter(((int) Math.floor(x)) >> 4, ((int) Math.floor(z)) >> 4, chunkSink);
             }
+            // The client is now fully in-world (it is reporting its own movement), so it will accept
+            // the creative palette that it dropped at spawn time.
+            maybeSendCreative();
         } catch (RuntimeException e) {
             LOGGER.debug(() -> "[PE] could not parse inbound MovePlayer: " + e);
         }
+    }
+
+    /** Send the creative palette exactly once, the first time the client proves it is in-world. */
+    private void maybeSendCreative() {
+        if (creativeSent || !loggedIn) {
+            return;
+        }
+        creativeSent = true;
+        LOGGER.info("[PE] sending creative inventory (" + CREATIVE.length + " items) to " + username);
+        sendCreativeContent();
     }
 
     // ===== Join sequence =====
@@ -450,17 +439,21 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
                 },
                 b -> {
                     ByteBufUtils.writeVarInt(b, ID_ADVENTURE_SETTINGS);
-                    ByteBufUtils.writeVarInt(b, 0x08 | 0x40); // flags: allow flight | world builder
+                    ByteBufUtils.writeVarInt(b, ADVENTURE_ALLOW_FLIGHT); // let the client toggle flight
                     ByteBufUtils.writeVarInt(b, 2);           // command permission (OP)
                     ByteBufUtils.writeVarInt(b, 0);           // action permissions
                     ByteBufUtils.writeVarInt(b, 2);           // permission level (OP)
                     ByteBufUtils.writeVarInt(b, 0);           // custom extension flags
-                    ByteBufUtils.writeVarLong(b, 1L);         // player entity unique id
+                    b.writeLongLE(1L);                        // player entity unique id — an LE long,
+                                                              // NOT a varint (a short write here drops
+                                                              // the whole packet, so flight never applied)
                 });
 
-        // Movement-speed + hotbar fixes before streaming chunks.
+        // Movement-speed attribute + starter hotbar + creative palette before streaming chunks
+        // (PocketMine sends inventory + creative contents during the spawn sequence).
         sendAttributes();
         sendInventory();
+        sendCreativeContent();
 
         // Stream the initial window around spawn
         Location spawn = world.getSpawnLocation();
@@ -472,6 +465,8 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             ByteBufUtils.writeVarInt(b, ID_PLAY_STATUS);
             ByteBufUtils.writeIntBE(b, PLAY_STATUS_PLAYER_SPAWN);
         });
+        // Re-sent on the first inbound MovePlayer too (see maybeSendCreative) as a belt-and-suspenders
+        // in case the client wasn't ready during the pre-spawn burst.
     }
 
     /** Send the standard movement-speed attribute (0.1) to stop the PE client's runaway acceleration. */
@@ -497,15 +492,81 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             Blocks.PLANKS, Blocks.SAND, Blocks.LOG, Blocks.GLASS,
     };
 
+    /**
+     * The creative menu's block palette: the full set of standard legacy MCPE 1.1.5 blocks (base
+     * variant, meta 0 — the world stores only a block id, so per-meta variants like wool colours or
+     * stone types can't be rendered distinctly yet). Any id in 0..255 places and serializes fine
+     * (see {@link Blocks#isKnown}); the client sorts them into its own tabs. Liquids, air and purely
+     * technical / multi-block ids (doors, beds, signs, wire, pistons heads, portals, fire) are left
+     * out because they don't render as a static full block without metadata.
+     */
+    private static final int[] CREATIVE = {
+            // Stone & manufactured building blocks
+            1, 4, 48, 98, 45, 24, 155, 168, 169, 172, 173,
+            // Wood
+            5, 17, 162, 47,
+            // Dirt / natural ground
+            2, 3, 60, 110, 12, 13, 82, 87, 88, 121,
+            // Ice / snow / desert
+            79, 174, 80, 78, 81,
+            // Foliage
+            18, 161, 106, 111,
+            // Ores
+            14, 15, 16, 21, 56, 73, 129, 153,
+            // Metal / mineral blocks
+            41, 42, 57, 133, 22, 152, 89, 49, 19, 30,
+            // Glass & panes
+            20, 102, 101,
+            // Wool / clay / decoration
+            35, 171, 159,
+            // Utility & interactive blocks
+            54, 58, 61, 84, 25, 46, 116, 145, 130, 138, 23, 158, 137, 165, 170, 52,
+            // Plants that are full blocks
+            86, 91, 103,
+            // Nether & end
+            112,
+            // Stairs
+            53, 67, 108, 109, 114, 128, 156, 134, 135, 136, 163, 164,
+            // Slabs / walls / fences
+            44, 126, 139, 85, 107,
+            // Redstone-ish blocks
+            29, 33, 123,
+    };
+
+    /**
+     * The player's own entity id. StartGame assigns it 1, and the ContainerSetContent packets are
+     * addressed to it (targetEid) exactly as PocketMine does for protocol 113.
+     */
+    private static final long SELF_ENTITY_ID = 1L;
+
     /** Populate the player inventory: the first slots (hotbar) with placeable blocks, the rest empty. */
     private void sendInventory() {
+        sendContainerContent(WINDOW_ID_PLAYER, 36, slot -> slot < HOTBAR.length ? HOTBAR[slot] : Blocks.AIR, 64);
+    }
+
+    /**
+     * Fill the creative menu (window {@link McpeProtocol#WINDOW_ID_CREATIVE}). Protocol 113 carries
+     * the creative palette in a ContainerSetContent addressed to the creative window — an empty menu
+     * just means it was never sent (or sent as the wrong 1.2+ InventoryContent packet).
+     */
+    private void sendCreativeContent() {
+        sendContainerContent(WINDOW_ID_CREATIVE, CREATIVE.length, slot -> CREATIVE[slot], 1);
+    }
+
+    /**
+     * Send a ContainerSetContent (0x34) for protocol 113: windowId, targetEid, slot count, the slots
+     * themselves, then a hotbar-link count (0 — we don't remap the hotbar). Verified against PMMP.
+     */
+    private void sendContainerContent(int windowId, int slotCount, java.util.function.IntUnaryOperator slotId, int count) {
         sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_INVENTORY_CONTENT);
-            ByteBufUtils.writeVarInt(b, 0);    // container id 0 = player inventory
-            ByteBufUtils.writeVarInt(b, 36);   // 36 slots (inventory + hotbar)
-            for (int slot = 0; slot < 36; slot++) {
-                McpeCodec.writeSlot(b, slot < HOTBAR.length ? HOTBAR[slot] : Blocks.AIR, 64);
+            ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_CONTENT);
+            ByteBufUtils.writeVarInt(b, windowId);                 // window id (unsigned varint)
+            ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);    // targetEid (zigzag varlong)
+            ByteBufUtils.writeVarInt(b, slotCount);                // slot count
+            for (int slot = 0; slot < slotCount; slot++) {
+                McpeCodec.writeSlot(b, slotId.applyAsInt(slot), count);
             }
+            ByteBufUtils.writeVarInt(b, 0);                        // hotbar-link count (none)
         });
     }
 

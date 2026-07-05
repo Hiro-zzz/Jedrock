@@ -6,6 +6,18 @@ unstable — anything may change between entries.
 
 ## [Unreleased]
 
+### Added
+
+- **Bedrock creative inventory.** The PE creative menu is populated with the full set of standard
+  legacy MCPE 1.1.5 blocks (base variants — the world stores a single block id, so per-meta variants
+  aren't distinct yet). The fix was using the protocol-113 `ContainerSetContent` packet (0x34, with
+  its `targetEid` and trailing hotbar-link count) rather than the 1.2+ `InventoryContent` (0x31);
+  the item serialization itself already matched. Verified against PocketMine-MP at
+  `CURRENT_PROTOCOL = 113`.
+- **Bedrock flight.** Creative players can now fly (double-tap jump). `AdventureSettings`'
+  `entityUniqueId` is written as a little-endian long, not a VarInt — the short write truncated the
+  packet, so its `ALLOW_FLIGHT` flag never reached the client.
+
 ### Changed
 
 - **PE network layer split into functional parts.** The ~1000-line `PeRakNetServer` is now just the
