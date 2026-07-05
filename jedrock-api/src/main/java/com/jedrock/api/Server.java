@@ -66,4 +66,9 @@ public interface Server {
      * Current server tick (monotonic).
      */
     long getCurrentTick();
+
+    /**
+     * A cheap snapshot of live server health (TPS, MSPT, memory, players, uptime).
+     */
+    ServerStatus getStatus();
 }

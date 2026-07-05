@@ -41,11 +41,17 @@ public interface JLogger {
 
         @Override
         public void debug(String message) {
-            // Disabled by default for performance
+            if (Debug.enabled(name)) {
+                System.out.printf("[%s] [DEBUG] %s%n", name, message);
+            }
         }
 
         @Override
         public void debug(Supplier<String> messageSupplier) {
+            // Off by default: the supplier is never invoked, so the call is effectively free.
+            if (Debug.enabled(name)) {
+                System.out.printf("[%s] [DEBUG] %s%n", name, messageSupplier.get());
+            }
         }
 
         @Override

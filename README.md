@@ -85,6 +85,27 @@ Concretely, the codebase holds to three rules: **lightweight** (few deps, few al
 
 ---
 
+## Performance
+
+The illusionist design spends almost nothing per player. A quick smoke test — **101 players**
+(100 bots) on one default world, read straight off the server's own `status` command:
+
+```
+TPS 20.0 | MSPT 0.04 (peak 4.01) | players 101 | mem 78/4004 MB | up 1m39s
+```
+
+- **TPS 20.0** — the loop never falls behind.
+- **~0.04 ms per tick** — the game loop does almost no per-player work: movement and edits are
+  *relayed* (on the network threads), not simulated, so the tick thread stays essentially idle.
+- **~78 MB heap for 101 connections** — the world is a lazily-allocated id matrix, not a live
+  simulation, and inbound bytes stay raw until something needs a value.
+
+Numbers are from bots (lighter than humans exploring fresh terrain), so treat them as a floor, not a
+benchmark — but the shape is the point: **"system requirements" is, generously, a formality.** Watch
+it live with the `status` command or `-Djedrock.status.seconds=N` (see [Console & diagnostics](#console--diagnostics)).
+
+---
+
 ## Module structure
 
 ```
@@ -162,6 +183,8 @@ a chunk allocates nothing per section.
 | `PlayerRegistry` | core | Thread-safe roster indexed by uuid / name / connection |
 | `EventBus` | api | Zero-reflection listener registration |
 | `GameLoop` / `Scheduler` | gameloop | 20 TPS heartbeat, run-later / repeating tasks |
+| `TickMetrics` / `ServerStatus` | gameloop / api | Live TPS, MSPT (+ peak), uptime and memory — via `Server.getStatus()` |
+| `Debug` | utils | Optional category-scoped verbose logging (off by default, zero cost) |
 
 ```java
 // Lazy: if you never materialize, the expensive payload is never parsed.
@@ -191,6 +214,23 @@ which binds:
 
 The RakNet protocol version defaults to `8` (MCPE 1.1.5) and can be overridden with
 `-Djedrock.pe.raknetProtocolVersion=N` for other client builds.
+
+### Console & diagnostics
+
+Once running, the server reads commands on stdin (headless-safe — it runs fine with stdin closed):
+
+| Command | Effect |
+|---------|--------|
+| `status` / `tps` | one-line health: TPS, MSPT (+ all-time peak), players, memory, uptime |
+| `players` | list online players and their edition |
+| `debug [all\|off\|<tags>]` | toggle extended debug logging; scope by logger-name tags, e.g. `debug pe,chunk` |
+| `gc` | request a GC, then print status |
+| `stop` | graceful shutdown |
+
+Extended debug is **off by default** — the `LOGGER.debug(...)` calls never invoke their message
+supplier, so they cost nothing. Turn it on at startup with `-Djedrock.debug=all` (or scoped, e.g.
+`-Djedrock.debug=pe,chunk`), or at runtime with the `debug` command. A periodic status line can be
+logged with `-Djedrock.status.seconds=30`.
 
 > **Testing a Bedrock client locally (Windows 10 Edition):** UWP apps cannot reach `localhost` by
 > default. Add a loopback exemption once:

@@ -2,6 +2,7 @@ package com.jedrock.core;
 
 import com.jedrock.api.Jedrock;
 import com.jedrock.api.Server;
+import com.jedrock.api.ServerStatus;
 import com.jedrock.api.event.EventBus;
 import com.jedrock.api.event.player.PlayerJoinEvent;
 import com.jedrock.api.event.player.PlayerQuitEvent;
@@ -20,6 +21,7 @@ import com.jedrock.network.ConnectionListener;
 import com.jedrock.network.NetworkServer;
 import com.jedrock.network.NettyNetworkServer;
 import com.jedrock.utils.JLogger;
+import com.jedrock.utils.TickUtil;
 
 import java.net.InetSocketAddress;
 import java.util.Collection;
@@ -111,7 +113,19 @@ public class JedrockServer implements Server, ConnectionListener {
         }
 
         gameLoop.start();
-        LOGGER.info("Jedrock server started successfully.");
+
+        // Interactive console (status / players / debug / stop). Daemon thread; headless-safe.
+        new ConsoleCommands(this).start();
+
+        // Optional periodic status line, e.g. -Djedrock.status.seconds=30 (0 = off).
+        long statusSeconds = Long.getLong("jedrock.status.seconds", 0L);
+        if (statusSeconds > 0) {
+            long periodTicks = statusSeconds * TickUtil.TPS;
+            scheduler.runTaskTimer(() -> LOGGER.info(getStatus().summary()), periodTicks, periodTicks);
+            LOGGER.info("Periodic status logging enabled (every " + statusSeconds + "s)");
+        }
+
+        LOGGER.info("Jedrock server started successfully. Type 'help' for console commands.");
     }
 
     @Override
@@ -281,6 +295,16 @@ public class JedrockServer implements Server, ConnectionListener {
     @Override
     public long getCurrentTick() {
         return tickCounter.get();
+    }
+
+    @Override
+    public ServerStatus getStatus() {
+        var metrics = gameLoop.metrics();
+        Runtime runtime = Runtime.getRuntime();
+        long usedMemory = runtime.totalMemory() - runtime.freeMemory();
+        return new ServerStatus(
+                metrics.tps(), metrics.mspt(), metrics.peakMspt(), tickCounter.get(), metrics.uptimeMillis(),
+                playerRegistry.size(), usedMemory, runtime.maxMemory());
     }
 
     // Accessors for modules that need to reach internal components

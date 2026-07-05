@@ -17,6 +17,12 @@ unstable — anything may change between entries.
 - **Bedrock flight.** Creative players can now fly (double-tap jump). `AdventureSettings`'
   `entityUniqueId` is written as a little-endian long, not a VarInt — the short write truncated the
   packet, so its `ALLOW_FLIGHT` flag never reached the client.
+- **Server status, TPS monitoring and an optional extended-debug system.** The game loop tracks live
+  TPS and mean / peak MSPT (`TickMetrics`), surfaced with uptime, memory and player count via
+  `Server.getStatus()`. A daemon stdin console exposes `status`/`tps`, `players`, `debug`, `gc` and
+  `stop`. Extended debug logging stays off by default (the message supplier is never invoked, so it
+  costs nothing) and can be enabled globally or scoped to logger-name tags — via `-Djedrock.debug=...`
+  or the `debug` command. `-Djedrock.status.seconds=N` logs a periodic status line.
 
 ### Changed
 

@@ -31,6 +31,7 @@ public final class GameLoop implements Runnable {
     private volatile Tickable[] tickables = new Tickable[0];
     private final AtomicLong currentTick = new AtomicLong(0);
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final TickMetrics metrics = new TickMetrics();
 
     private Thread thread;
     private long targetTickNanos = TickUtil.MILLIS_PER_TICK * 1_000_000L;
@@ -64,6 +65,11 @@ public final class GameLoop implements Runnable {
         return currentTick.get();
     }
 
+    /** Live TPS / MSPT / uptime metrics for status reporting. */
+    public TickMetrics metrics() {
+        return metrics;
+    }
+
     public void start() {
         if (running.compareAndSet(false, true)) {
             thread = new Thread(this, "Jedrock-GameLoop");
@@ -93,6 +99,7 @@ public final class GameLoop implements Runnable {
                 long tick = currentTick.incrementAndGet();
 
                 // Tick everything. Read the volatile array once and iterate by index — no iterator.
+                long tickStart = System.nanoTime();
                 Tickable[] snapshot = tickables;
                 for (int i = 0; i < snapshot.length; i++) {
                     try {
@@ -101,6 +108,7 @@ public final class GameLoop implements Runnable {
                         LOGGER.error("Error during tick " + tick, ex);
                     }
                 }
+                metrics.record(tickStart, System.nanoTime() - tickStart);
 
                 // Schedule next tick, attempting to correct drift
                 nextTickTime += targetTickNanos;
