@@ -40,16 +40,6 @@ public final class ByteBufUtils {
         buf.writeByte(value);
     }
 
-    public static int varIntSize(int value) {
-        int size = 0;
-        while (true) {
-            size++;
-            if ((value & ~0x7F) == 0) break;
-            value >>>= 7;
-        }
-        return size;
-    }
-
     // ========== Strings ==========
 
     public static String readString(ByteBuf buf) {
@@ -139,15 +129,5 @@ public final class ByteBufUtils {
     /** Writes a rotation in degrees as the single-byte JE angle unit (256 steps per turn). */
     public static void writeAngle(ByteBuf buf, float degrees) {
         buf.writeByte((int) (degrees * 256.0f / 360.0f));
-    }
-
-    // ========== Position (JE packed long) ==========
-
-    public static long readPosition(ByteBuf buf) {
-        return buf.readLong();
-    }
-
-    public static void writePosition(ByteBuf buf, long position) {
-        buf.writeLong(position);
     }
 }

@@ -23,6 +23,7 @@ final class McpeProtocol {
     static final int ID_ADD_PLAYER = 0x0C;
     static final int ID_REMOVE_ENTITY = 0x0E;
     static final int ID_MOVE_PLAYER = 0x13;
+    static final int ID_UPDATE_BLOCK = 0x16;
     static final int ID_UPDATE_ATTRIBUTES = 0x1D; // movement-speed fix
     static final int ID_INVENTORY_TRANSACTION = 0x1E;
     static final int ID_USE_ITEM = 0x23;          // Win10 1.1.5 carries block placement here
@@ -49,12 +50,15 @@ final class McpeProtocol {
     static final int PLAYER_LIST_ADD = 0;
     static final int PLAYER_LIST_REMOVE = 1;
 
-    // --- Inventory window ids (InventoryContent) ---
-    static final int WINDOW_ID_PLAYER = 0;   // the player's own inventory (fills the hotbar)
+    // --- Inventory window ids (ContainerSetContent targets) ---
+    static final int WINDOW_ID_PLAYER = 0;     // the player's own inventory
     static final int WINDOW_ID_CREATIVE = 121; // the creative menu's item palette
 
     // --- AdventureSettings flags (protocol 113) ---
     static final int ADVENTURE_ALLOW_FLIGHT = 0x40;
+
+    /** UpdateBlock flags: neighbours | network — tells the client to apply and re-render the change. */
+    static final int UPDATE_BLOCK_FLAG_ALL = 0b0011;
 
     // --- PlayerAction action ids ---
     // In creative the client reports a break with CONTINUE_BREAK carrying the block position.

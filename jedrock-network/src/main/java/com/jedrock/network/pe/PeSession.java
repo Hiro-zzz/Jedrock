@@ -51,8 +51,6 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     private volatile String username;
     /** Compression mode observed on inbound batches; reused for outbound (chat etc.). */
     private volatile boolean rawDeflate = false;
-    /** The creative palette is sent lazily on the first post-spawn packet; this guards the one-shot. */
-    private volatile boolean creativeSent = false;
 
     /** Chunk streaming state; created once the client's requested radius is known. */
     private ChunkView chunkView;
@@ -167,12 +165,18 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
 
     @Override
     public void sendBlockChange(int x, int y, int z, int blockId) {
-        // Until a typed UpdateBlock is verified for protocol 113, reflect edits by re-sending the
-        // affected chunk (the world already holds the new block). Heavier than a single block
-        // packet, but reuses the proven chunk path. Only if the client has that chunk.
-        if (chunkView != null) {
-            sendChunk(x >> 4, z >> 4);
-        }
+        // Typed UpdateBlock (0x16): one block instead of re-sending the whole affected chunk. The
+        // client applies it if it has the chunk loaded and ignores it otherwise. Block position is
+        // x/z zigzag-varint and y unsigned-varint (same layout the inbound edit decoder reads); the
+        // block is a legacy id with meta 0, and the flags request a neighbour-aware re-render.
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_UPDATE_BLOCK);
+            ByteBufUtils.writeSignedVarInt(b, x);
+            ByteBufUtils.writeVarInt(b, y);
+            ByteBufUtils.writeSignedVarInt(b, z);
+            ByteBufUtils.writeVarInt(b, blockId & 0xFF);            // legacy block id
+            ByteBufUtils.writeVarInt(b, UPDATE_BLOCK_FLAG_ALL << 4); // (flags << 4) | meta(0)
+        });
     }
 
     @Override
@@ -340,22 +344,9 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             if (chunkView != null) {
                 chunkView.recenter(((int) Math.floor(x)) >> 4, ((int) Math.floor(z)) >> 4, chunkSink);
             }
-            // The client is now fully in-world (it is reporting its own movement), so it will accept
-            // the creative palette that it dropped at spawn time.
-            maybeSendCreative();
         } catch (RuntimeException e) {
             LOGGER.debug(() -> "[PE] could not parse inbound MovePlayer: " + e);
         }
-    }
-
-    /** Send the creative palette exactly once, the first time the client proves it is in-world. */
-    private void maybeSendCreative() {
-        if (creativeSent || !loggedIn) {
-            return;
-        }
-        creativeSent = true;
-        LOGGER.info("[PE] sending creative inventory (" + CREATIVE.length + " items) to " + username);
-        sendCreativeContent();
     }
 
     // ===== Join sequence =====
@@ -449,11 +440,9 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
                                                               // the whole packet, so flight never applied)
                 });
 
-        // Movement-speed attribute + starter hotbar + creative palette before streaming chunks
-        // (PocketMine sends inventory + creative contents during the spawn sequence).
+        // Movement-speed attribute + starter hotbar before streaming chunks.
         sendAttributes();
         sendInventory();
-        sendCreativeContent();
 
         // Stream the initial window around spawn
         Location spawn = world.getSpawnLocation();
@@ -465,8 +454,10 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             ByteBufUtils.writeVarInt(b, ID_PLAY_STATUS);
             ByteBufUtils.writeIntBE(b, PLAY_STATUS_PLAYER_SPAWN);
         });
-        // Re-sent on the first inbound MovePlayer too (see maybeSendCreative) as a belt-and-suspenders
-        // in case the client wasn't ready during the pre-spawn burst.
+
+        // Creative palette, once, right after the spawn status — the point PocketMine sends it, when
+        // the client's inventory UI is up and will accept it.
+        sendCreativeContent();
     }
 
     /** Send the standard movement-speed attribute (0.1) to stop the PE client's runaway acceleration. */

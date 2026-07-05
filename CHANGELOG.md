@@ -20,6 +20,10 @@ unstable — anything may change between entries.
 
 ### Changed
 
+- **Typed PE `UpdateBlock`.** A block edit is now reflected to Bedrock as a single `UpdateBlock`
+  (0x16) packet — a few bytes — instead of re-serializing and re-sending the whole affected chunk
+  (~10 KB). Block position layout matches the inbound edit decoder; verified against PocketMine-MP
+  at protocol 113. (Closes a roadmap item.)
 - **PE network layer split into functional parts.** The ~1000-line `PeRakNetServer` is now just the
   RakNet transport plus the server-level listener (ping / accept / session creation). The per-session
   MCPE game layer moved to `PeSession`, which delegates wire concerns to focused units:
@@ -53,6 +57,12 @@ unstable — anything may change between entries.
 
 - **PE server-list ping advertised the wrong port.** `onQuery` used the querying client's port for
   the advertised IPv4/IPv6 port fields instead of the server's own bind port.
+
+### Removed
+
+- Creative palette's first-`MovePlayer` fallback send (and its one-shot guard): the creative content
+  is now sent once, right after the spawn `PlayStatus`, matching PocketMine.
+- Unused `ByteBufUtils` helpers (`varIntSize`, `readPosition`, `writePosition`).
 
 ## 0.1.0 — baseline (pre-changelog)
 
