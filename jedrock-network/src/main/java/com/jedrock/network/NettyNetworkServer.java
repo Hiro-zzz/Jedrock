@@ -29,8 +29,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * - All inbound traffic becomes LazyPacket (id + raw payload)
  * - Framed correctly for the protocol
- * - JE uses full TCP + VarInt pipeline (implemented)
- * - PE will be RakNet over UDP (stub prepared)
+ * - JE uses the full TCP + VarInt pipeline here
+ * - PE (RakNet over UDP) is delegated to {@link PeRakNetServer}
  */
 
 public class NettyNetworkServer implements NetworkServer {

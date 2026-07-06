@@ -48,16 +48,5 @@ public final class Blocks {
         return id >= 0 && id <= MAX_LEGACY_ID;
     }
 
-    /**
-     * Guarantees a safe fallback block state if the ID violates protocol bounds,
-     * protecting the pipeline from network desynchronization.
-     */
-    public static int getSafeId(int id) {
-        if (!isKnown(id)) {
-            return STONE; // Fallback to safe solid stone instead of breaking the loop
-        }
-        return id;
-    }
-
     private Blocks() {}
 }

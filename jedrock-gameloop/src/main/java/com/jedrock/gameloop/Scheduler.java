@@ -20,7 +20,10 @@ public final class Scheduler implements Tickable {
     private record ScheduledTask(long executeTick, Runnable task, boolean repeating, long periodTicks) {}
 
     private final ConcurrentLinkedQueue<ScheduledTask> tasks = new ConcurrentLinkedQueue<>();
-    private long lastTick = 0;
+    // Written by the loop thread in tick(); read by any thread that schedules a task, so publish it
+    // volatile — otherwise a runTask* call off the loop thread could compute its executeTick from a
+    // stale tick and fire a tick early or late.
+    private volatile long lastTick = 0;
 
     @Override
     public void tick(long currentTick) {
