@@ -19,6 +19,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 
 import java.util.Arrays;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -45,10 +46,14 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     private final ConnectionListener listener;
     private final ProtocolVersion protocol;
     private final World world;
+    /** Shared uuid → skin map (owned by the PE server); lets us render other PE players' real skins. */
+    private final Map<UUID, McpeSkin.Skin> skins;
 
     private volatile boolean loggedIn = false;
     private volatile UUID uuid;
     private volatile String username;
+    /** This player's own skin (real one from the Login JWT, or synthetic); published to {@link #skins}. */
+    private volatile McpeSkin.Skin skin;
     /** Compression mode observed on inbound batches; reused for outbound (chat etc.). */
     private volatile boolean rawDeflate = false;
 
@@ -59,11 +64,13 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         @Override public void unload(int cx, int cz) { /* PE 1.1.5 client culls by distance */ }
     };
 
-    PeSession(RakNetServerSession session, ConnectionListener listener, ProtocolVersion protocol, World world) {
+    PeSession(RakNetServerSession session, ConnectionListener listener, ProtocolVersion protocol,
+              World world, Map<UUID, McpeSkin.Skin> skins) {
         this.session = session;
         this.listener = listener;
         this.protocol = protocol;
         this.world = world;
+        this.skins = skins;
     }
 
     // ===== PlayerConnection (api) — lets the core treat a PE player like any other =====
@@ -116,6 +123,8 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     @Override
     public void showPlayer(UUID uuid, String name, long entityId,
                            double x, double y, double z, float yaw, float pitch) {
+        // The shown player's real skin if they're a Bedrock player; synthetic for JE players.
+        McpeSkin.Skin shownSkin = skins.getOrDefault(uuid, McpeSkin.syntheticSkin(uuid));
         // PlayerList ADD must precede AddPlayer — it carries the skin the avatar renders with.
         sendGameBatch(
                 b -> {
@@ -125,8 +134,8 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
                     McpeCodec.writeUuid(b, uuid);
                     ByteBufUtils.writeSignedVarLong(b, entityId);      // entity unique id
                     ByteBufUtils.writeString(b, name);
-                    ByteBufUtils.writeString(b, "Standard_Custom");    // skin model
-                    ByteBufUtils.writeByteArray(b, McpeSkin.synthetic(uuid));
+                    ByteBufUtils.writeString(b, shownSkin.id());       // skin id / geometry
+                    ByteBufUtils.writeByteArray(b, shownSkin.data());  // skin RGBA texture
                 },
                 b -> {
                     ByteBufUtils.writeVarInt(b, ID_ADD_PLAYER);
@@ -164,18 +173,19 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     }
 
     @Override
-    public void sendBlockChange(int x, int y, int z, int blockId) {
+    public void sendBlockChange(int x, int y, int z, int state) {
         // Typed UpdateBlock (0x16): one block instead of re-sending the whole affected chunk. The
         // client applies it if it has the chunk loaded and ignores it otherwise. Block position is
         // x/z zigzag-varint and y unsigned-varint (same layout the inbound edit decoder reads); the
-        // block is a legacy id with meta 0, and the flags request a neighbour-aware re-render.
+        // canonical state splits into a legacy id and 4-bit meta, and the flags request a
+        // neighbour-aware re-render.
         sendGameBatch(b -> {
             ByteBufUtils.writeVarInt(b, ID_UPDATE_BLOCK);
             ByteBufUtils.writeSignedVarInt(b, x);
             ByteBufUtils.writeVarInt(b, y);
             ByteBufUtils.writeSignedVarInt(b, z);
-            ByteBufUtils.writeVarInt(b, blockId & 0xFF);            // legacy block id
-            ByteBufUtils.writeVarInt(b, UPDATE_BLOCK_FLAG_ALL << 4); // (flags << 4) | meta(0)
+            ByteBufUtils.writeVarInt(b, (state >> 4) & 0xFF);                            // legacy block id
+            ByteBufUtils.writeVarInt(b, (UPDATE_BLOCK_FLAG_ALL << 4) | (state & 0xF));   // (flags << 4) | meta
         });
     }
 
@@ -196,6 +206,40 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         });
     }
 
+    @Override
+    public void swingArm(long entityId) {
+        sendGameBatch(b -> writeAnimate(b, ANIMATE_SWING_ARM, entityId));
+    }
+
+    @Override
+    public void setPose(long entityId, boolean sneaking, boolean sprinting) {
+        sendGameBatch(b -> writeSetEntityDataFlags(b, entityId, sneaking, sprinting));
+    }
+
+    /** Encode an Animate packet body (protocol 113): action (putVarInt), then entity runtime id. */
+    static void writeAnimate(ByteBuf b, int action, long entityRuntimeId) {
+        ByteBufUtils.writeVarInt(b, ID_ANIMATE);
+        ByteBufUtils.writeSignedVarInt(b, action);     // action (putVarInt, signed)
+        ByteBufUtils.writeVarLong(b, entityRuntimeId); // entity runtime id
+        // no trailing float — only actions with bit 0x80 carry one
+    }
+
+    /**
+     * Encode a SetEntityData body carrying the pose: entity runtime id, then a one-entry metadata
+     * dictionary DATA_FLAGS (a long) with the sneaking / sprinting bits set (both together, since
+     * they live in the same long).
+     */
+    static void writeSetEntityDataFlags(ByteBuf b, long entityRuntimeId, boolean sneaking, boolean sprinting) {
+        long flags = (sneaking ? (1L << DATA_FLAG_SNEAKING_BIT) : 0L)
+                | (sprinting ? (1L << DATA_FLAG_SPRINTING_BIT) : 0L);
+        ByteBufUtils.writeVarInt(b, ID_SET_ENTITY_DATA);
+        ByteBufUtils.writeVarLong(b, entityRuntimeId); // entity runtime id
+        ByteBufUtils.writeVarInt(b, 1);                // metadata entry count
+        ByteBufUtils.writeVarInt(b, DATA_FLAGS_INDEX); // key = DATA_FLAGS (0)
+        ByteBufUtils.writeVarInt(b, DATA_TYPE_LONG);   // type = LONG (7)
+        ByteBufUtils.writeSignedVarLong(b, flags);     // putVarLong (zigzag)
+    }
+
     // ===== RakNet session callbacks =====
 
     @Override
@@ -209,6 +253,9 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     @Override
     public void onDisconnect(DisconnectReason reason) {
         LOGGER.info("[PE] disconnect " + session.getAddress() + " (" + reason + ")");
+        if (uuid != null) {
+            skins.remove(uuid);
+        }
         if (loggedIn && listener != null) {
             listener.onDisconnect(this);
         }
@@ -270,7 +317,9 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
                 McpeLoginIdentity.Identity identity = McpeLoginIdentity.extract(pk);
                 this.uuid = identity.uuid();
                 this.username = identity.name();
-                LOGGER.info("[PE] Login: " + username + " (" + uuid + ") → PlayStatus + ResourcePacksInfo");
+                this.skin = buildSkin(identity);
+                LOGGER.info("[PE] Login: " + username + " (" + uuid + ", skin="
+                        + (identity.skinData() != null ? "real" : "synthetic") + ") → PlayStatus + ResourcePacksInfo");
                 sendLoginResponse();
             }
             case ID_RESOURCE_PACK_RESPONSE -> {
@@ -288,7 +337,8 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             case ID_MOVE_PLAYER -> handleInboundMove(pk);
             case ID_INVENTORY_TRANSACTION -> applyEdit(PeBlockEditDecoder.decodeInventoryTransaction(pk));
             case ID_USE_ITEM -> applyEdit(PeBlockEditDecoder.decodeUseItem(pk));
-            case ID_PLAYER_ACTION -> applyEdit(PeBlockEditDecoder.decodePlayerAction(pk));
+            case ID_PLAYER_ACTION -> handlePlayerAction(pk);
+            case ID_ANIMATE -> handleInboundAnimate(pk);
             default -> { /* other gameplay packet — nothing to answer yet */ }
         }
     }
@@ -297,15 +347,57 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     private void registerPlayer() {
         if (loggedIn || uuid == null) return;
         loggedIn = true;
+        // Publish our skin before onLogin so the other players' showPlayer(us) can render it.
+        if (skin != null) {
+            skins.put(uuid, skin);
+        }
         if (listener != null) {
             listener.onLogin(this, uuid, username);
         }
     }
 
+    /** Build this player's skin from the Login JWT, falling back to the synthetic one. */
+    private static McpeSkin.Skin buildSkin(McpeLoginIdentity.Identity identity) {
+        if (identity.skinData() != null) {
+            String id = identity.skinId() != null ? identity.skinId() : McpeSkin.DEFAULT_SKIN_ID;
+            return new McpeSkin.Skin(id, identity.skinData());
+        }
+        return McpeSkin.syntheticSkin(identity.uuid());
+    }
+
     /** Relay a decoded block edit to the core, if we are in-game. */
     private void applyEdit(PeBlockEditDecoder.BlockEdit edit) {
         if (edit != null && loggedIn && listener != null) {
-            listener.onBlockChange(this, edit.x(), edit.y(), edit.z(), edit.blockId());
+            listener.onBlockChange(this, edit.x(), edit.y(), edit.z(), edit.state());
+        }
+    }
+
+    /** Dispatch a PlayerAction: an instant creative break, or a sneak-pose toggle. */
+    private void handlePlayerAction(ByteBuf pk) {
+        PeBlockEditDecoder.PlayerAction a = PeBlockEditDecoder.decodePlayerAction(pk);
+        if (a == null || !loggedIn || listener == null) {
+            return;
+        }
+        switch (a.action()) {
+            case ACTION_START_BREAK, ACTION_CONTINUE_BREAK ->
+                    listener.onBlockChange(this, a.x(), a.y(), a.z(), Blocks.AIR);
+            case ACTION_START_SNEAK -> listener.onSneak(this, true);
+            case ACTION_STOP_SNEAK -> listener.onSneak(this, false);
+            case ACTION_START_SPRINT -> listener.onSprint(this, true);
+            case ACTION_STOP_SPRINT -> listener.onSprint(this, false);
+            default -> { /* other actions (jump, glide…) not relayed yet */ }
+        }
+    }
+
+    /** Relay an inbound Animate (arm swing) to the core so other players see the swing. */
+    private void handleInboundAnimate(ByteBuf pk) {
+        try {
+            int action = ByteBufUtils.readSignedVarInt(pk); // putVarInt (signed)
+            if (action == ANIMATE_SWING_ARM && loggedIn && listener != null) {
+                listener.onSwingArm(this);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debug(() -> "[PE] could not parse Animate: " + e);
         }
     }
 

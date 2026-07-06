@@ -8,6 +8,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 /**
  * Minimal stdin console for the running server: live status / TPS, the player list, toggling the
@@ -52,7 +53,7 @@ final class ConsoleCommands implements Runnable {
             return;
         }
         int space = line.indexOf(' ');
-        String cmd = (space < 0 ? line : line.substring(0, space)).toLowerCase();
+        String cmd = (space < 0 ? line : line.substring(0, space)).toLowerCase(Locale.ROOT);
         String args = space < 0 ? "" : line.substring(space + 1).trim();
 
         switch (cmd) {

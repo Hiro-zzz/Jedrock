@@ -3,6 +3,7 @@ package com.jedrock.core;
 import com.jedrock.api.Jedrock;
 import com.jedrock.api.Server;
 import com.jedrock.api.ServerStatus;
+import com.jedrock.api.config.ServerProperties;
 import com.jedrock.api.event.EventBus;
 import com.jedrock.api.event.player.PlayerJoinEvent;
 import com.jedrock.api.event.player.PlayerQuitEvent;
@@ -12,6 +13,7 @@ import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Dimension;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
+import com.jedrock.core.config.JedrockConfig;
 import com.jedrock.core.player.CorePlayer;
 import com.jedrock.core.player.PlayerRegistry;
 import com.jedrock.core.world.CoreWorld;
@@ -43,6 +45,7 @@ public class JedrockServer implements Server, ConnectionListener {
 
     private static final JLogger LOGGER = JLogger.getLogger(JedrockServer.class);
 
+    private final ServerProperties config;
     private final String name;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
@@ -53,20 +56,25 @@ public class JedrockServer implements Server, ConnectionListener {
 
     // In-memory state layer
     private final PlayerRegistry playerRegistry = new PlayerRegistry();
-    private final CoreWorld defaultWorld = new CoreWorld("world", Dimension.OVERWORLD);
+    private final CoreWorld defaultWorld;
 
     private final AtomicLong tickCounter = new AtomicLong(0);
 
     public JedrockServer() {
-        this.name = Jedrock.NAME;
+        // Load configuration first — everything below is parameterized by it.
+        this.config = JedrockConfig.load();
+        this.name = config.name();
+        this.defaultWorld = new CoreWorld("world", Dimension.OVERWORLD, config.seed());
 
         // Attach scheduler + core tick to game loop
         gameLoop.addTickable(scheduler);
         gameLoop.addTickable(this::serverTick);
+        gameLoop.setTickRate(config.tickRate());
 
-        // Default network impl (can be swapped). Register as the state listener before binding.
+        // Default network impl (can be swapped). Register state listener + config before binding.
         this.networkServer = new NettyNetworkServer();
         this.networkServer.setConnectionListener(this);
+        this.networkServer.setProperties(config);
         this.networkServer.setWorld(defaultWorld); // clients serialize chunks from this shared world
     }
 
@@ -99,12 +107,11 @@ public class JedrockServer implements Server, ConnectionListener {
         LOGGER.info("Starting " + getVersion());
 
         try {
-            // Bind example addresses (in real life load from config)
             // Java Edition 1.12.2 (TCP)
-            networkServer.bind(new InetSocketAddress("0.0.0.0", 25565), ProtocolVersion.JE_1_12_2);
+            networkServer.bind(new InetSocketAddress(config.bindHost(), config.javaPort()), ProtocolVersion.JE_1_12_2);
 
             // MCPE / Bedrock 1.1.5 (RakNet over UDP, handled by the PE server)
-            networkServer.bind(new InetSocketAddress("0.0.0.0", 19132), ProtocolVersion.PE_1_1_5);
+            networkServer.bind(new InetSocketAddress(config.bindHost(), config.bedrockPort()), ProtocolVersion.PE_1_1_5);
 
         } catch (Exception e) {
             LOGGER.error("Failed to bind network", e);
@@ -213,6 +220,10 @@ public class JedrockServer implements Server, ConnectionListener {
             Location loc = other.getLocation();
             connection.showPlayer(other.getUniqueId(), other.getName(), other.getEntityId(),
                     loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
+            // Sync a currently sneaking/sprinting player's pose so the newcomer sees it, not standing.
+            if (other instanceof CorePlayer oc && (oc.isSneaking() || oc.isSprinting())) {
+                connection.setPose(other.getEntityId(), oc.isSneaking(), oc.isSprinting());
+            }
             other.getConnection().showPlayer(uuid, username, player.getEntityId(),
                     spawn.x(), spawn.y(), spawn.z(), spawn.yaw(), spawn.pitch());
         }
@@ -259,12 +270,64 @@ public class JedrockServer implements Server, ConnectionListener {
     }
 
     @Override
-    public void onBlockChange(PlayerConnection connection, int x, int y, int z, int blockId) {
-        // Apply to the shared world, then push the edit to every client (including the editor,
-        // so the server stays authoritative). Each connection serializes it in its own protocol.
-        defaultWorld.setBlockId(x, y, z, blockId);
+    public void onBlockChange(PlayerConnection connection, int x, int y, int z, int state) {
+        // Apply to the shared world, then push the edit to every client (including the editor, so
+        // the server stays authoritative). {@code state} is the canonical (id << 4 | meta) value;
+        // each connection serializes it in its own protocol.
+        defaultWorld.setBlockId(x, y, z, state);
         for (Player p : playerRegistry.all()) {
-            p.getConnection().sendBlockChange(x, y, z, blockId);
+            p.getConnection().sendBlockChange(x, y, z, state);
+        }
+    }
+
+    @Override
+    public int getOnlinePlayerCount() {
+        return playerRegistry.size();
+    }
+
+    @Override
+    public void onSneak(PlayerConnection connection, boolean sneaking) {
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player == null) {
+            return;
+        }
+        player.setSneaking(sneaking);
+        relayPose(player);
+    }
+
+    @Override
+    public void onSprint(PlayerConnection connection, boolean sprinting) {
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player == null) {
+            return;
+        }
+        player.setSprinting(sprinting);
+        relayPose(player);
+    }
+
+    /** Relay a player's full pose (sneak + sprint together — they share one flags field per edition). */
+    private void relayPose(CorePlayer player) {
+        long entityId = player.getEntityId();
+        boolean sneaking = player.isSneaking();
+        boolean sprinting = player.isSprinting();
+        for (CorePlayer other : playerRegistry.online()) {
+            if (other != player) {
+                other.getConnection().setPose(entityId, sneaking, sprinting);
+            }
+        }
+    }
+
+    @Override
+    public void onSwingArm(PlayerConnection connection) {
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player == null) {
+            return;
+        }
+        long entityId = player.getEntityId();
+        for (CorePlayer other : playerRegistry.online()) {
+            if (other != player) {
+                other.getConnection().swingArm(entityId);
+            }
         }
     }
 

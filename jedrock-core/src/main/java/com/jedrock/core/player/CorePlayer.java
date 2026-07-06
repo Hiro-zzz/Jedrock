@@ -30,6 +30,8 @@ public final class CorePlayer implements Player {
     private volatile CoreWorld world;
     private volatile Location location;
     private volatile GameMode gameMode = GameMode.CREATIVE;
+    private volatile boolean sneaking = false;
+    private volatile boolean sprinting = false;
 
     public CorePlayer(UUID uniqueId, String name, PlayerConnection connection,
                       CoreWorld world, Location location) {
@@ -48,6 +50,24 @@ public final class CorePlayer implements Player {
     @Override
     public long getEntityId() {
         return entityId;
+    }
+
+    /** Whether the player is currently crouching — used to sync pose to players who join later. */
+    public boolean isSneaking() {
+        return sneaking;
+    }
+
+    public void setSneaking(boolean sneaking) {
+        this.sneaking = sneaking;
+    }
+
+    /** Whether the player is currently sprinting — synced (with sneak) to players who join later. */
+    public boolean isSprinting() {
+        return sprinting;
+    }
+
+    public void setSprinting(boolean sprinting) {
+        this.sprinting = sprinting;
     }
 
     @Override

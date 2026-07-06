@@ -29,10 +29,10 @@ class CoreWorldTerrainTest {
         int surface = world.surfaceHeight(5, 9);
 
         assertEquals(Blocks.AIR, world.getBlockId(5, surface + 1, 9), "air above the surface");
-        assertEquals(Blocks.GRASS, world.getBlockId(5, surface, 9), "grass on top");
-        assertEquals(Blocks.DIRT, world.getBlockId(5, surface - 1, 9), "dirt just below");
-        assertEquals(Blocks.STONE, world.getBlockId(5, surface - 10, 9), "stone deep down");
-        assertEquals(Blocks.STONE, world.getBlockId(5, 0, 9), "stone at bedrock level");
+        assertEquals(Blocks.GRASS, Blocks.idOf(world.getBlockId(5, surface, 9)), "grass on top");
+        assertEquals(Blocks.DIRT, Blocks.idOf(world.getBlockId(5, surface - 1, 9)), "dirt just below");
+        assertEquals(Blocks.STONE, Blocks.idOf(world.getBlockId(5, surface - 10, 9)), "stone deep down");
+        assertEquals(Blocks.STONE, Blocks.idOf(world.getBlockId(5, 0, 9)), "stone at bedrock level");
     }
 
     @Test
@@ -41,22 +41,34 @@ class CoreWorldTerrainTest {
         int surface = world.surfaceHeight(0, 0);
         // Feet one block above the grass, so the client lands instead of suffocating.
         assertEquals(surface + 1, spawn.getBlockY());
-        assertEquals(Blocks.GRASS, world.getBlockId(0, surface, 0));
+        assertEquals(Blocks.GRASS, Blocks.idOf(world.getBlockId(0, surface, 0)));
         assertEquals(Blocks.AIR, world.getBlockId(0, surface + 1, 0));
     }
 
     @Test
     void editsOverrideGeneratedTerrain() {
         int surface = world.surfaceHeight(3, 3);
-        world.setBlockId(3, surface + 5, 3, Blocks.STONE); // place a floating block
-        assertEquals(Blocks.STONE, world.getBlockId(3, surface + 5, 3));
+        world.setBlockId(3, surface + 5, 3, Blocks.state(Blocks.STONE, 0)); // place a floating block
+        assertEquals(Blocks.state(Blocks.STONE, 0), world.getBlockId(3, surface + 5, 3));
+    }
+
+    @Test
+    void placedBlockPreservesMetadata() {
+        int surface = world.surfaceHeight(4, 4);
+        int redWool = Blocks.state(Blocks.WOOL, 14); // wool + meta 14 (red)
+        world.setBlockId(4, surface + 2, 4, redWool);
+
+        int stored = world.getBlockId(4, surface + 2, 4);
+        assertEquals(redWool, stored, "full state round-trips");
+        assertEquals(Blocks.WOOL, Blocks.idOf(stored), "id preserved");
+        assertEquals(14, Blocks.metaOf(stored), "meta preserved");
     }
 
     @Test
     void fillSectionMatchesScalarGetBlockId() {
         // Include edits so the overlay paths (placed block + broken-natural sentinel) are exercised.
         int surface = world.surfaceHeight(1, 1);
-        world.setBlockId(1, surface + 20, 1, Blocks.STONE); // floating placed block (upper section)
+        world.setBlockId(1, surface + 20, 1, Blocks.state(Blocks.STONE, 0)); // floating placed block
         world.setBlockId(2, surface, 2, Blocks.AIR);        // break a natural block (REMOVED sentinel)
 
         short[] out = new short[4096];
@@ -82,11 +94,11 @@ class CoreWorldTerrainTest {
     @Test
     void breakingNaturalTerrainSticks() {
         int surface = world.surfaceHeight(2, 2);
-        assertEquals(Blocks.GRASS, world.getBlockId(2, surface, 2), "natural grass surface");
+        assertEquals(Blocks.GRASS, Blocks.idOf(world.getBlockId(2, surface, 2)), "natural grass surface");
 
         world.setBlockId(2, surface, 2, Blocks.AIR); // break the natural block
 
         assertEquals(Blocks.AIR, world.getBlockId(2, surface, 2), "broken natural block stays gone");
-        assertEquals(Blocks.DIRT, world.getBlockId(2, surface - 1, 2), "layer below untouched");
+        assertEquals(Blocks.DIRT, Blocks.idOf(world.getBlockId(2, surface - 1, 2)), "layer below untouched");
     }
 }

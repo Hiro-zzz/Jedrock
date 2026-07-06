@@ -1,13 +1,16 @@
 package com.jedrock.network;
 
+import com.jedrock.api.config.ServerProperties;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
 import com.jedrock.network.handler.ProtocolHandler;
 import com.jedrock.network.handler.je.JavaEditionProtocolHandler;
+import com.jedrock.network.je.packet.ClientboundAnimation;
 import com.jedrock.network.je.packet.ClientboundBlockChange;
 import com.jedrock.network.je.packet.ClientboundChatMessage;
+import com.jedrock.network.je.packet.ClientboundEntityMetadata;
 import com.jedrock.network.je.packet.ClientboundChunkData;
 import com.jedrock.network.je.packet.ClientboundDestroyEntities;
 import com.jedrock.network.je.packet.ClientboundEntityHeadLook;
@@ -54,6 +57,7 @@ public class JedrockConnection implements Connection, PlayerConnection {
     private final ConnectionProtocol connectionProtocol;
     private final ConnectionListener listener;
     private final World world;
+    private final ServerProperties properties;
     private final ProtocolHandler protocolHandler;
 
     private final AtomicBoolean open = new AtomicBoolean(true);
@@ -68,12 +72,15 @@ public class JedrockConnection implements Connection, PlayerConnection {
     private volatile double lastX, lastY, lastZ;
     private volatile float lastYaw = 0f, lastPitch = 0f;
 
-    public JedrockConnection(Channel channel, ProtocolVersion protocol, ConnectionListener listener, World world) {
+    public JedrockConnection(Channel channel, ProtocolVersion protocol, ConnectionListener listener,
+                             World world, ServerProperties properties) {
         this.channel = channel;
         this.protocol = protocol;
         this.listener = listener;
         this.world = world;
+        this.properties = properties;
         this.connectionProtocol = new ConnectionProtocol(protocol);
+        this.chunkView = new ChunkView(properties.viewDistance());
 
         // Seed the movement-merge state with the world spawn we'll teleport the client to.
         Location spawn = world.getSpawnLocation();
@@ -135,6 +142,16 @@ public class JedrockConnection implements Connection, PlayerConnection {
     public void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch) {
         send(new ClientboundEntityTeleport((int) entityId, x, y, z, yaw, pitch));
         send(new ClientboundEntityHeadLook((int) entityId, yaw));
+    }
+
+    @Override
+    public void swingArm(long entityId) {
+        send(new ClientboundAnimation((int) entityId, ClientboundAnimation.SWING_MAIN_ARM));
+    }
+
+    @Override
+    public void setPose(long entityId, boolean sneaking, boolean sprinting) {
+        send(ClientboundEntityMetadata.pose((int) entityId, sneaking, sprinting));
     }
 
     @Override
@@ -240,10 +257,8 @@ public class JedrockConnection implements Connection, PlayerConnection {
         send(new ClientboundPlayerPositionAndLook(s.x(), s.y(), s.z(), s.yaw(), s.pitch()));
     }
 
-    /** View distance (in chunks) streamed around the player. */
-    private static final int VIEW_RADIUS = 6;
-
-    private final ChunkView chunkView = new ChunkView(VIEW_RADIUS);
+    /** View distance (in chunks) streamed around the player — from server config. */
+    private final ChunkView chunkView;
     private final ChunkView.Sink chunkSink = new ChunkView.Sink() {
         @Override public void load(int cx, int cz) { send(new ClientboundChunkData(world, cx, cz)); }
         @Override public void unload(int cx, int cz) { send(new ClientboundUnloadChunk(cx, cz)); }
@@ -301,6 +316,11 @@ public class JedrockConnection implements Connection, PlayerConnection {
      */
     public ConnectionListener getListener() {
         return listener;
+    }
+
+    /** Server settings (player cap, view distance, etc.) for the protocol handler. */
+    public ServerProperties getServerProperties() {
+        return properties;
     }
 
     /**

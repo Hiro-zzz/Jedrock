@@ -77,9 +77,9 @@ public final class CoreWorld implements World {
 
     @Override
     public BlockState getBlockAt(int x, int y, int z) {
-        int id = getBlockId(x, y, z);
+        int state = getBlockId(x, y, z);
         // Allocate a BlockState only on this abstract path; hot code uses getBlockId().
-        return id == Blocks.AIR ? BlockState.AIR : new BlockState(id, "minecraft:unknown");
+        return state == Blocks.AIR ? BlockState.AIR : new BlockState(state, "minecraft:unknown");
     }
 
     @Override
@@ -97,9 +97,10 @@ public final class CoreWorld implements World {
     /**
      * Overlay sentinel for a block a player explicitly removed. Plain air in the overlay means
      * "nothing stored" (fall through to terrain), so breaking a natural block needs a distinct
-     * marker or the generator would just put it back. Out of the real block-id range.
+     * marker or the generator would just put it back. Bit 12 is set, so it sits just outside the
+     * 12-bit {@code (id << 4) | meta} state range and can never collide with a real placed state.
      */
-    private static final int REMOVED = 0x0FFF;
+    private static final int REMOVED = 0x1000;
 
     @Override
     public int getBlockId(int x, int y, int z) {
@@ -108,12 +109,12 @@ public final class CoreWorld implements World {
             return Blocks.AIR;          // a player broke a (possibly natural) block here
         }
         if (stored != Blocks.AIR) {
-            return stored;              // a player placed a block here
+            return stored;              // a player placed a block here (packed state)
         }
         return generatedBlock(x, y, z); // procedural terrain
     }
 
-    /** Classify a coordinate into a block from the surface height: grass / dirt / stone / air. */
+    /** Classify a coordinate into a block state from the surface height: grass / dirt / stone / air. */
     private int generatedBlock(int x, int y, int z) {
         return generatedBlock(y, surfaceHeight(x, z));
     }
@@ -126,10 +127,11 @@ public final class CoreWorld implements World {
         if (y > surface) {
             return Blocks.AIR;
         }
+        // Natural terrain is all meta-0, so each state is simply the id shifted into place.
         if (y == surface) {
-            return Blocks.GRASS;
+            return Blocks.state(Blocks.GRASS, 0);
         }
-        return y >= surface - DIRT_DEPTH ? Blocks.DIRT : Blocks.STONE;
+        return y >= surface - DIRT_DEPTH ? Blocks.state(Blocks.DIRT, 0) : Blocks.state(Blocks.STONE, 0);
     }
 
     /**
@@ -179,10 +181,10 @@ public final class CoreWorld implements World {
     }
 
     @Override
-    public void setBlockId(int x, int y, int z, int id) {
+    public void setBlockId(int x, int y, int z, int state) {
         // Store the explicit-air sentinel so a broken natural block stays broken (plain air in the
         // overlay reads as "not stored" and would fall through to the generated terrain again).
-        storage.setId(x, y, z, id == Blocks.AIR ? REMOVED : id);
+        storage.setId(x, y, z, state == Blocks.AIR ? REMOVED : state);
     }
 
     // ===== Player membership (managed by the server on join/quit) =====

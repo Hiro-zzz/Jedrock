@@ -37,3 +37,7 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### Jedrock ###
+# Runtime config written on first run (the template lives in jedrock-core resources).
+/jedrock.properties

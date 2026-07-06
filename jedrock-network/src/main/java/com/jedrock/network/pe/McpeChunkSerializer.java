@@ -40,12 +40,14 @@ final class McpeChunkSerializer {
         Arrays.fill(FULL_LIGHT, (byte) 0xFF);
     }
 
-    /** Per-thread section buffer so serializing a column allocates nothing per sub-chunk. */
+    /** Per-thread section + metadata-nibble buffers so serializing a column allocates nothing. */
     private static final ThreadLocal<short[]> SCRATCH = ThreadLocal.withInitial(() -> new short[4096]);
+    private static final ThreadLocal<byte[]> META = ThreadLocal.withInitial(() -> new byte[2048]);
 
     /** Serialize the given chunk column of {@code world} into a network-format payload. */
     static byte[] serialize(World world, int chunkX, int chunkZ) {
         short[] blocks = SCRATCH.get();
+        byte[] meta = META.get();
 
         // Pass 1: find the highest non-empty section. fillSection is allocation-free and far cheaper
         // than the old per-block scan (one storage lookup + one height eval per column, no boxing).
@@ -65,14 +67,21 @@ final class McpeChunkSerializer {
                 world.fillSection(chunkX, sy, chunkZ, blocks);
                 payload.writeByte(0); // sub-chunk format version (legacy)
                 // Block ids in Bedrock XZY order (x outer, y inner); scratch is indexed (y<<8)|(z<<4)|x.
+                // The canonical value is a packed state, so id = state >> 4 and meta = state & 0xF; the
+                // metadata travels as a parallel 4-bit nibble array in the same iteration order.
+                Arrays.fill(meta, (byte) 0);
+                int i = 0;
                 for (int x = 0; x < 16; x++) {
                     for (int z = 0; z < 16; z++) {
                         for (int y = 0; y < 16; y++) {
-                            payload.writeByte(toBedrockId(blocks[(y << 8) | (z << 4) | x] & 0xFFFF));
+                            int state = blocks[(y << 8) | (z << 4) | x] & 0xFFFF;
+                            payload.writeByte((state >> 4) & 0xFF);              // block id
+                            meta[i >> 1] |= (state & 0xF) << ((i & 1) << 2);     // low nibble, then high
+                            i++;
                         }
                     }
                 }
-                payload.writeZero(2048);        // block metadata nibbles (all 0)
+                payload.writeBytes(meta);       // block metadata (4-bit nibbles, XZY order)
                 payload.writeBytes(FULL_LIGHT); // sky light (full daylight)
                 payload.writeZero(2048);        // block light (none)
             }
@@ -87,13 +96,5 @@ final class McpeChunkSerializer {
         } finally {
             payload.release();
         }
-    }
-
-    /**
-     * Canonical block id → Bedrock 1.1.5 block id. Canonical ids are the classic numeric ids,
-     * which legacy Bedrock shares for basic blocks, so this is an identity (clamped to a byte).
-     */
-    private static int toBedrockId(int canonical) {
-        return canonical & 0xFF;
     }
 }

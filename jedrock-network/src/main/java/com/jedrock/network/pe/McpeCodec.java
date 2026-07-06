@@ -34,17 +34,18 @@ final class McpeCodec {
     }
 
     /**
-     * Read one network Item (protocol 113) and return its id (0 = air). Consumes the whole item so
-     * the read position stays aligned: id, aux (meta/count), optional NBT, and the can-place-on /
-     * can-destroy string lists.
+     * Read one network Item (protocol 113) and return its canonical state {@code (id << 4) | meta}
+     * (0 = air). The Bedrock aux field packs {@code meta << 8 | count}, so the block variant is the
+     * high byte. Consumes the whole item so the read position stays aligned: id, aux, optional NBT,
+     * and the can-place-on / can-destroy string lists.
      */
-    static int readItemId(ByteBuf pk) {
+    static int readItemState(ByteBuf pk) {
         int id = ByteBufUtils.readSignedVarInt(pk);
         if (id == 0) {
-            return 0; // air — no further fields
+            return Blocks.AIR; // air — no further fields
         }
-        ByteBufUtils.readSignedVarInt(pk);        // aux value (meta << 8 | count)
-        int nbtLen = pk.readShortLE() & 0xFFFF;   // NBT length (little-endian)
+        int aux = ByteBufUtils.readSignedVarInt(pk); // meta << 8 | count
+        int nbtLen = pk.readShortLE() & 0xFFFF;      // NBT length (little-endian)
         if (nbtLen > 0) {
             pk.skipBytes(nbtLen);
         }
@@ -52,6 +53,11 @@ final class McpeCodec {
         for (int i = 0; i < canPlaceOn; i++) ByteBufUtils.readString(pk);
         int canDestroy = ByteBufUtils.readVarInt(pk);
         for (int i = 0; i < canDestroy; i++) ByteBufUtils.readString(pk);
-        return id;
+        return Blocks.state(id, aux >> 8);
+    }
+
+    /** As {@link #readItemState} but discarding the metadata — for items we only need to skip. */
+    static int readItemId(ByteBuf pk) {
+        return Blocks.idOf(readItemState(pk));
     }
 }

@@ -25,7 +25,7 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
     // Per-connection creative inventory state (one handler instance per connection, single-threaded
     // inbound), used to know which block a placement should place.
     private int heldSlot = 0;
-    private final int[] hotbarItemId = new int[9]; // classic item ids; 0 = empty
+    private final int[] hotbarState = new int[9]; // canonical states (id<<4|meta); 0 = empty
 
     @Override
     public void handleInbound(LazyPacket packet, JedrockConnection connection) {
@@ -60,7 +60,6 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
                 connection.setState(ProtocolState.LOGIN);
             } else if (hs.nextState == 1) {
                 connection.setState(ProtocolState.STATUS);
-                // TODO: proper status ping (server list) later
             }
         }
     }
@@ -120,13 +119,31 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
             if (h.slot >= 0 && h.slot < 9) heldSlot = h.slot;
         } else if (id == ServerboundCreativeInventoryAction.PACKET_ID) {
             ServerboundCreativeInventoryAction c = lazy.materialize(ServerboundCreativeInventoryAction::fromBuffer);
-            if (c.slot >= 36 && c.slot <= 44) hotbarItemId[c.slot - 36] = Math.max(0, c.itemId);
+            if (c.slot >= 36 && c.slot <= 44) {
+                hotbarState[c.slot - 36] = c.itemId <= 0 ? 0 : Blocks.state(c.itemId, c.damage);
+            }
         } else if (id == ServerboundPlayerBlockPlacement.PACKET_ID) {
             ServerboundPlayerBlockPlacement place = lazy.materialize(ServerboundPlayerBlockPlacement::fromBuffer);
-            int canonical = hotbarItemId[heldSlot];
-            if (Blocks.isKnown(canonical) && canonical != Blocks.AIR && connection.getListener() != null) {
+            int state = hotbarState[heldSlot];
+            if (Blocks.isKnown(Blocks.idOf(state)) && state != Blocks.AIR && connection.getListener() != null) {
                 connection.getListener().onBlockChange(connection,
-                        place.placeX(), place.placeY(), place.placeZ(), canonical);
+                        place.placeX(), place.placeY(), place.placeZ(), state);
+            }
+        } else if (id == ServerboundEntityAction.PACKET_ID) {
+            ServerboundEntityAction a = lazy.materialize(ServerboundEntityAction::fromBuffer);
+            if (connection.getListener() != null) {
+                switch (a.actionId) {
+                    case ServerboundEntityAction.START_SNEAKING -> connection.getListener().onSneak(connection, true);
+                    case ServerboundEntityAction.STOP_SNEAKING -> connection.getListener().onSneak(connection, false);
+                    case ServerboundEntityAction.START_SPRINTING -> connection.getListener().onSprint(connection, true);
+                    case ServerboundEntityAction.STOP_SPRINTING -> connection.getListener().onSprint(connection, false);
+                    default -> { /* leave bed, horse jump, elytra — not relayed */ }
+                }
+            }
+        } else if (id == ServerboundAnimation.PACKET_ID) {
+            // Arm swing (the hand field is irrelevant to the relayed main-arm swing).
+            if (connection.getListener() != null) {
+                connection.getListener().onSwingArm(connection);
             }
         } else if (id == 0x00) {
             // Teleport Confirm (sent after PlayerPositionAndLook)
@@ -136,14 +153,28 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
     }
 
     private void handleStatus(int id, LazyPacket lazy, JedrockConnection connection) {
-        // TODO: implement server list ping (status + ping) if desired
+        if (id == 0x00) {
+            // Request → Response: version, player counts and MOTD as JSON. The client renders this
+            // in the multiplayer list, then usually follows with a Ping to measure latency.
+            int online = connection.getListener() != null ? connection.getListener().getOnlinePlayerCount() : 0;
+            connection.send(ClientboundStatusResponse.of(
+                    connection.getProtocolVersion().getVersionName(),
+                    connection.getProtocolVersion().getProtocolNumber(),
+                    connection.getServerProperties().maxPlayers(),
+                    online,
+                    connection.getServerProperties().motd()));
+        } else if (id == ServerboundStatusPing.PACKET_ID) {
+            // Ping → Pong: echo the client's opaque long; the client then closes the connection.
+            ServerboundStatusPing ping = lazy.materialize(ServerboundStatusPing::fromBuffer);
+            connection.send(new ClientboundStatusPong(ping.payload));
+        }
     }
 
     /**
      * Sends the mandatory packets right after Login Success so the client actually spawns.
      */
     private void sendInitialJoinSequence(JedrockConnection connection) {
-        connection.send(new ClientboundJoinGame());
+        connection.send(new ClientboundJoinGame(connection.getServerProperties().maxPlayers()));
         connection.send(new ClientboundServerDifficulty());
         connection.sendSpawnPosition();
         connection.send(new ClientboundPlayerAbilities());

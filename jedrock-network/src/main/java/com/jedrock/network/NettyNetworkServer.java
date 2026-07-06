@@ -1,5 +1,6 @@
 package com.jedrock.network;
 
+import com.jedrock.api.config.ServerProperties;
 import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.network.pe.PeRakNetServer;
 import com.jedrock.network.pipeline.LazyPacketDecoder;
@@ -45,6 +46,7 @@ public class NettyNetworkServer implements NetworkServer {
     private volatile boolean active = false;
     private volatile ConnectionListener listener;
     private volatile com.jedrock.api.world.World world;
+    private volatile ServerProperties properties = ServerProperties.defaults();
     private volatile PeRakNetServer peServer;
 
     @Override
@@ -58,10 +60,17 @@ public class NettyNetworkServer implements NetworkServer {
     }
 
     @Override
+    public void setProperties(ServerProperties properties) {
+        if (properties != null) {
+            this.properties = properties;
+        }
+    }
+
+    @Override
     public void bind(SocketAddress address, ProtocolVersion protocol) throws Exception {
         if (protocol.isBedrock()) {
             // Bedrock: hand the whole RakNet layer to the dedicated PE server.
-            PeRakNetServer pe = new PeRakNetServer((InetSocketAddress) address, protocol, listener, world);
+            PeRakNetServer pe = new PeRakNetServer((InetSocketAddress) address, protocol, listener, world, properties);
             pe.bind();
             this.peServer = pe;
             active = true;
@@ -194,7 +203,7 @@ public class NettyNetworkServer implements NetworkServer {
 
         @Override
         public void channelActive(ChannelHandlerContext ctx) {
-            connection = new JedrockConnection(ctx.channel(), protocol, server.listener, server.world);
+            connection = new JedrockConnection(ctx.channel(), protocol, server.listener, server.world, server.properties);
             server.registerConnection(ctx.channel(), connection);
 
             // New connection starts in HANDSHAKE state (for JE)

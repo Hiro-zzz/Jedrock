@@ -1,5 +1,6 @@
 package com.jedrock.network;
 
+import com.jedrock.api.config.ServerProperties;
 import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.World;
 
@@ -22,6 +23,12 @@ public interface NetworkServer {
 
     /** The world clients read blocks from when serializing chunks. Set before {@link #bind}. */
     void setWorld(World world);
+
+    /**
+     * Server settings the network layer advertises and honours (server-list MOTD, player cap,
+     * view distance). Set before {@link #bind}; defaults to {@link ServerProperties#defaults()}.
+     */
+    default void setProperties(ServerProperties properties) {}
 
     void shutdown();
 

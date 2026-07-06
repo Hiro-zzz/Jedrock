@@ -8,6 +8,39 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Player animations — sneak, sprint + arm swing (cross-edition).** Crouch, sprint and arm-swing are
+  decoded from each edition (JE Entity Action `0x15` / Animation `0x1D`; PE PlayerAction actions
+  9/10/11/12 / Animate `0x2c`), relayed through `ConnectionListener.onSneak` / `onSprint` / `onSwingArm`
+  + `PlayerConnection.setPose` / `swingArm`, and re-encoded per edition (JE Entity Metadata `0x3c` /
+  Animation `0x06`; PE SetEntityData `0x27` / Animate). Sneak and sprint share one flags field per
+  edition (JE flags byte, PE DATA_FLAGS long), so `setPose` sends both bits together rather than one
+  clearing the other. A late joiner is synced to anyone already crouching or sprinting. PE wire formats
+  verified against PocketMine-MP at protocol 113.
+- **Real Bedrock skins.** A Bedrock player's `SkinId` + `SkinData` are pulled from the Login JWT
+  (`McpeLoginIdentity`) and relayed into the PE `PlayerList` via a shared uuid→skin registry, so
+  Bedrock players see each other's real skins instead of the synthetic placeholder. A malformed or
+  wrong-sized texture falls back to synthetic. Cross-edition stays limited by Java's signed-texture
+  model (Bedrock players remain Steve/Alex on Java). (Advances a roadmap item.)
+- **Block metadata (block variants).** The world now stores a packed `(id << 4) | meta` state per
+  cell instead of a bare id (`Blocks.state/idOf/metaOf`; the `BlockStorage` short already had room).
+  Metadata flows end to end: placement reads the variant from the held item (JE creative slot damage,
+  Bedrock item aux `meta << 8 | count`), chunks serialize it (JE global-palette id — now an identity
+  map — and the Bedrock sub-chunk's 4-bit nibble array, previously written as zeros), and single-block
+  edits carry it (JE Block Change value, PE `UpdateBlock` meta). Wool colours, wood/stone types, etc.
+  now render distinctly and cross-edition. (Closes a roadmap item.)
+- **Java Edition server-list ping.** The server now answers the JE status flow (`handleStatus`):
+  Request → Response (a JSON blob with version, MOTD and player counts) and Ping → Pong (echoing the
+  client's latency probe). Jedrock now shows up in the Java multiplayer list instead of failing to
+  respond. MOTD and max players come from config; the live online count is surfaced to both editions'
+  pings via a new `ConnectionListener.getOnlinePlayerCount()` hook — so the Bedrock query's formerly
+  hard-coded `0` online now reflects reality too. (Closes a roadmap item.)
+- **File-based configuration.** Settings now load from `jedrock.properties` in the working directory
+  (`JedrockConfig` → the protocol-agnostic `ServerProperties` record in `jedrock-api`). On first run
+  the bundled template is written to disk; missing or malformed keys fall back to defaults with a
+  warning rather than failing, and any key can be overridden at launch with `-Dkey=value`. Wired
+  through the server: bind host + JE/PE ports, server name, world seed (`random` / numeric / hashed
+  text, Minecraft's rule), tick rate, view distance, and the server-list advertisement (MOTD + max
+  players on the PE ping, max players in JE Join Game). (Closes a roadmap item.)
 - **Bedrock creative inventory.** The PE creative menu is populated with the full set of standard
   legacy MCPE 1.1.5 blocks (base variants — the world stores a single block id, so per-meta variants
   aren't distinct yet). The fix was using the protocol-113 `ContainerSetContent` packet (0x34, with
@@ -26,6 +59,11 @@ unstable — anything may change between entries.
 
 ### Changed
 
+- **Wider JE chunk-section palette.** Each 1.12.2 section now picks the smallest legal bits-per-block
+  (4–8) for its palette instead of a fixed 4, packing the indices with the 1.12.2 straddling bit
+  layout (entries may cross a long boundary). A section with more than 16 distinct block states no
+  longer overflows the palette and corrupts (indices beyond 256 states — unreachable with our block
+  set — still clamp safely). (Closes a roadmap item.)
 - **Typed PE `UpdateBlock`.** A block edit is now reflected to Bedrock as a single `UpdateBlock`
   (0x16) packet — a few bytes — instead of re-serializing and re-sending the whole affected chunk
   (~10 KB). Block position layout matches the inbound edit decoder; verified against PocketMine-MP

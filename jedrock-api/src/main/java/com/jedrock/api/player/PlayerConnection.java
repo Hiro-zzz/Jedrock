@@ -58,11 +58,20 @@ public interface PlayerConnection {
     /** Move a player avatar previously shown via {@link #showPlayer} to an absolute position. */
     void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch);
 
+    /** Play another player's arm-swing animation on this client (attack / dig / interact). */
+    void swingArm(long entityId);
+
+    /**
+     * Set another player's pose on this client. Sneak and sprint share one flags field per edition,
+     * so both are sent together to avoid one clearing the other.
+     */
+    void setPose(long entityId, boolean sneaking, boolean sprinting);
+
     /**
      * Push a single block change to this client so an edit made by any player becomes visible.
-     * @param blockId the new canonical block id (0 = air, i.e. a break)
+     * @param state the new canonical block state {@code (id << 4) | meta} (0 = air, i.e. a break)
      */
-    void sendBlockChange(int x, int y, int z, int blockId);
+    void sendBlockChange(int x, int y, int z, int state);
 
     /**
      * Close the connection.

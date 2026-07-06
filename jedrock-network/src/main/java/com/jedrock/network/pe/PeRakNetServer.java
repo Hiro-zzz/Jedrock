@@ -1,5 +1,6 @@
 package com.jedrock.network.pe;
 
+import com.jedrock.api.config.ServerProperties;
 import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.World;
 import com.jedrock.network.ConnectionListener;
@@ -13,6 +14,9 @@ import io.netty.channel.socket.DatagramPacket;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Bedrock (PE 1.1.5) server built on the nukkitx RakNet transport.
@@ -43,14 +47,20 @@ public final class PeRakNetServer {
     private final ProtocolVersion protocol;
     private final ConnectionListener listener;
     private final World world;
+    private final ServerProperties properties;
+
+    /** Shared skin registry (uuid → real Bedrock skin) so one PE player's avatar shows on another. */
+    private final Map<UUID, McpeSkin.Skin> skins = new ConcurrentHashMap<>();
 
     private RakNetServer server;
 
-    public PeRakNetServer(InetSocketAddress address, ProtocolVersion protocol, ConnectionListener listener, World world) {
+    public PeRakNetServer(InetSocketAddress address, ProtocolVersion protocol, ConnectionListener listener,
+                          World world, ServerProperties properties) {
         this.address = address;
         this.protocol = protocol;
         this.listener = listener;
         this.world = world;
+        this.properties = properties;
     }
 
     public void bind() {
@@ -91,15 +101,16 @@ public final class PeRakNetServer {
             // MCPE server-list advertisement (semicolon-separated). The port fields advertise the
             // server's own bind port — `address` here is the pinging client, not us.
             int port = PeRakNetServer.this.address.getPort();
+            int online = listener != null ? listener.getOnlinePlayerCount() : 0;
             String motd = String.join(";",
                     "MCPE",
-                    "Jedrock",                                      // MOTD line 1
+                    properties.motd(),                              // MOTD line 1
                     Integer.toString(protocol.getProtocolNumber()), // MCPE protocol (113 for 1.1.5)
                     protocol.getVersionName(),                      // "1.1.5"
-                    "0",                                            // online players
-                    "10",                                           // max players
+                    Integer.toString(online),                       // online players
+                    Integer.toString(properties.maxPlayers()),      // max players
                     Long.toString(raknet.getGuid()),                // server GUID
-                    "Jedrock PE",                                   // MOTD line 2
+                    properties.name(),                              // MOTD line 2 (world/sub-title)
                     "Survival",                                     // game mode
                     "1",                                            // game mode (numeric)
                     Integer.toString(port),                         // IPv4 port
@@ -112,7 +123,7 @@ public final class PeRakNetServer {
         public void onSessionCreation(RakNetServerSession session) {
             LOGGER.info("[PE] session from " + session.getAddress()
                     + " (mtu=" + session.getMtu() + ", raknet v" + session.getProtocolVersion() + ")");
-            session.setListener(new PeSession(session, listener, protocol, world));
+            session.setListener(new PeSession(session, listener, protocol, world, skins));
         }
 
         @Override

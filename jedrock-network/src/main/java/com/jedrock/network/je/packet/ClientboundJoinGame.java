@@ -18,12 +18,16 @@ public final class ClientboundJoinGame implements ClientboundPacket {
     public boolean reducedDebugInfo;
 
     public ClientboundJoinGame() {
+        this(10);
+    }
+
+    public ClientboundJoinGame(int maxPlayers) {
         // Reasonable defaults for a minimal server
         this.entityId = 1;
         this.gamemode = 1;       // Creative for easy testing
         this.dimension = 0;
         this.difficulty = 2;     // Normal
-        this.maxPlayers = 10;
+        this.maxPlayers = maxPlayers;
         this.levelType = "default";
         this.reducedDebugInfo = false;
     }

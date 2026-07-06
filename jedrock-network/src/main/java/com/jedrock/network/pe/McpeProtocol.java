@@ -28,6 +28,8 @@ final class McpeProtocol {
     static final int ID_INVENTORY_TRANSACTION = 0x1E;
     static final int ID_USE_ITEM = 0x23;          // Win10 1.1.5 carries block placement here
     static final int ID_PLAYER_ACTION = 0x24;
+    static final int ID_SET_ENTITY_DATA = 0x27;   // entity metadata (sneak pose etc.)
+    static final int ID_ANIMATE = 0x2C;           // arm swing
     // MCPE 1.1 (protocol 113) uses ContainerSetContent (0x34) for inventory/creative content — NOT
     // the InventoryContent (0x31) of 1.2+. Its layout is: windowId, targetEid (entity id), slot count,
     // slots, then a hotbar-link count. Verified against PocketMine-MP at CURRENT_PROTOCOL = 113.
@@ -64,6 +66,18 @@ final class McpeProtocol {
     // In creative the client reports a break with CONTINUE_BREAK carrying the block position.
     static final int ACTION_START_BREAK = 0;
     static final int ACTION_CONTINUE_BREAK = 18;
+    static final int ACTION_START_SPRINT = 9;
+    static final int ACTION_STOP_SPRINT = 10;
+    static final int ACTION_START_SNEAK = 11;
+    static final int ACTION_STOP_SNEAK = 12;
+
+    // --- Animate (arm swing) + entity metadata (sneak / sprint pose) ---
+    static final int ANIMATE_SWING_ARM = 1;
+    /** Entity metadata: DATA_FLAGS is a LONG property at index 0; sneak/sprint are bits of that long. */
+    static final int DATA_FLAGS_INDEX = 0;
+    static final int DATA_TYPE_LONG = 7;
+    static final int DATA_FLAG_SNEAKING_BIT = 1;
+    static final int DATA_FLAG_SPRINTING_BIT = 3;
 
     // --- InventoryTransaction: transaction types + UseItem action types + inventory-action sources ---
     static final int TRANSACTION_USE_ITEM = 2;

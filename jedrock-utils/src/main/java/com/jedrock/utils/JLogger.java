@@ -3,9 +3,11 @@ package com.jedrock.utils;
 import java.util.function.Supplier;
 
 /**
- * Ultra-lightweight logging facade.
- * Implementations can delegate to JUL, System.out, or SLF4J.
- * Designed so that log calls have minimal cost when disabled.
+ * Ultra-lightweight logging facade. The default backend is a zero-dependency console logger
+ * ({@link SimpleConsoleLogger}), but the whole facade is pluggable: call
+ * {@link #setProvider(LoggerProvider)} once at startup to route every logger through a custom
+ * backend (JUL, SLF4J, a test collector, or {@code /dev/null}). Designed so that log calls have
+ * minimal cost when disabled — see {@link #debug(Supplier)}.
  */
 public interface JLogger {
 
@@ -21,8 +23,26 @@ public interface JLogger {
 
     void error(String message, Throwable throwable);
 
+    /** Factory for {@link JLogger} instances by name. Install one via {@link #setProvider}. */
+    @FunctionalInterface
+    interface LoggerProvider {
+        JLogger get(String name);
+    }
+
+    /** The active backend. Volatile so a startup swap is visible to every thread. */
+    java.util.concurrent.atomic.AtomicReference<LoggerProvider> PROVIDER =
+            new java.util.concurrent.atomic.AtomicReference<>(SimpleConsoleLogger::new);
+
+    /**
+     * Replace the logging backend for all loggers obtained afterwards. Intended to be called
+     * once during startup. Passing {@code null} restores the default console backend.
+     */
+    static void setProvider(LoggerProvider provider) {
+        PROVIDER.set(provider != null ? provider : SimpleConsoleLogger::new);
+    }
+
     static JLogger getLogger(String name) {
-        return new SimpleConsoleLogger(name);
+        return PROVIDER.get().get(name);
     }
 
     static JLogger getLogger(Class<?> clazz) {
@@ -30,7 +50,7 @@ public interface JLogger {
     }
 
     /**
-     * Default zero-dependency console logger (can be replaced at runtime).
+     * Default zero-dependency console logger, used unless {@link #setProvider} installs another.
      */
     final class SimpleConsoleLogger implements JLogger {
         private final String name;

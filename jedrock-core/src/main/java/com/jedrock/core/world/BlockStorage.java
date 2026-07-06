@@ -17,9 +17,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Height is fixed to 0..255 (16 sections), matching JE 1.12.2.
  *
- * <p>Threading: designed for a single writer (the tick thread). Reads are safe from any
- * thread; concurrent writes into the same column are not synchronised (not needed yet —
- * block edits are not wired to the network in this layer).
+ * <p>Threading: reads are safe from any thread. Writes now arrive from the network threads
+ * (a player edit on either edition), so section allocation is guarded — two players placing
+ * the first block in the same fresh section can't lose one to a torn {@code column[sy]} write.
+ * Two writes to the <b>same</b> cell still race to a last-writer-wins result, which is fine.
  */
 public final class BlockStorage {
 
@@ -67,10 +68,18 @@ public final class BlockStorage {
 
         short[][] column = columns.computeIfAbsent(columnKey(x >> 4, z >> 4),
                 k -> new short[SECTIONS_PER_COLUMN][]);
-        short[] section = column[y >> 4];
+        int sy = y >> 4;
+        short[] section = column[sy];
         if (section == null) {
-            section = new short[4096];
-            column[y >> 4] = section;
+            // Guard first-touch allocation: concurrent edits into a fresh section must not each
+            // create their own array and clobber the other's write. Lock the column (rare path).
+            synchronized (column) {
+                section = column[sy];
+                if (section == null) {
+                    section = new short[4096];
+                    column[sy] = section;
+                }
+            }
         }
         section[index(x, y, z)] = (short) id;
     }

@@ -53,9 +53,29 @@ Target versions:
 - ✅ **Bedrock creative inventory + flight** — the PE creative menu is filled with the full standard
   legacy block palette (via the protocol-113 `ContainerSetContent` packet), the player can fly (fixed
   `AdventureSettings`), and a movement-speed attribute kills the runaway acceleration.
+- ✅ **Block metadata (variants)** — the world stores a packed `(id << 4) | meta` state per cell, so
+  wool colours, wood/stone types and the like are preserved and rendered distinctly on both editions.
+  Placement reads the variant from the held item (JE creative damage, Bedrock item aux); chunks carry
+  it (JE global-palette id, Bedrock's 4-bit nibble array), as do single-block edits.
+- ✅ **Wide JE chunk palette** — each JE section picks the smallest legal bits-per-block (4–8) for its
+  palette, so a section with more than 16 distinct states no longer overflows and corrupts.
+- ✅ **File-based config** — `jedrock.properties` (auto-created on first run) sets the bind host and
+  ports, server name, world seed, tick rate, view distance and the server-list MOTD / max players;
+  any key is overridable with `-Dkey=value`, and bad values fall back to defaults instead of failing.
+- ✅ **Server-list ping, both editions** — Java shows the server in its multiplayer list (version,
+  MOTD, live player count, and a latency ping); the Bedrock query now reports the real online count
+  too. MOTD and max players come from config.
+- ✅ **Real Bedrock skins** — a Bedrock player's actual skin is pulled from their Login JWT and
+  relayed into the PE `PlayerList`, so Bedrock players see each other's real skins (not the coloured
+  placeholder). Cross-edition is a hard protocol limit: Java requires Mojang-signed textures, so a
+  Bedrock player still shows as Steve/Alex on Java, and JE players use the placeholder on Bedrock.
+- ✅ **Player animations (sneak, sprint + arm swing)** — crouch, sprint and arm swings are decoded
+  from each edition (JE Entity Action / Animation, PE PlayerAction / Animate) and relayed cross-edition
+  (JE Entity Metadata / Animation, PE SetEntityData / Animate), so a phone player sees a PC player
+  crouch, sprint and swing, and vice versa. Sneak and sprint share one flags field, so they're sent
+  together; a late joiner is synced to anyone already crouching or sprinting.
 
-Not yet: **real skins** (avatars render with placeholder textures — Bedrock players show as a solid
-colour, and on Java as Steve/Alex), movement validation, config files, scripting.
+Not yet: cross-edition skin fidelity (a signed-texture limit, see above), movement validation, scripting.
 See [Roadmap](#roadmap).
 
 ---
@@ -158,11 +178,12 @@ in one `PlayerRegistry`, so broadcasting a chat line or a tab update is a single
 `Player`s; each `PlayerConnection` serializes it in its own protocol.
 
 ### The shared world
-`CoreWorld` exposes canonical, protocol-agnostic block ids (`World.getBlockId`, see `Blocks`) over
-a procedural heightmap (`TerrainGenerator` — deterministic value noise, computed on demand, never
-stored), with `BlockStorage` — a lazily-allocated flat matrix of `short` ids — as the edit overlay.
-Each protocol maps canonical ids to its own palette when serializing chunks (Java global state vs.
-Bedrock id + meta), so both clients see — and collide against — the same terrain.
+`CoreWorld` exposes a canonical, protocol-agnostic block **state** — the packed `(id << 4) | meta`
+value both legacy protocols use (`World.getBlockId`, see `Blocks`) — over a procedural heightmap
+(`TerrainGenerator` — deterministic value noise, computed on demand, never stored), with
+`BlockStorage` — a lazily-allocated flat matrix of `short` states — as the edit overlay. Each
+protocol maps that state to its own wire form when serializing chunks (Java global-palette id vs.
+Bedrock id + a 4-bit meta nibble), so both clients see — and collide against — the same terrain.
 
 For the chunk hot path, both editions bulk-read a section through `World.fillSection`, which resolves
 terrain + overlay for a whole 16³ section with a single storage lookup and one height evaluation per
@@ -207,13 +228,15 @@ mvn -o clean test      # offline (deps are cached after the first resolve)
 
 The Bedrock RakNet dependency comes from the OpenCollab repository (not Maven Central) — the
 network module declares it. Run the server from your IDE (`com.jedrock.core.JedrockServer#main`),
-which binds:
+which binds (defaults, configurable in `jedrock.properties`):
 
 - **Java Edition** on TCP `0.0.0.0:25565`
 - **Bedrock** on UDP `0.0.0.0:19132`
 
-The RakNet protocol version defaults to `8` (MCPE 1.1.5) and can be overridden with
-`-Djedrock.pe.raknetProtocolVersion=N` for other client builds.
+The first run writes a `jedrock.properties` next to the process with the bind host/ports, server
+name, MOTD, max players, world seed, tick rate and view distance; edit and restart to apply, or
+override a single key with `-Dkey=value`. The RakNet protocol version defaults to `8` (MCPE 1.1.5)
+and can be overridden with `-Djedrock.pe.raknetProtocolVersion=N` for other client builds.
 
 ### Console & diagnostics
 
@@ -243,15 +266,9 @@ and MCPE compression — no client required.
 
 ## Roadmap
 
-- **Wider-than-4-bit JE chunk palette** — the current indirect palette is 4 bits/block (≤16 states
-  per section), so many distinct placed block types in one section could overflow it.
-- **Bedrock block metadata** — the world stores a single block id per cell, so per-meta variants
-  (wool colours, wood/stone types) can't be offered or rendered distinctly yet.
-- **Real skins** — relay a Bedrock player's actual skin (it's already in the Login JWT we parse)
-  into the PE `PlayerList`; cross-edition skin fidelity is limited by JE's signed-texture model
-  (see below). Avatars render with placeholder textures today.
+- **More animations** — sneak, sprint and arm swing relay today; eating/blocking poses and hurt
+  animations are the same relay pattern extended with more action ids and metadata flags.
 - **The blind judge** — movement-delta and interaction-sphere validation, now that movement is live.
-- **Config** — bind addresses, world settings, MOTD from a file.
 - **Scripting** — embedded JS (GraalJS) plugins with hot reload.
 
 ---

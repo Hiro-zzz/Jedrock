@@ -31,7 +31,25 @@ public interface ConnectionListener {
 
     /**
      * An in-game player edited a block (break or place). The core applies it to the shared world
-     * and relays it to everyone. {@code blockId} is the new canonical id (0 = air = a break).
+     * and relays it to everyone. {@code state} is the new canonical block state {@code (id << 4) |
+     * meta} (0 = air = a break).
      */
-    void onBlockChange(PlayerConnection connection, int x, int y, int z, int blockId);
+    void onBlockChange(PlayerConnection connection, int x, int y, int z, int state);
+
+    /**
+     * Current number of online players, for the server-list ping (JE status + PE query). Queried
+     * on I/O threads before login, so it must be cheap and thread-safe. Defaults to 0.
+     */
+    default int getOnlinePlayerCount() {
+        return 0;
+    }
+
+    /** A player started or stopped sneaking (crouch pose); the core relays it to everyone else. */
+    default void onSneak(PlayerConnection connection, boolean sneaking) {}
+
+    /** A player started or stopped sprinting; the core relays it to everyone else. */
+    default void onSprint(PlayerConnection connection, boolean sprinting) {}
+
+    /** A player swung their arm (attack / dig / interact); the core relays it to everyone else. */
+    default void onSwingArm(PlayerConnection connection) {}
 }

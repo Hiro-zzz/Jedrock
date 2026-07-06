@@ -1,5 +1,6 @@
 package com.jedrock.utils;
 
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 
@@ -33,7 +34,7 @@ public final class Debug {
         if (cats.isEmpty()) {
             return true;
         }
-        String name = loggerName.toLowerCase();
+        String name = loggerName.toLowerCase(Locale.ROOT);
         for (String c : cats) {
             if (name.contains(c)) {
                 return true;
@@ -53,7 +54,7 @@ public final class Debug {
      * logger-name tags to allow.
      */
     public static void configure(String spec) {
-        String s = spec == null ? "" : spec.trim().toLowerCase();
+        String s = spec == null ? "" : spec.trim().toLowerCase(Locale.ROOT);
         switch (s) {
             case "", "off", "none", "false" -> {
                 enabled = false;

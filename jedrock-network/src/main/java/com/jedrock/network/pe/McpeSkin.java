@@ -14,6 +14,31 @@ final class McpeSkin {
 
     private McpeSkin() {}
 
+    /** A Bedrock skin as the PlayerList carries it (protocol 113): a skin/geometry id + RGBA texture. */
+    record Skin(String id, byte[] data) {}
+
+    /** The default skin id paired with the synthetic texture (also a sane fallback for real skins). */
+    static final String DEFAULT_SKIN_ID = "Standard_Custom";
+
+    /** The synthetic fallback wrapped as a {@link Skin} — used for JE players and parse failures. */
+    static Skin syntheticSkin(UUID uuid) {
+        return new Skin(DEFAULT_SKIN_ID, synthetic(uuid));
+    }
+
+    /**
+     * Whether a byte array is a plausible raw RGBA skin texture: a multiple of 4 (RGBA) and one of the
+     * dimensions the Bedrock client accepts (64×32, 64×64, or 128×128). Guards against a truncated or
+     * mis-decoded {@code SkinData} that the client would reject.
+     */
+    static boolean isValidSkinData(byte[] data) {
+        if (data == null) {
+            return false;
+        }
+        return data.length == 64 * 32 * 4    // 8192  — classic
+                || data.length == 64 * 64 * 4  // 16384 — modern
+                || data.length == 128 * 128 * 4; // 65536 — HD
+    }
+
     /** A small palette of clearly distinct colours so avatars are easy to tell apart. */
     private static final int[] PALETTE = {
             0xE64A3B, // red
