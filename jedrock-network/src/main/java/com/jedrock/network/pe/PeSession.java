@@ -153,7 +153,15 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
                     b.writeFloatLE(yaw);                               // head yaw
                     b.writeFloatLE(yaw);
                     ByteBufUtils.writeSignedVarInt(b, 0);              // held item: air
-                    ByteBufUtils.writeVarInt(b, 0);                    // entity metadata: empty
+                    // Entity metadata: the flags long (nametag always visible) + the nametag string,
+                    // so the player's name floats above the avatar the way it does on Java.
+                    ByteBufUtils.writeVarInt(b, 2);                    // metadata entry count
+                    ByteBufUtils.writeVarInt(b, DATA_FLAGS_INDEX);     // key = DATA_FLAGS (0)
+                    ByteBufUtils.writeVarInt(b, DATA_TYPE_LONG);       // type = LONG (7)
+                    ByteBufUtils.writeSignedVarLong(b, BASE_ENTITY_FLAGS);
+                    ByteBufUtils.writeVarInt(b, DATA_NAMETAG_INDEX);   // key = DATA_NAMETAG (4)
+                    ByteBufUtils.writeVarInt(b, DATA_TYPE_STRING);     // type = STRING (4)
+                    ByteBufUtils.writeString(b, name);                 // the floating nametag
                 });
     }
 
@@ -207,13 +215,31 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     }
 
     @Override
+    public void teleport(double x, double y, double z, float yaw, float pitch) {
+        // Reposition our own player via MovePlayer in teleport mode (the judge snapping back a move).
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_MOVE_PLAYER);
+            ByteBufUtils.writeVarLong(b, SELF_ENTITY_ID);      // our own runtime id
+            b.writeFloatLE((float) x);
+            b.writeFloatLE((float) (y + EYE_HEIGHT));          // MovePlayer takes eye y
+            b.writeFloatLE((float) z);
+            b.writeFloatLE(pitch);
+            b.writeFloatLE(yaw);                               // head yaw
+            b.writeFloatLE(yaw);
+            b.writeByte(MOVE_MODE_TELEPORT);                   // server-forced reposition
+            b.writeBoolean(true);                              // on ground
+            ByteBufUtils.writeVarLong(b, 0);                   // riding runtime id: none
+        });
+    }
+
+    @Override
     public void swingArm(long entityId) {
         sendGameBatch(b -> writeAnimate(b, ANIMATE_SWING_ARM, entityId));
     }
 
     @Override
-    public void setPose(long entityId, boolean sneaking, boolean sprinting) {
-        sendGameBatch(b -> writeSetEntityDataFlags(b, entityId, sneaking, sprinting));
+    public void setPose(long entityId, boolean sneaking, boolean sprinting, boolean usingItem) {
+        sendGameBatch(b -> writeSetEntityDataFlags(b, entityId, sneaking, sprinting, usingItem));
     }
 
     /** Encode an Animate packet body (protocol 113): action (putVarInt), then entity runtime id. */
@@ -229,9 +255,13 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
      * dictionary DATA_FLAGS (a long) with the sneaking / sprinting bits set (both together, since
      * they live in the same long).
      */
-    static void writeSetEntityDataFlags(ByteBuf b, long entityRuntimeId, boolean sneaking, boolean sprinting) {
-        long flags = (sneaking ? (1L << DATA_FLAG_SNEAKING_BIT) : 0L)
-                | (sprinting ? (1L << DATA_FLAG_SPRINTING_BIT) : 0L);
+    static void writeSetEntityDataFlags(ByteBuf b, long entityRuntimeId,
+                                        boolean sneaking, boolean sprinting, boolean usingItem) {
+        // Keep the nametag-visibility flags on every write, or updating the pose would hide the name.
+        long flags = BASE_ENTITY_FLAGS
+                | (sneaking ? (1L << DATA_FLAG_SNEAKING_BIT) : 0L)
+                | (sprinting ? (1L << DATA_FLAG_SPRINTING_BIT) : 0L)
+                | (usingItem ? (1L << DATA_FLAG_ACTION_BIT) : 0L);
         ByteBufUtils.writeVarInt(b, ID_SET_ENTITY_DATA);
         ByteBufUtils.writeVarLong(b, entityRuntimeId); // entity runtime id
         ByteBufUtils.writeVarInt(b, 1);                // metadata entry count

@@ -111,8 +111,17 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
             connection.clientMoved(null, null, null, p.yaw, p.pitch);
         } else if (id == ServerboundPlayerDigging.PACKET_ID) {
             ServerboundPlayerDigging dig = lazy.materialize(ServerboundPlayerDigging::fromBuffer);
-            if (dig.isBreak() && connection.getListener() != null) {
-                connection.getListener().onBlockChange(connection, dig.x, dig.y, dig.z, 0); // 0 = air
+            if (connection.getListener() != null) {
+                if (dig.isBreak()) {
+                    connection.getListener().onBlockChange(connection, dig.x, dig.y, dig.z, 0); // 0 = air
+                } else if (dig.status == ServerboundPlayerDigging.STATUS_RELEASE_USE) {
+                    connection.getListener().onUseItem(connection, false); // finished eating / released
+                }
+            }
+        } else if (id == ServerboundUseItem.PACKET_ID) {
+            // Started using the held item (eat / drink / block / draw bow).
+            if (connection.getListener() != null) {
+                connection.getListener().onUseItem(connection, true);
             }
         } else if (id == ServerboundHeldItemChange.PACKET_ID) {
             ServerboundHeldItemChange h = lazy.materialize(ServerboundHeldItemChange::fromBuffer);

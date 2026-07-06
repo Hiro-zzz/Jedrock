@@ -31,42 +31,60 @@ class PeAnimationEncodingTest {
     @Test
     void setEntityDataSneakingSetsFlagBitOne() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeSetEntityDataFlags(b, 1000L, true, false);
+        PeSession.writeSetEntityDataFlags(b, 1000L, true, false, false);
 
         assertEquals(ID_SET_ENTITY_DATA, ByteBufUtils.readVarInt(b), "packet id");
         assertEquals(1000L, ByteBufUtils.readVarLong(b), "entity runtime id");
         assertEquals(1, ByteBufUtils.readVarInt(b), "metadata entry count");
         assertEquals(0, ByteBufUtils.readVarInt(b), "key = DATA_FLAGS");
         assertEquals(7, ByteBufUtils.readVarInt(b), "type = LONG");
-        assertEquals(1L << 1, readSignedVarLong(b), "sneaking = bit 1");
+        assertEquals(McpeProtocol.BASE_ENTITY_FLAGS | (1L << 1), readSignedVarLong(b),
+                "nametag flags + sneaking bit 1");
         b.release();
     }
 
     @Test
-    void setEntityDataCombinesSneakAndSprintBits() {
+    void setEntityDataCombinesSneakSprintAndItemUse() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeSetEntityDataFlags(b, 9L, true, true);
+        PeSession.writeSetEntityDataFlags(b, 9L, true, true, true);
 
         ByteBufUtils.readVarInt(b);   // id
         ByteBufUtils.readVarLong(b);  // runtime id
         ByteBufUtils.readVarInt(b);   // count
         ByteBufUtils.readVarInt(b);   // key
         ByteBufUtils.readVarInt(b);   // type
-        assertEquals((1L << 1) | (1L << 3), readSignedVarLong(b), "sneak bit 1 + sprint bit 3");
+        assertEquals(McpeProtocol.BASE_ENTITY_FLAGS | (1L << 1) | (1L << 3) | (1L << 4),
+                readSignedVarLong(b), "nametag + sneak(1) + sprint(3) + action(4)");
         b.release();
     }
 
     @Test
-    void setEntityDataClearsFlagsWhenStanding() {
+    void setEntityDataItemUseSetsActionBit() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeSetEntityDataFlags(b, 5L, false, false);
+        PeSession.writeSetEntityDataFlags(b, 3L, false, false, true);
 
         ByteBufUtils.readVarInt(b);   // id
         ByteBufUtils.readVarLong(b);  // runtime id
         ByteBufUtils.readVarInt(b);   // count
         ByteBufUtils.readVarInt(b);   // key
         ByteBufUtils.readVarInt(b);   // type
-        assertEquals(0L, readSignedVarLong(b), "no flags when standing");
+        assertEquals(McpeProtocol.BASE_ENTITY_FLAGS | (1L << 4), readSignedVarLong(b),
+                "nametag flags + action bit 4 (using item)");
+        b.release();
+    }
+
+    @Test
+    void setEntityDataKeepsNametagFlagsWhenIdle() {
+        ByteBuf b = Unpooled.buffer();
+        PeSession.writeSetEntityDataFlags(b, 5L, false, false, false);
+
+        ByteBufUtils.readVarInt(b);   // id
+        ByteBufUtils.readVarLong(b);  // runtime id
+        ByteBufUtils.readVarInt(b);   // count
+        ByteBufUtils.readVarInt(b);   // key
+        ByteBufUtils.readVarInt(b);   // type
+        assertEquals(McpeProtocol.BASE_ENTITY_FLAGS, readSignedVarLong(b),
+                "only the nametag-visibility flags when idle");
         b.release();
     }
 

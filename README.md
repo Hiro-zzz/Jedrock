@@ -69,11 +69,18 @@ Target versions:
   relayed into the PE `PlayerList`, so Bedrock players see each other's real skins (not the coloured
   placeholder). Cross-edition is a hard protocol limit: Java requires Mojang-signed textures, so a
   Bedrock player still shows as Steve/Alex on Java, and JE players use the placeholder on Bedrock.
-- ✅ **Player animations (sneak, sprint + arm swing)** — crouch, sprint and arm swings are decoded
-  from each edition (JE Entity Action / Animation, PE PlayerAction / Animate) and relayed cross-edition
-  (JE Entity Metadata / Animation, PE SetEntityData / Animate), so a phone player sees a PC player
-  crouch, sprint and swing, and vice versa. Sneak and sprint share one flags field, so they're sent
-  together; a late joiner is synced to anyone already crouching or sprinting.
+- ✅ **Player animations (sneak, sprint, arm swing, item-use)** — crouch, sprint, arm swings and the
+  item-use pose (eat / drink / block / draw bow) are decoded from each edition and relayed
+  cross-edition (JE Entity Action / Animation / Use Item → Entity Metadata / Animation; PE PlayerAction
+  / Animate → SetEntityData / Animate). Crouch, sprint and item-use share a flags field, so the full
+  pose is always sent together (one can't clear another) and a late joiner is synced to it. Item-use is
+  reported cleanly by the Java client (start via Use Item, stop via Player Digging release); a
+  Bedrock-initiated item-use isn't decoded yet, and the pose is generic until held items are relayed.
+- ✅ **The blind judge (lazy anti-cheat)** — instead of a physics engine, two cheap checks the core
+  runs on the network threads: a **reach sphere** rejects block edits farther than `judge.max-reach`
+  from the editor (their client is corrected with the real block), and a **movement-delta** check
+  refuses a teleport/speed jump larger than `judge.max-move-delta` between two reports (the client is
+  snapped back to its last valid spot). Generous by design and fully configurable / toggleable.
 
 Not yet: cross-edition skin fidelity (a signed-texture limit, see above), movement validation, scripting.
 See [Roadmap](#roadmap).
@@ -92,7 +99,8 @@ packet switch that spends CPU and memory only when it absolutely must**. Five pi
    collisions are left to the client. We don't simulate an honest world — we render a convincing
    one in the player's mind.
 3. **The blind judge.** Instead of a heavy server physics engine, validation is a lazy
-   approximation at the points that matter (movement deltas, interaction spheres) — *planned*.
+   approximation at the points that matter — movement deltas and interaction spheres — done cheaply
+   on the network threads (`BlindJudge`), catching the egregious rather than simulating an honest world.
 4. **The two-headed monster.** The network layer isolates the core from both protocols' nightmares
    (RakNet, zlib batches, differing block palettes). To the core, a PC player and a phone player
    are identical `Player` objects.
@@ -234,8 +242,9 @@ which binds (defaults, configurable in `jedrock.properties`):
 - **Bedrock** on UDP `0.0.0.0:19132`
 
 The first run writes a `jedrock.properties` next to the process with the bind host/ports, server
-name, MOTD, max players, world seed, tick rate and view distance; edit and restart to apply, or
-override a single key with `-Dkey=value`. The RakNet protocol version defaults to `8` (MCPE 1.1.5)
+name, MOTD, max players, world seed, tick rate, view distance and the blind-judge limits
+(`judge.enabled`, `judge.max-reach`, `judge.max-move-delta`); edit and restart to apply, or override
+a single key with `-Dkey=value`. The RakNet protocol version defaults to `8` (MCPE 1.1.5)
 and can be overridden with `-Djedrock.pe.raknetProtocolVersion=N` for other client builds.
 
 ### Console & diagnostics
@@ -266,8 +275,13 @@ and MCPE compression — no client required.
 
 ## Roadmap
 
-- **More animations** — sneak, sprint and arm swing relay today; eating/blocking poses and hurt
-  animations are the same relay pattern extended with more action ids and metadata flags.
+- **Held-item / equipment relay** — show what each player holds in-hand on their avatar; this also
+  makes the item-use pose render as the specific eat / drink / block animation, and unblocks a
+  Bedrock-initiated item-use signal.
+- **More animations** — sneak, sprint, arm swing and item-use relay today; hurt / death animations
+  need a damage model, and elytra gliding needs a clean cross-edition stop signal.
+- **Sharper judge** — the blind judge lands today (reach + move-delta); per-axis limits, a knockback
+  allowance and interaction ray-casts would tighten it without turning into a physics engine.
 - **The blind judge** — movement-delta and interaction-sphere validation, now that movement is live.
 - **Scripting** — embedded JS (GraalJS) plugins with hot reload.
 

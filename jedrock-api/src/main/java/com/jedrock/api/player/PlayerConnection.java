@@ -58,14 +58,22 @@ public interface PlayerConnection {
     /** Move a player avatar previously shown via {@link #showPlayer} to an absolute position. */
     void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch);
 
+    /**
+     * Reposition <em>this</em> client's own player — e.g. the blind judge snapping an illegal move
+     * back to the last valid spot, so the client re-syncs with the server's authoritative position.
+     */
+    void teleport(double x, double y, double z, float yaw, float pitch);
+
     /** Play another player's arm-swing animation on this client (attack / dig / interact). */
     void swingArm(long entityId);
 
     /**
-     * Set another player's pose on this client. Sneak and sprint share one flags field per edition,
-     * so both are sent together to avoid one clearing the other.
+     * Set another player's pose on this client — crouch, sprint and item-use (eat / drink / block /
+     * draw bow). These share a flags field on the wire (all in one PE {@code DATA_FLAGS} long; crouch
+     * and sprint in the one JE flags byte), so they are always sent together to avoid one clearing
+     * another.
      */
-    void setPose(long entityId, boolean sneaking, boolean sprinting);
+    void setPose(long entityId, boolean sneaking, boolean sprinting, boolean usingItem);
 
     /**
      * Push a single block change to this client so an edit made by any player becomes visible.

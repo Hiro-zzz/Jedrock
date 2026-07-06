@@ -22,43 +22,47 @@ class AnimationPacketsTest {
         buf.release();
     }
 
-    @Test
-    void entityMetadataCarriesCrouchFlagThenTerminator() {
-        ByteBuf buf = Unpooled.buffer();
-        ClientboundEntityMetadata.pose(1000, true, false).write(buf);
-
-        assertEquals(1000, ByteBufUtils.readVarInt(buf), "entity id");
+    /** Reads a pose packet into [flags, handStates] after asserting the framing. */
+    private static int[] readPose(ByteBuf buf, int expectedEntityId) {
+        assertEquals(expectedEntityId, ByteBufUtils.readVarInt(buf), "entity id");
         assertEquals(0, buf.readUnsignedByte(), "metadata index 0 (flags)");
         assertEquals(0, ByteBufUtils.readVarInt(buf), "type 0 (byte)");
-        assertEquals(0x02, buf.readUnsignedByte(), "crouched flag bit");
+        int flags = buf.readUnsignedByte();
+        assertEquals(6, buf.readUnsignedByte(), "metadata index 6 (hand states)");
+        assertEquals(0, ByteBufUtils.readVarInt(buf), "type 0 (byte)");
+        int handStates = buf.readUnsignedByte();
         assertEquals(0xFF, buf.readUnsignedByte(), "metadata terminator");
-        assertFalse(buf.isReadable());
+        assertFalse(buf.isReadable(), "no trailing bytes");
+        return new int[]{flags, handStates};
+    }
+
+    @Test
+    void poseCarriesCrouchFlag() {
+        ByteBuf buf = Unpooled.buffer();
+        ClientboundEntityMetadata.pose(1000, true, false, false).write(buf);
+        int[] pose = readPose(buf, 1000);
+        assertEquals(0x02, pose[0], "crouched flag");
+        assertEquals(0x00, pose[1], "not using an item");
         buf.release();
     }
 
     @Test
-    void entityMetadataCombinesCrouchAndSprintInOneByte() {
+    void poseCombinesCrouchSprintAndItemUse() {
         ByteBuf buf = Unpooled.buffer();
-        ClientboundEntityMetadata.pose(7, true, true).write(buf);
-
-        ByteBufUtils.readVarInt(buf);          // entity id
-        buf.readUnsignedByte();                // index
-        ByteBufUtils.readVarInt(buf);          // type
-        assertEquals(0x02 | 0x08, buf.readUnsignedByte(), "crouch + sprint bits together");
-        assertEquals(0xFF, buf.readUnsignedByte());
+        ClientboundEntityMetadata.pose(7, true, true, true).write(buf);
+        int[] pose = readPose(buf, 7);
+        assertEquals(0x02 | 0x08, pose[0], "crouch + sprint bits");
+        assertEquals(0x01, pose[1], "hand active (using item)");
         buf.release();
     }
 
     @Test
-    void entityMetadataClearsFlagsWhenStanding() {
+    void poseClearsEverythingWhenIdle() {
         ByteBuf buf = Unpooled.buffer();
-        ClientboundEntityMetadata.pose(7, false, false).write(buf);
-
-        ByteBufUtils.readVarInt(buf);          // entity id
-        buf.readUnsignedByte();                // index
-        ByteBufUtils.readVarInt(buf);          // type
-        assertEquals(0x00, buf.readUnsignedByte(), "no flags when standing");
-        assertEquals(0xFF, buf.readUnsignedByte());
+        ClientboundEntityMetadata.pose(7, false, false, false).write(buf);
+        int[] pose = readPose(buf, 7);
+        assertEquals(0x00, pose[0], "no flags");
+        assertEquals(0x00, pose[1], "no hand state");
         buf.release();
     }
 

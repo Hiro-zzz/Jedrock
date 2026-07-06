@@ -57,6 +57,7 @@ public class JedrockServer implements Server, ConnectionListener {
     // In-memory state layer
     private final PlayerRegistry playerRegistry = new PlayerRegistry();
     private final CoreWorld defaultWorld;
+    private final BlindJudge judge;
 
     private final AtomicLong tickCounter = new AtomicLong(0);
 
@@ -65,6 +66,7 @@ public class JedrockServer implements Server, ConnectionListener {
         this.config = JedrockConfig.load();
         this.name = config.name();
         this.defaultWorld = new CoreWorld("world", Dimension.OVERWORLD, config.seed());
+        this.judge = new BlindJudge(config.judgeEnabled(), config.maxReach(), config.maxMoveDelta());
 
         // Attach scheduler + core tick to game loop
         gameLoop.addTickable(scheduler);
@@ -220,9 +222,9 @@ public class JedrockServer implements Server, ConnectionListener {
             Location loc = other.getLocation();
             connection.showPlayer(other.getUniqueId(), other.getName(), other.getEntityId(),
                     loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
-            // Sync a currently sneaking/sprinting player's pose so the newcomer sees it, not standing.
-            if (other instanceof CorePlayer oc && (oc.isSneaking() || oc.isSprinting())) {
-                connection.setPose(other.getEntityId(), oc.isSneaking(), oc.isSprinting());
+            // Sync a currently posed player (crouch / sprint / item-use) so the newcomer sees it.
+            if (other instanceof CorePlayer oc && (oc.isSneaking() || oc.isSprinting() || oc.isUsingItem())) {
+                connection.setPose(other.getEntityId(), oc.isSneaking(), oc.isSprinting(), oc.isUsingItem());
             }
             other.getConnection().showPlayer(uuid, username, player.getEntityId(),
                     spawn.x(), spawn.y(), spawn.z(), spawn.yaw(), spawn.pitch());
@@ -257,6 +259,13 @@ public class JedrockServer implements Server, ConnectionListener {
         if (player == null) {
             return;
         }
+        // Blind judge: refuse to believe a blatant teleport / speed jump and snap the client back to
+        // its last valid spot (keeping its new look angles, which aren't cheating), then drop the move.
+        Location from = player.getLocation();
+        if (!judge.allowsMove(from.x(), from.y(), from.z(), x, y, z)) {
+            connection.teleport(from.x(), from.y(), from.z(), yaw, pitch);
+            return;
+        }
         player.setLocation(new Location(player.getWorld(), x, y, z, yaw, pitch));
         // Relay at the sender's own rate; both clients interpolate between updates. Iterate the live
         // roster view directly and skip the Optional/capturing lambda, so a move packet allocates
@@ -271,6 +280,16 @@ public class JedrockServer implements Server, ConnectionListener {
 
     @Override
     public void onBlockChange(PlayerConnection connection, int x, int y, int z, int state) {
+        // Blind judge: reject an edit outside the editor's reach sphere and correct their client by
+        // re-sending the real (unchanged) block, so a reach hack can't touch distant blocks.
+        CorePlayer editor = playerRegistry.getByConnectionOrNull(connection);
+        if (editor != null) {
+            Location loc = editor.getLocation();
+            if (!judge.allowsInteraction(loc.x(), loc.y(), loc.z(), x, y, z)) {
+                connection.sendBlockChange(x, y, z, defaultWorld.getBlockId(x, y, z));
+                return;
+            }
+        }
         // Apply to the shared world, then push the edit to every client (including the editor, so
         // the server stays authoritative). {@code state} is the canonical (id << 4 | meta) value;
         // each connection serializes it in its own protocol.
@@ -305,14 +324,25 @@ public class JedrockServer implements Server, ConnectionListener {
         relayPose(player);
     }
 
-    /** Relay a player's full pose (sneak + sprint together — they share one flags field per edition). */
+    @Override
+    public void onUseItem(PlayerConnection connection, boolean using) {
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player == null) {
+            return;
+        }
+        player.setUsingItem(using);
+        relayPose(player);
+    }
+
+    /** Relay a player's full pose (sneak + sprint + item-use share a flags field, so send together). */
     private void relayPose(CorePlayer player) {
         long entityId = player.getEntityId();
         boolean sneaking = player.isSneaking();
         boolean sprinting = player.isSprinting();
+        boolean usingItem = player.isUsingItem();
         for (CorePlayer other : playerRegistry.online()) {
             if (other != player) {
-                other.getConnection().setPose(entityId, sneaking, sprinting);
+                other.getConnection().setPose(entityId, sneaking, sprinting, usingItem);
             }
         }
     }

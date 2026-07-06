@@ -145,13 +145,18 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void teleport(double x, double y, double z, float yaw, float pitch) {
+        send(new ClientboundPlayerPositionAndLook(x, y, z, yaw, pitch));
+    }
+
+    @Override
     public void swingArm(long entityId) {
         send(new ClientboundAnimation((int) entityId, ClientboundAnimation.SWING_MAIN_ARM));
     }
 
     @Override
-    public void setPose(long entityId, boolean sneaking, boolean sprinting) {
-        send(ClientboundEntityMetadata.pose((int) entityId, sneaking, sprinting));
+    public void setPose(long entityId, boolean sneaking, boolean sprinting, boolean usingItem) {
+        send(ClientboundEntityMetadata.pose((int) entityId, sneaking, sprinting, usingItem));
     }
 
     @Override

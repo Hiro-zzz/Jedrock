@@ -15,6 +15,8 @@ public final class ServerboundPlayerDigging implements ServerboundPacket {
 
     public static final int STATUS_STARTED = 0;
     public static final int STATUS_FINISHED = 2;
+    /** Release use item — finish eating / drinking / blocking / shoot bow. */
+    public static final int STATUS_RELEASE_USE = 5;
 
     public int status;
     public int x, y, z;

@@ -71,13 +71,25 @@ final class McpeProtocol {
     static final int ACTION_START_SNEAK = 11;
     static final int ACTION_STOP_SNEAK = 12;
 
-    // --- Animate (arm swing) + entity metadata (sneak / sprint pose) ---
+    // --- Animate (arm swing) + entity metadata (sneak / sprint pose, nametag) ---
     static final int ANIMATE_SWING_ARM = 1;
     /** Entity metadata: DATA_FLAGS is a LONG property at index 0; sneak/sprint are bits of that long. */
     static final int DATA_FLAGS_INDEX = 0;
+    static final int DATA_NAMETAG_INDEX = 4;   // string: the floating nametag above the entity
     static final int DATA_TYPE_LONG = 7;
+    static final int DATA_TYPE_STRING = 4;
     static final int DATA_FLAG_SNEAKING_BIT = 1;
     static final int DATA_FLAG_SPRINTING_BIT = 3;
+    static final int DATA_FLAG_ACTION_BIT = 4;    // "using an item" (eat / drink / block / draw bow)
+    static final int DATA_FLAG_CAN_SHOW_NAMETAG_BIT = 14;
+    static final int DATA_FLAG_ALWAYS_SHOW_NAMETAG_BIT = 15;
+    /**
+     * Flags every player avatar always carries so its nametag floats above its head like on Java.
+     * These must ride along in <em>every</em> DATA_FLAGS write (e.g. pose changes) or a later write
+     * would clear them and the name would stop showing.
+     */
+    static final long BASE_ENTITY_FLAGS =
+            (1L << DATA_FLAG_CAN_SHOW_NAMETAG_BIT) | (1L << DATA_FLAG_ALWAYS_SHOW_NAMETAG_BIT);
 
     // --- InventoryTransaction: transaction types + UseItem action types + inventory-action sources ---
     static final int TRANSACTION_USE_ITEM = 2;
@@ -87,6 +99,9 @@ final class McpeProtocol {
     static final int SOURCE_WORLD = 2;
     static final int SOURCE_CREATIVE = 3;
     static final int SOURCE_TODO = 99999;
+
+    /** MovePlayer mode: 0 normal (interpolated), 2 teleport (server reposition — used by the judge). */
+    static final int MOVE_MODE_TELEPORT = 2;
 
     /** Block-face offsets (Bedrock uses the same order as Java): down, up, north, south, west, east. */
     static final int[] FACE_DX = {0, 0, 0, 0, -1, 1};

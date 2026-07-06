@@ -7,8 +7,10 @@ import java.io.InputStream;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Parsing behaviour of {@link JedrockConfig}: defaults fill the gaps, valid values are honoured,
@@ -33,6 +35,9 @@ class JedrockConfigTest {
         p.setProperty("world.seed", "12345");
         p.setProperty("game.tick-rate", "40");
         p.setProperty("game.view-distance", "10");
+        p.setProperty("judge.enabled", "false");
+        p.setProperty("judge.max-reach", "5.5");
+        p.setProperty("judge.max-move-delta", "12.0");
 
         ServerProperties c = JedrockConfig.parse(p);
         assertEquals("My Server", c.name());
@@ -44,6 +49,22 @@ class JedrockConfigTest {
         assertEquals(12345L, c.seed());
         assertEquals(40, c.tickRate());
         assertEquals(10, c.viewDistance());
+        assertFalse(c.judgeEnabled());
+        assertEquals(5.5, c.maxReach());
+        assertEquals(12.0, c.maxMoveDelta());
+    }
+
+    @Test
+    void malformedJudgeValuesFallBackToDefaults() {
+        Properties p = new Properties();
+        p.setProperty("judge.max-reach", "not-a-number");
+        p.setProperty("judge.max-move-delta", "-3");   // non-positive
+
+        ServerProperties def = ServerProperties.defaults();
+        ServerProperties c = JedrockConfig.parse(p);
+        assertEquals(def.maxReach(), c.maxReach());
+        assertEquals(def.maxMoveDelta(), c.maxMoveDelta());
+        assertTrue(c.judgeEnabled(), "unset judge.enabled keeps the default (true)");
     }
 
     @Test

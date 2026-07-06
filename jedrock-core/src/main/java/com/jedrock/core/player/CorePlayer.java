@@ -32,6 +32,7 @@ public final class CorePlayer implements Player {
     private volatile GameMode gameMode = GameMode.CREATIVE;
     private volatile boolean sneaking = false;
     private volatile boolean sprinting = false;
+    private volatile boolean usingItem = false;
 
     public CorePlayer(UUID uniqueId, String name, PlayerConnection connection,
                       CoreWorld world, Location location) {
@@ -68,6 +69,15 @@ public final class CorePlayer implements Player {
 
     public void setSprinting(boolean sprinting) {
         this.sprinting = sprinting;
+    }
+
+    /** Whether the player is currently using an item (eat / drink / block / draw bow). */
+    public boolean isUsingItem() {
+        return usingItem;
+    }
+
+    public void setUsingItem(boolean usingItem) {
+        this.usingItem = usingItem;
     }
 
     @Override

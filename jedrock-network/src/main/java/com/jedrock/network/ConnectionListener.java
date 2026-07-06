@@ -50,6 +50,9 @@ public interface ConnectionListener {
     /** A player started or stopped sprinting; the core relays it to everyone else. */
     default void onSprint(PlayerConnection connection, boolean sprinting) {}
 
+    /** A player started or stopped using an item (eat / drink / block / draw bow); the core relays it. */
+    default void onUseItem(PlayerConnection connection, boolean using) {}
+
     /** A player swung their arm (attack / dig / interact); the core relays it to everyone else. */
     default void onSwingArm(PlayerConnection connection) {}
 }

@@ -15,6 +15,9 @@ package com.jedrock.api.config;
  * @param seed         world-generation seed
  * @param tickRate     game-loop rate in ticks per second
  * @param viewDistance chunk streaming radius around each player
+ * @param judgeEnabled whether the "blind judge" lazy anti-cheat validation is on
+ * @param maxReach     max block-interaction distance (blocks) from the player
+ * @param maxMoveDelta max position change (blocks) between two movement reports
  */
 public record ServerProperties(
         String name,
@@ -25,7 +28,10 @@ public record ServerProperties(
         String motd,
         long seed,
         int tickRate,
-        int viewDistance
+        int viewDistance,
+        boolean judgeEnabled,
+        double maxReach,
+        double maxMoveDelta
 ) {
 
     /** The built-in defaults, used when no config file is present or a key is missing/invalid. */
@@ -39,7 +45,10 @@ public record ServerProperties(
                 "Jedrock",       // motd
                 0x5EED1EAFL,     // seed — fixed so restarts reproduce the same terrain
                 20,              // tickRate
-                6                // viewDistance
+                6,               // viewDistance
+                true,            // judgeEnabled
+                7.0,             // maxReach — creative reach (~6) plus margin
+                16.0             // maxMoveDelta — generous; catches teleport/speed, not lag/falls
         );
     }
 }

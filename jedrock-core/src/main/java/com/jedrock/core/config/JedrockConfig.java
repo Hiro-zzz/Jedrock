@@ -65,7 +65,10 @@ public final class JedrockConfig {
                 str(file, "server.motd", def.motd()),
                 seed(file, "world.seed", def.seed()),
                 positiveInt(file, "game.tick-rate", def.tickRate()),
-                positiveInt(file, "game.view-distance", def.viewDistance())
+                positiveInt(file, "game.view-distance", def.viewDistance()),
+                bool(file, "judge.enabled", def.judgeEnabled()),
+                positiveDouble(file, "judge.max-reach", def.maxReach()),
+                positiveDouble(file, "judge.max-move-delta", def.maxMoveDelta())
         );
     }
 
@@ -92,6 +95,29 @@ public final class JedrockConfig {
             int parsed = Integer.parseInt(v.trim());
             if (parsed <= 0) {
                 LOGGER.warn(key + " must be positive (got " + parsed + "); using default " + def);
+                return def;
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            LOGGER.warn(key + " is not a number ('" + v.trim() + "'); using default " + def);
+            return def;
+        }
+    }
+
+    private static boolean bool(Properties file, String key, boolean def) {
+        String v = raw(file, key);
+        return v == null || v.isBlank() ? def : Boolean.parseBoolean(v.trim());
+    }
+
+    private static double positiveDouble(Properties file, String key, double def) {
+        String v = raw(file, key);
+        if (v == null || v.isBlank()) {
+            return def;
+        }
+        try {
+            double parsed = Double.parseDouble(v.trim());
+            if (parsed <= 0 || !Double.isFinite(parsed)) {
+                LOGGER.warn(key + " must be a positive number (got " + v.trim() + "); using default " + def);
                 return def;
             }
             return parsed;

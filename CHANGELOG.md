@@ -8,6 +8,26 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **The blind judge — lazy anti-cheat.** A dependency-free `BlindJudge` runs two cheap, allocation-free
+  checks on the network threads instead of a physics engine: an **interaction sphere** rejects a block
+  edit farther than `judge.max-reach` from the editor (the client is corrected by re-sending the real
+  block), and a **movement-delta** check rejects a position jump larger than `judge.max-move-delta`
+  between two reports (the client is snapped back to its last valid spot via a new
+  `PlayerConnection.teleport`). Thresholds are generous by design and come from config
+  (`judge.enabled` / `judge.max-reach` / `judge.max-move-delta`). (Closes a roadmap item.)
+- **Item-use pose animation (eat / drink / block / draw bow).** The Java client's item use is decoded
+  (start = Use Item `0x20`, stop = Player Digging release, status 5) and relayed cross-edition as an
+  entity pose (JE Entity Metadata index 6 hand-states `0x01`; PE `DATA_FLAG_ACTION`, bit 4). Crouch,
+  sprint and item-use now travel through one unified `setPose(sneaking, sprinting, usingItem)` — the PE
+  side shares a single `DATA_FLAGS` long, so sending them together (with the base nametag flags) keeps
+  one from clearing another. A late joiner is synced to the full pose. Bedrock-initiated item-use isn't
+  decoded yet (the 1.1.5 signal is under-documented), and the pose stays generic until held items are
+  relayed. PE flag verified against PocketMine-MP at protocol 113.
+- **Nametags above Bedrock avatars.** The `AddPlayer` metadata now carries `DATA_NAMETAG` (the
+  player's name) plus the `CAN_SHOW_NAMETAG` / `ALWAYS_SHOW_NAMETAG` flags, so every player's name —
+  Java players included — floats above their avatar on Bedrock the way it does on Java (previously the
+  metadata was empty and no nametag showed). Those flag bits are folded into `BASE_ENTITY_FLAGS` and
+  re-sent on every pose update, so crouching/sprinting no longer clears the name.
 - **Player animations — sneak, sprint + arm swing (cross-edition).** Crouch, sprint and arm-swing are
   decoded from each edition (JE Entity Action `0x15` / Animation `0x1D`; PE PlayerAction actions
   9/10/11/12 / Animate `0x2c`), relayed through `ConnectionListener.onSneak` / `onSprint` / `onSwingArm`
