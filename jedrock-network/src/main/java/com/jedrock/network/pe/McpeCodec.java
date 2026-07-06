@@ -50,8 +50,14 @@ final class McpeCodec {
             pk.skipBytes(nbtLen);
         }
         int canPlaceOn = ByteBufUtils.readVarInt(pk);
+        if (!PacketGuard.saneCount(canPlaceOn)) {
+            throw new IllegalArgumentException("canPlaceOn count out of bounds: " + canPlaceOn);
+        }
         for (int i = 0; i < canPlaceOn; i++) ByteBufUtils.readString(pk);
         int canDestroy = ByteBufUtils.readVarInt(pk);
+        if (!PacketGuard.saneCount(canDestroy)) {
+            throw new IllegalArgumentException("canDestroy count out of bounds: " + canDestroy);
+        }
         for (int i = 0; i < canDestroy; i++) ByteBufUtils.readString(pk);
         return Blocks.state(id, aux >> 8);
     }

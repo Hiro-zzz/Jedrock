@@ -8,6 +8,13 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Crash-packet guard (blind judge, wire layer).** A new `PacketGuard` hardens the Bedrock inbound
+  path against malicious packets that aim to crash or stall the server: `McpeCompression` now caps how
+  far a `0xFE` batch may inflate (rejecting a tiny "zip bomb" that would balloon to gigabytes and OOM
+  the process), the batch dispatcher caps inner-packet count, and the item / inventory-transaction
+  decoders reject an out-of-bounds wire-driven list length before looping on it. Generous limits, far
+  above anything a real 1.1.5 client sends. (The Java pipeline was already frame- and array-length
+  capped.)
 - **The blind judge — lazy anti-cheat.** A dependency-free `BlindJudge` runs two cheap, allocation-free
   checks on the network threads instead of a physics engine: an **interaction sphere** rejects a block
   edit farther than `judge.max-reach` from the editor (the client is corrected by re-sending the real

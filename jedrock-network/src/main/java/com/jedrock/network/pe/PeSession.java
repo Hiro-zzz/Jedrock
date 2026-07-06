@@ -323,7 +323,13 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
 
         ByteBuf batch = Unpooled.wrappedBuffer(inflated.data());
         try {
+            int packetCount = 0;
             while (batch.isReadable()) {
+                if (++packetCount > PacketGuard.MAX_PACKETS_PER_BATCH) {
+                    LOGGER.warn("[PE] batch exceeded " + PacketGuard.MAX_PACKETS_PER_BATCH
+                            + " inner packets — dropping the rest");
+                    break;
+                }
                 int len = ByteBufUtils.readVarInt(batch);
                 if (len <= 0 || len > batch.readableBytes()) {
                     LOGGER.warn("[PE] malformed batch entry: len=" + len);

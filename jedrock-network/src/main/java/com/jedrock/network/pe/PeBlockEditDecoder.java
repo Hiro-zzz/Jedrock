@@ -91,6 +91,9 @@ final class PeBlockEditDecoder {
         try {
             int transactionType = ByteBufUtils.readVarInt(pk); // unsigned
             int actionCount = ByteBufUtils.readVarInt(pk);     // unsigned
+            if (!PacketGuard.saneCount(actionCount)) {
+                return null; // hostile action count — refuse before spinning the skip loop
+            }
             for (int i = 0; i < actionCount; i++) {
                 if (!skipInventoryAction(pk)) {
                     return null; // unknown source type — can't skip safely, bail before misaligning

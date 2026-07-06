@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class McpeCompressionTest {
@@ -44,5 +45,14 @@ class McpeCompressionTest {
         McpeCompression.Inflated result = McpeCompression.inflate(compressed);
         assertNotNull(result);
         assertArrayEquals(sample, result.data());
+    }
+
+    @Test
+    void rejectsAZipBombThatInflatesPastTheCap() {
+        // A few MiB of zeros compresses to a few KB — the classic tiny-in, huge-out crash packet.
+        byte[] huge = new byte[(PacketGuard.MAX_INFLATED_BATCH) + (1 << 20)]; // cap + 1 MiB
+        byte[] compressed = McpeCompression.deflate(huge, false);
+        assertTrue(compressed.length < huge.length / 100, "the bomb is tiny compressed");
+        assertNull(McpeCompression.inflate(compressed), "inflating past the cap must be rejected");
     }
 }

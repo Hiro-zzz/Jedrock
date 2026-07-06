@@ -1,5 +1,7 @@
 package com.jedrock.network.pe;
 
+import com.jedrock.utils.JLogger;
+
 import java.io.ByteArrayOutputStream;
 import java.util.zip.DataFormatException;
 import java.util.zip.Deflater;
@@ -13,6 +15,8 @@ import java.util.zip.Inflater;
  * trying zlib first, then raw, and reports which worked so replies can match.
  */
 public final class McpeCompression {
+
+    private static final JLogger LOGGER = JLogger.getLogger(McpeCompression.class);
 
     private McpeCompression() {}
 
@@ -33,7 +37,9 @@ public final class McpeCompression {
     private static byte[] tryInflate(byte[] input, boolean raw) {
         Inflater inflater = new Inflater(raw);
         inflater.setInput(input);
-        ByteArrayOutputStream out = new ByteArrayOutputStream(Math.max(64, input.length * 4));
+        // Cap the initial guess (guarding int overflow for a large input) at the hard limit.
+        int initial = (int) Math.max(64, Math.min((long) input.length * 4, PacketGuard.MAX_INFLATED_BATCH));
+        ByteArrayOutputStream out = new ByteArrayOutputStream(initial);
         byte[] chunk = new byte[8192];
         try {
             while (!inflater.finished()) {
@@ -42,6 +48,12 @@ public final class McpeCompression {
                     if (inflater.needsInput() || inflater.needsDictionary()) break;
                 }
                 out.write(chunk, 0, n);
+                if (out.size() > PacketGuard.MAX_INFLATED_BATCH) {
+                    // Refuse to keep inflating — a small input ballooning past the cap is a zip bomb.
+                    LOGGER.warn("[PE] batch inflated past " + PacketGuard.MAX_INFLATED_BATCH
+                            + " bytes from " + input.length + " compressed — rejecting (possible packet bomb)");
+                    return null;
+                }
             }
             return out.size() > 0 ? out.toByteArray() : null;
         } catch (DataFormatException e) {

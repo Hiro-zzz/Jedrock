@@ -76,11 +76,14 @@ Target versions:
   pose is always sent together (one can't clear another) and a late joiner is synced to it. Item-use is
   reported cleanly by the Java client (start via Use Item, stop via Player Digging release); a
   Bedrock-initiated item-use isn't decoded yet, and the pose is generic until held items are relayed.
-- ✅ **The blind judge (lazy anti-cheat)** — instead of a physics engine, two cheap checks the core
-  runs on the network threads: a **reach sphere** rejects block edits farther than `judge.max-reach`
-  from the editor (their client is corrected with the real block), and a **movement-delta** check
-  refuses a teleport/speed jump larger than `judge.max-move-delta` between two reports (the client is
-  snapped back to its last valid spot). Generous by design and fully configurable / toggleable.
+- ✅ **The blind judge (lazy anti-cheat + crash-packet guard)** — instead of a physics engine, cheap
+  checks that catch the egregious. Gameplay: a **reach sphere** rejects block edits farther than
+  `judge.max-reach` from the editor (their client is corrected with the real block), and a
+  **movement-delta** check refuses a teleport/speed jump larger than `judge.max-move-delta` between two
+  reports (the client is snapped back). Wire: a **`PacketGuard`** bounds the Bedrock packet layer so a
+  malicious client can't crash the server — a zlib "zip bomb" batch is rejected once it inflates past a
+  cap, and batch / inventory-action / string-list counts are capped so a huge wire-driven count can't
+  spin a parse loop or exhaust memory. (Java's frame + array reads were already length-capped.)
 
 Not yet: cross-edition skin fidelity (a signed-texture limit, see above), movement validation, scripting.
 See [Roadmap](#roadmap).
