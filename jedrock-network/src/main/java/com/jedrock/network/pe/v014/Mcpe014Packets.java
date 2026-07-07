@@ -39,8 +39,20 @@ public final class Mcpe014Packets {
     public static final int ID_RESPAWN = 0xb3;
     public static final int ID_FULL_CHUNK_DATA = 0xbf;
     public static final int ID_SET_DIFFICULTY = 0xc0;
+    public static final int ID_PLAYER_LIST = 0xc3;
     public static final int ID_REQUEST_CHUNK_RADIUS = 0xc8;
     public static final int ID_CHUNK_RADIUS_UPDATE = 0xc9;
+
+    // PlayerList types.
+    public static final int PLAYER_LIST_ADD = 0;
+    public static final int PLAYER_LIST_REMOVE = 1;
+    // Entity metadata (0.14): DATA_FLAGS is a BYTE at index 0 (not a LONG like 1.1.5); terminator 0x7f.
+    public static final int DATA_FLAGS_INDEX = 0;
+    public static final int DATA_TYPE_BYTE = 0;
+    public static final int META_END = 0x7f;
+    public static final int FLAG_SNEAKING = 1 << 1; // 0x02
+    public static final int FLAG_SPRINTING = 1 << 3; // 0x08
+    public static final int FLAG_ACTION = 1 << 4;   // 0x10 — using an item
 
     // TextPacket types.
     public static final int TEXT_TYPE_RAW = 0;
@@ -201,6 +213,41 @@ public final class Mcpe014Packets {
         b.writeByte(ID_ANIMATE);
         b.writeByte(action);
         b.writeLong(eid);
+    }
+
+    /** Add one entry to the pause-menu player list. Skin name/data left empty (0.14 draws its own). */
+    public static void playerListAdd(ByteBuf b, java.util.UUID uuid, long eid, String name) {
+        b.writeByte(ID_PLAYER_LIST);
+        b.writeByte(PLAYER_LIST_ADD);
+        b.writeInt(1);                 // entry count
+        Mcpe014Codec.writeUuid(b, uuid);
+        b.writeLong(eid);
+        Mcpe014Codec.writeString(b, name);
+        Mcpe014Codec.writeString(b, ""); // skin name / geometry
+        Mcpe014Codec.writeString(b, ""); // skin data
+    }
+
+    /** Remove one entry from the player list. */
+    public static void playerListRemove(ByteBuf b, java.util.UUID uuid) {
+        b.writeByte(ID_PLAYER_LIST);
+        b.writeByte(PLAYER_LIST_REMOVE);
+        b.writeInt(1);
+        Mcpe014Codec.writeUuid(b, uuid);
+    }
+
+    /**
+     * Set an entity's pose via SetEntityData: the DATA_FLAGS byte (crouch / sprint / item-use). In
+     * 0.14 the nametag is a separate metadata index, so writing only the flags never clears the name.
+     */
+    public static void setEntityDataFlags(ByteBuf b, long eid,
+                                          boolean sneaking, boolean sprinting, boolean usingItem) {
+        int flags = (sneaking ? FLAG_SNEAKING : 0) | (sprinting ? FLAG_SPRINTING : 0)
+                | (usingItem ? FLAG_ACTION : 0);
+        b.writeByte(ID_SET_ENTITY_DATA);
+        b.writeLong(eid);
+        b.writeByte((DATA_TYPE_BYTE << 5) | DATA_FLAGS_INDEX); // metadata key header
+        b.writeByte(flags);
+        b.writeByte(META_END);
     }
 
     /** Single-block change. {@code id}/{@code meta} are the split canonical state. */
