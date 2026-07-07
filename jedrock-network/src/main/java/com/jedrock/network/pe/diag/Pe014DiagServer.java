@@ -1,5 +1,14 @@
 package com.jedrock.network.pe.diag;
 
+import com.jedrock.api.entity.Entity;
+import com.jedrock.api.player.Player;
+import com.jedrock.api.world.BlockState;
+import com.jedrock.api.world.Blocks;
+import com.jedrock.api.world.Dimension;
+import com.jedrock.api.world.Location;
+import com.jedrock.api.world.World;
+import com.jedrock.network.pe.v014.Mcpe014Batch;
+import com.jedrock.network.pe.v014.Mcpe014ChunkSerializer;
 import com.jedrock.network.pe.v014.Mcpe014Login;
 import com.jedrock.network.pe.v014.Mcpe014Packets;
 import com.nukkitx.network.raknet.EncapsulatedPacket;
@@ -47,8 +56,11 @@ public final class Pe014DiagServer {
     private static final int WRAPPER = Mcpe014Packets.WRAPPER;   // 0x8e
     private static final int ID_LOGIN = Mcpe014Login.PACKET_ID;  // 0x8f
 
-    // Hardcoded spawn for this diagnostic (no world yet): the client should appear standing here.
-    private static final int SPAWN_X = 0, SPAWN_Y = 70, SPAWN_Z = 0;
+    // Flat test world: grass top at y=63, so the player's feet spawn on it at y=64.
+    private static final World WORLD = new FlatWorld();
+    private static final int FLOOR_TOP = 63;
+    private static final int SPAWN_X = 0, SPAWN_Y = FLOOR_TOP + 1, SPAWN_Z = 0;
+    private static final int SPAWN_RADIUS = 3; // chunks each way around spawn to stream
 
     public static void main(String[] args) throws Exception {
         int port = args.length > 0 ? Integer.parseInt(args[0])
@@ -136,9 +148,13 @@ public final class Pe014DiagServer {
             } else if (id == Mcpe014Packets.ID_REQUEST_CHUNK_RADIUS) {
                 ByteBuf body = Unpooled.wrappedBuffer(data, bodyOffset, n - bodyOffset);
                 int radius = body.readableBytes() >= 4 ? body.readInt() : 8;
-                System.out.println("[0.14] *** RequestChunkRadius: " + radius
-                        + " → replying ChunkRadiusUpdate (StartGame accepted!). No chunks sent yet. ***");
-                sendWrapped(b -> Mcpe014Packets.chunkRadiusUpdate(b, Math.min(radius, 4)));
+                int granted = Math.min(radius, SPAWN_RADIUS + 1);
+                System.out.println("[0.14] *** RequestChunkRadius: " + radius + " → ChunkRadiusUpdate("
+                        + granted + "), streaming " + ((2 * SPAWN_RADIUS + 1) * (2 * SPAWN_RADIUS + 1))
+                        + " chunks, then doFirstSpawn ***");
+                sendWrapped(b -> Mcpe014Packets.chunkRadiusUpdate(b, granted));
+                streamSpawnChunks();
+                doFirstSpawn();
             } else {
                 System.out.println("[0.14] body hex: " + hex(data, bodyOffset, Math.min(n, bodyOffset + 64)));
             }
@@ -168,6 +184,42 @@ public final class Pe014DiagServer {
             body.accept(out);
             session.send(out, RakNetReliability.RELIABLE_ORDERED);
         }
+
+        /** Stream the spawn-area chunks as batched FullChunkData (each chunk in its own 0x92 batch). */
+        private void streamSpawnChunks() {
+            int spawnCX = SPAWN_X >> 4, spawnCZ = SPAWN_Z >> 4;
+            for (int cx = spawnCX - SPAWN_RADIUS; cx <= spawnCX + SPAWN_RADIUS; cx++) {
+                for (int cz = spawnCZ - SPAWN_RADIUS; cz <= spawnCZ + SPAWN_RADIUS; cz++) {
+                    sendChunk(cx, cz);
+                }
+            }
+        }
+
+        /** One FullChunkData column, packed [id][body], wrapped in a 0x92 zlib batch, 0x8e-framed. */
+        private void sendChunk(int cx, int cz) {
+            byte[] blob = Mcpe014ChunkSerializer.serialize(WORLD, cx, cz);
+            ByteBuf pkt = Unpooled.buffer(1 + 13 + blob.length);
+            Mcpe014Packets.fullChunkDataHeader(pkt, cx, cz, blob.length);
+            pkt.writeBytes(blob);
+            byte[] pktBytes = new byte[pkt.readableBytes()];
+            pkt.readBytes(pktBytes);
+            pkt.release();
+
+            byte[] batch = Mcpe014Batch.of(pktBytes);
+            ByteBuf out = Unpooled.buffer(1 + batch.length);
+            out.writeByte(WRAPPER);
+            out.writeBytes(batch);
+            session.send(out, RakNetReliability.RELIABLE_ORDERED);
+        }
+
+        /** After chunks: SetTime + Respawn + PlayStatus(PLAYER_SPAWN) — the client leaves the load screen. */
+        private void doFirstSpawn() {
+            sendWrapped(b -> Mcpe014Packets.setTime(b, 0, true));
+            sendWrapped(b -> Mcpe014Packets.respawn(b, SPAWN_X + 0.5f, SPAWN_Y, SPAWN_Z + 0.5f));
+            sendWrapped(b -> Mcpe014Packets.playStatus(b, Mcpe014Packets.PLAY_STATUS_PLAYER_SPAWN));
+            System.out.println("[0.14] → doFirstSpawn sent (SetTime + Respawn + PlayStatus PLAYER_SPAWN)."
+                    + " The client should now spawn standing on the flat world.");
+        }
     }
 
     private static String hex(byte[] data, int off, int end) {
@@ -178,5 +230,27 @@ public final class Pe014DiagServer {
             sb.append(' ');
         }
         return sb.toString().trim();
+    }
+
+    /** A minimal flat world for the diagnostic: stone up to y=60, dirt to 62, grass at 63, air above. */
+    private static final class FlatWorld implements World {
+        @Override
+        public int getBlockId(int x, int y, int z) {
+            if (y < 61) return Blocks.state(Blocks.STONE, 0);
+            if (y < 63) return Blocks.state(Blocks.DIRT, 0);
+            if (y == 63) return Blocks.state(Blocks.GRASS, 0);
+            return Blocks.AIR;
+        }
+        @Override public String getName() { return "pe014-flat"; }
+        @Override public java.util.UUID getUniqueId() { return null; }
+        @Override public Dimension getDimension() { return Dimension.OVERWORLD; }
+        @Override public java.util.Collection<Player> getPlayers() { return java.util.List.of(); }
+        @Override public java.util.Collection<Entity> getEntities() { return java.util.List.of(); }
+        @Override public BlockState getBlockAt(int x, int y, int z) { return BlockState.AIR; }
+        @Override public void setBlockAt(int x, int y, int z, BlockState s) { }
+        @Override public void setBlockId(int x, int y, int z, int blockId) { }
+        @Override public Location getSpawnLocation() {
+            return new Location(this, SPAWN_X + 0.5, SPAWN_Y, SPAWN_Z + 0.5, 0f, 0f);
+        }
     }
 }
