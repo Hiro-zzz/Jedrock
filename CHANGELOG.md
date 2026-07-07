@@ -8,7 +8,7 @@ unstable — anything may change between entries.
 
 ### Added
 
-- **Multiversion framework for Java Edition (experimental, `test` branch).** One TCP listener now
+- **Multiversion framework for Java Edition.** One TCP listener now
   serves several JE protocol versions at once. A version-neutral `JedrockConnection` owns only what is
   stable across versions (channel + framing, movement merge, chunk streaming, keep-alive, lifecycle)
   and delegates every version-specific encode to a `JavaProtocol` strategy. A shared
@@ -18,17 +18,19 @@ unstable — anything may change between entries.
   compatible. All legacy JE versions share the world's canonical `(id<<4)|meta` model, so no block
   translation is needed between them. 1.12.2 became the first `JavaProtocol` implementation with its
   wire format unchanged.
-- **Java Edition 1.8 support (protocol 47, experimental, `test` branch).** A `Java1_8ProtocolHandler`
+- **Java Edition 1.8 support (protocol 47, beta).** A `Java1_8ProtocolHandler`
   plugs into the framework above: full login → play, join sequence, movement, chat, block break/place,
-  cross-platform avatars and the sneak/sprint pose. The 1.8 deltas from 1.12.2 are handled — a byte
-  dimension in Join Game, VarInt keep-alive ids, fixed-point entity coordinates, the old header-tagged
-  entity-metadata format (`(type<<5)|index`, list terminated by `0x7F`), no teleport-confirm handshake,
-  and the 1.8 grouped chunk layout (`Java1_8ChunkData`: little-endian `(id<<4)|meta` shorts, then block
-  light, then sky light, then a biome map). Placement reads the held block straight out of the 1.8
-  placement packet (legacy id + damage), so it lands in the shared world cross-edition. Packet ids and
-  formats are implemented from the protocol spec and centralised in `Java1_8Protocol`; the chunk layout
-  and ids still want a cross-check against minecraft-data and a real 1.8 client. Unit tests pin the 1.8
-  chunk bytes.
+  cross-platform avatars and the sneak/sprint/item-use pose. The 1.8 deltas from 1.12.2 are handled — a
+  byte dimension in Join Game, VarInt keep-alive ids, fixed-point entity coordinates, the old
+  header-tagged entity-metadata format (`(type<<5)|index`, list terminated by `0x7F`), no
+  teleport-confirm handshake, and the 1.8 grouped chunk layout (`Java1_8ChunkData`: little-endian
+  `(id<<4)|meta` shorts, then block light, then sky light, then a biome map). Placement reads the held
+  block straight out of the 1.8 placement packet (legacy id + damage), so it lands in the shared world
+  cross-edition. The full pose (crouch / sprint / item-use) travels in one shared entity-flags byte, so
+  the cross-edition item-use pose renders on 1.8 avatars too. Packet ids and formats are implemented
+  from the protocol spec and centralised in `Java1_8Protocol`; unit tests pin the 1.8 chunk bytes. Still
+  **beta**: the wire format wants confirmation against a real 1.8 client (an unsupported version is
+  refused at handshake, so it can't destabilise 1.12.2 or Bedrock).
 - **Crash-packet guard (blind judge, wire layer).** A new `PacketGuard` hardens the Bedrock inbound
   path against malicious packets that aim to crash or stall the server: `McpeCompression` now caps how
   far a `0xFE` batch may inflate (rejecting a tiny "zip bomb" that would balloon to gigabytes and OOM

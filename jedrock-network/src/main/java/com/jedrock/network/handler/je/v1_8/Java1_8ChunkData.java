@@ -1,6 +1,5 @@
 package com.jedrock.network.handler.je.v1_8;
 
-import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.World;
 import com.jedrock.network.je.packet.ClientboundPacket;
 import com.jedrock.utils.ByteBufUtils;
@@ -94,10 +93,5 @@ public final class Java1_8ChunkData implements ClientboundPacket {
                 ByteBufUtils.writeVarInt(buf, 0);// no data
             }
         };
-    }
-
-    /** Exposed for tests: the canonical state a cell serializes as (identity for 1.8). */
-    static int stateOf(int canonical) {
-        return canonical == Blocks.AIR ? Blocks.AIR : canonical;
     }
 }

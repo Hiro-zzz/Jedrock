@@ -12,15 +12,17 @@ Target versions:
 | Edition | Version | Protocol | Transport |
 |---------|---------|----------|-----------|
 | Java Edition | **1.12.2** | 340 | Netty TCP |
-| Java Edition | **1.8** · *experimental* | 47 | Netty TCP |
+| Java Edition | **1.8** · *beta* | 47 | Netty TCP |
 | Bedrock / Pocket Edition | **1.1.5** | 113 | RakNet over UDP |
 
 Java Edition is **multi-version on one port**: the client's handshake protocol selects the encoder,
-so 1.8 and 1.12.2 share the listener (see [Multiversion](#multiversion-experimental)).
+so 1.8 and 1.12.2 share the listener (see [Multiversion](#multiversion)).
 
 > ⚠️ **Status: early but real.** This is a from-scratch experiment, not a production server.
 > What works today is listed below — and it genuinely works with real, unmodified clients. The
-> multiversion layer (JE 1.8) is newer and lives on the `test` branch, still pending client testing.
+> multiversion layer is a stable part of the core; **JE 1.8** rides on it as a **beta** — its wire
+> format is implemented against the protocol spec and pinned by unit tests, but not yet confirmed
+> against a real 1.8 client.
 
 ---
 
@@ -95,7 +97,7 @@ See [Roadmap](#roadmap).
 
 ---
 
-## Multiversion (experimental)
+## Multiversion
 
 Adding a Java Edition version no longer means forking the connection. A version-neutral
 `JedrockConnection` owns only what is stable across versions (channel + framing, movement merge,
@@ -113,9 +115,11 @@ Game, VarInt keep-alive ids, fixed-point entity coordinates, the old header-tagg
 format, no teleport-confirm, and the 1.8 grouped chunk layout). Packet ids/formats are centralised in
 `Java1_8Protocol`; unit tests pin the chunk bytes.
 
-> Status: on the `test` branch. Wire details are implemented from the protocol spec and still want a
-> minecraft-data cross-check and a real 1.8 client to confirm. Modern versions (1.13+ flattening,
-> Bedrock's current palette) are deliberately out of scope — they invert the legacy world model.
+> Status: the framework and its 1.12.2 implementation are stable. **1.8 is beta** — the wire details
+> are implemented from the protocol spec and pinned by unit tests, but still want confirmation against
+> a real 1.8 client (an unsupported version is refused at handshake, so it can't destabilise 1.12.2 or
+> Bedrock). Modern versions (1.13+ flattening, Bedrock's current palette) are deliberately out of
+> scope — they invert the legacy world model.
 
 ---
 

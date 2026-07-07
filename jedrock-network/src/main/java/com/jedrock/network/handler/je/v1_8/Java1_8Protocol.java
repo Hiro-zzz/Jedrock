@@ -53,6 +53,7 @@ public final class Java1_8Protocol {
     public static final int META_END = 0x7F;
     public static final int FLAG_CROUCHED = 0x02;
     public static final int FLAG_SPRINTING = 0x08;
+    public static final int FLAG_USING_ITEM = 0x10;  // eating / drinking / blocking / drawing bow
 
     /** Fixed-point factor for 1.8 absolute entity coordinates (block = value / 32). */
     public static final int FIXED_POINT = 32;

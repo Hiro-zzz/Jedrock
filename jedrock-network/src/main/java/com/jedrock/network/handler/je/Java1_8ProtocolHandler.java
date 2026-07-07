@@ -263,7 +263,10 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     @Override
     public void setPose(JedrockConnection c, long entityId, boolean sneaking, boolean sprinting, boolean usingItem) {
         // 1.8 metadata (old format): header = (type<<5)|index, then value, list ends with 0x7F.
-        int flags = (sneaking ? FLAG_CROUCHED : 0) | (sprinting ? FLAG_SPRINTING : 0);
+        // Crouch, sprint and item-use all live in the shared entity-flags byte (index 0), so the full
+        // pose travels together — matching the cross-edition setPose contract.
+        int flags = (sneaking ? FLAG_CROUCHED : 0) | (sprinting ? FLAG_SPRINTING : 0)
+                | (usingItem ? FLAG_USING_ITEM : 0);
         send(c, CB_ENTITY_METADATA, b -> {
             ByteBufUtils.writeVarInt(b, (int) entityId);
             b.writeByte((META_TYPE_BYTE << 5) | META_INDEX_FLAGS);
