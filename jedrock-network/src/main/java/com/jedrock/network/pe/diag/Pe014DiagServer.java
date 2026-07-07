@@ -1,6 +1,7 @@
 package com.jedrock.network.pe.diag;
 
 import com.jedrock.network.pe.v014.Mcpe014Login;
+import com.jedrock.network.pe.v014.Mcpe014Packets;
 import com.nukkitx.network.raknet.EncapsulatedPacket;
 import com.nukkitx.network.raknet.RakNetReliability;
 import com.nukkitx.network.raknet.RakNetServer;
@@ -43,10 +44,11 @@ public final class Pe014DiagServer {
 
     private static final int RAKNET_VERSION_014 = 7;
 
-    private static final int WRAPPER = 0x8e;              // one-byte game-packet wrapper (observed)
-    private static final int ID_LOGIN = Mcpe014Login.PACKET_ID; // 0x8f
-    private static final int ID_PLAY_STATUS_GUESS = 0x90;       // hypothesis: Login(0x8f)+1
-    private static final int PLAY_STATUS_LOGIN_SUCCESS = 0;
+    private static final int WRAPPER = Mcpe014Packets.WRAPPER;   // 0x8e
+    private static final int ID_LOGIN = Mcpe014Login.PACKET_ID;  // 0x8f
+
+    // Hardcoded spawn for this diagnostic (no world yet): the client should appear standing here.
+    private static final int SPAWN_X = 0, SPAWN_Y = 70, SPAWN_Z = 0;
 
     public static void main(String[] args) throws Exception {
         int port = args.length > 0 ? Integer.parseInt(args[0])
@@ -124,23 +126,46 @@ public final class Pe014DiagServer {
                     Mcpe014Login.Identity idn = Mcpe014Login.decode(body);
                     System.out.println("[0.14] *** Login: name='" + idn.name() + "' protocol="
                             + idn.protocol() + " uuid=" + idn.uuid() + " ***");
-                    sendPlayStatus(PLAY_STATUS_LOGIN_SUCCESS);
-                    System.out.println("[0.14] → sent PlayStatus(LOGIN_SUCCESS) hypothesis"
-                            + " [0x8e][0x90][int32 0]; watch whether the client advances.");
+                    sendLoginSequence();
+                    System.out.println("[0.14] → sent full login sequence (PlayStatus + StartGame +"
+                            + " SetTime + SetSpawnPosition + SetHealth + SetDifficulty). Watch whether"
+                            + " the client reaches terrain-load and requests a chunk radius (0xc8).");
                 } catch (RuntimeException e) {
                     System.out.println("[0.14] failed to decode Login: " + e);
                 }
+            } else if (id == Mcpe014Packets.ID_REQUEST_CHUNK_RADIUS) {
+                ByteBuf body = Unpooled.wrappedBuffer(data, bodyOffset, n - bodyOffset);
+                int radius = body.readableBytes() >= 4 ? body.readInt() : 8;
+                System.out.println("[0.14] *** RequestChunkRadius: " + radius
+                        + " → replying ChunkRadiusUpdate (StartGame accepted!). No chunks sent yet. ***");
+                sendWrapped(b -> Mcpe014Packets.chunkRadiusUpdate(b, Math.min(radius, 4)));
             } else {
                 System.out.println("[0.14] body hex: " + hex(data, bodyOffset, Math.min(n, bodyOffset + 64)));
             }
         }
 
-        /** Send the login-accept hypothesis: wrapper 0x8e + PlayStatus id + big-endian int32 status. */
-        private void sendPlayStatus(int status) {
-            ByteBuf out = Unpooled.buffer(6);
+        /** Send the full MCPE 0.14 login-accept sequence (each packet 0x8e-wrapped, like PocketMine). */
+        private void sendLoginSequence() {
+            sendWrapped(b -> Mcpe014Packets.playStatus(b, Mcpe014Packets.PLAY_STATUS_LOGIN_SUCCESS));
+            sendWrapped(b -> Mcpe014Packets.startGame(b,
+                    -1,                 // seed
+                    0,                  // dimension: overworld
+                    1,                  // generator: infinite
+                    1,                  // gamemode: creative
+                    0L,                 // eid: self is always 0
+                    SPAWN_X, SPAWN_Y, SPAWN_Z,
+                    SPAWN_X + 0.5f, SPAWN_Y, SPAWN_Z + 0.5f));
+            sendWrapped(b -> Mcpe014Packets.setTime(b, 0, true));
+            sendWrapped(b -> Mcpe014Packets.setSpawnPosition(b, SPAWN_X, SPAWN_Y, SPAWN_Z));
+            sendWrapped(b -> Mcpe014Packets.setHealth(b, 20));
+            sendWrapped(b -> Mcpe014Packets.setDifficulty(b, 2));
+        }
+
+        /** Wrap one packet in the 0x8e game header and send it reliably-ordered (channel 0). */
+        private void sendWrapped(java.util.function.Consumer<ByteBuf> body) {
+            ByteBuf out = Unpooled.buffer();
             out.writeByte(WRAPPER);
-            out.writeByte(ID_PLAY_STATUS_GUESS);
-            out.writeInt(status);
+            body.accept(out);
             session.send(out, RakNetReliability.RELIABLE_ORDERED);
         }
     }
