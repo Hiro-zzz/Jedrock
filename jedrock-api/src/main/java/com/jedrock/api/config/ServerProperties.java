@@ -18,6 +18,8 @@ package com.jedrock.api.config;
  * @param judgeEnabled whether the "blind judge" lazy anti-cheat validation is on
  * @param maxReach     max block-interaction distance (blocks) from the player
  * @param maxMoveDelta max position change (blocks) between two movement reports
+ * @param bedrock014Port    UDP port for the experimental MCPE 0.14 listener (own RakNet version)
+ * @param bedrock014Enabled whether the MCPE 0.14 listener is bound at all
  */
 public record ServerProperties(
         String name,
@@ -31,7 +33,9 @@ public record ServerProperties(
         int viewDistance,
         boolean judgeEnabled,
         double maxReach,
-        double maxMoveDelta
+        double maxMoveDelta,
+        int bedrock014Port,
+        boolean bedrock014Enabled
 ) {
 
     /** The built-in defaults, used when no config file is present or a key is missing/invalid. */
@@ -48,7 +52,9 @@ public record ServerProperties(
                 6,               // viewDistance
                 true,            // judgeEnabled
                 7.0,             // maxReach — creative reach (~6) plus margin
-                16.0             // maxMoveDelta — generous; catches teleport/speed, not lag/falls
+                16.0,            // maxMoveDelta — generous; catches teleport/speed, not lag/falls
+                19133,           // bedrock014Port — experimental MCPE 0.14, its own UDP port
+                true             // bedrock014Enabled
         );
     }
 }

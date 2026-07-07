@@ -12,17 +12,19 @@ Target versions:
 | Edition | Version | Protocol | Transport |
 |---------|---------|----------|-----------|
 | Java Edition | **1.12.2** | 340 | Netty TCP |
-| Java Edition | **1.8** · *beta* | 47 | Netty TCP |
+| Java Edition | **1.8** | 47 | Netty TCP |
 | Bedrock / Pocket Edition | **1.1.5** | 113 | RakNet over UDP |
+| Bedrock / Pocket Edition | **0.14** | 45 | RakNet over UDP |
 
 Java Edition is **multi-version on one port**: the client's handshake protocol selects the encoder,
-so 1.8 and 1.12.2 share the listener (see [Multiversion](#multiversion)).
+so 1.8 and 1.12.2 share the listener (see [Multiversion](#multiversion)). Bedrock spans two eras that
+can't share a socket (they negotiate different RakNet versions), so **0.14** — the pre-VarInt,
+128-tall-world, no-Xbox-login era — runs on its own UDP port alongside 1.1.5.
 
-> ⚠️ **Status: early but real.** This is a from-scratch experiment, not a production server.
-> What works today is listed below — and it genuinely works with real, unmodified clients. The
-> multiversion layer is a stable part of the core; **JE 1.8** rides on it as a **beta** — its wire
-> format is implemented against the protocol spec and pinned by unit tests, but not yet confirmed
-> against a real 1.8 client.
+> ⚠️ **Status: early but real.** This is a from-scratch experiment, not a production server. What
+> works today is listed below — and every version in the table above has been confirmed with a real,
+> unmodified client (a 1.8 PC client, a 1.1.5 Win10 client, a 0.14 phone client — all sharing one
+> world with 1.12.2).
 
 ---
 
@@ -35,6 +37,12 @@ so 1.8 and 1.12.2 share the listener (see [Multiversion](#multiversion)).
   the server runs no physics (see the philosophy below).
 - ✅ **Bedrock 1.1.5 client joins** the same server over real RakNet (offline handshake →
   MCPE Login → Resource Packs → StartGame → chunks → spawn).
+- ✅ **Bedrock 0.14 client joins too** (protocol 45, on its own UDP port) — the pre-VarInt era, spoken
+  from scratch: big-endian wire, a one-byte game wrapper, plaintext (no-Xbox) login, a `0x92` zlib
+  batch and 128-tall full-column chunks. A real 0.14 phone client logs in, spawns on the shared
+  procedural terrain, and moves / digs / builds — cross-play with a Java 1.12.2 client in one world
+  (shared blocks, chat, avatars). Nametags, skins and the sprint / item-use poses are drawn by the
+  0.14 client itself, so the server sends less than 1.1.5 needs.
 - ✅ **One shared world** — Java and Bedrock render the **same blocks** from a single `CoreWorld`;
   the Bedrock side serializes chunks in the MCPE 1.0/1.1 network format (blocks + metadata + sky/block
   light + heightmap), so a Bedrock client stands on exactly the terrain a Java client sees.
@@ -115,11 +123,19 @@ Game, VarInt keep-alive ids, fixed-point entity coordinates, the old header-tagg
 format, no teleport-confirm, and the 1.8 grouped chunk layout). Packet ids/formats are centralised in
 `Java1_8Protocol`; unit tests pin the chunk bytes.
 
-> Status: the framework and its 1.12.2 implementation are stable. **1.8 is beta** — the wire details
-> are implemented from the protocol spec and pinned by unit tests, but still want confirmation against
-> a real 1.8 client (an unsupported version is refused at handshake, so it can't destabilise 1.12.2 or
-> Bedrock). Modern versions (1.13+ flattening, Bedrock's current palette) are deliberately out of
-> scope — they invert the legacy world model.
+> Status: the framework, 1.12.2 and 1.8 are all confirmed with real clients (an unsupported version is
+> refused at handshake, so it can't destabilise the others). Modern versions (1.13+ flattening,
+> Bedrock's current palette) are deliberately out of scope — they invert the legacy world model.
+
+**Bedrock is multi-version too — but across sockets, not one port.** A Bedrock client negotiates a
+RakNet protocol version in its offline handshake, and one UDP socket serves exactly one of them, so
+1.1.5 (RakNet v8) and 0.14 (RakNet v7) each bind their own port. The two are otherwise different
+protocols, not deltas: 0.14 is the pre-VarInt era — big-endian fields, a one-byte `0x8e` game wrapper,
+a `0x92` zlib batch, plaintext (no Xbox/JWT) login, and 128-tall full-column chunks — so it has its own
+`PeSession014` / `Pe014RakNetServer` and codec (`network/pe/v014`) rather than sharing the 1.1.5 layer.
+Both map the same canonical `(id << 4) | meta` world, so a 0.14 phone, a 1.1.5 Win10 client, a 1.8 PC
+and a 1.12.2 PC all stand in one world. The 0.14 wire was reverse-checked against PocketMine-MP at
+`CURRENT_PROTOCOL = 45`.
 
 ---
 
@@ -180,10 +196,11 @@ jedrock
 │   ├── handler/je/      # JavaProtocol per JE version; JavaHandshakeHandler picks 1.8 / 1.12.2
 │   ├── je/packet/       # Java Edition packets (Serverbound* / Clientbound*)
 │   ├── pipeline/        # Netty codecs: VarInt framing, lazy packet decoding
-│   └── pe/              # Bedrock, split by concern: PeRakNetServer (RakNet transport) +
-│                        #   PeSession (per-session MCPE game layer) delegating to McpeProtocol,
-│                        #   McpeCodec, McpeChunkSerializer, McpeLoginIdentity, McpeSkin,
-│                        #   PeBlockEditDecoder, McpeCompression (0xFE zlib batches)
+│   └── pe/              # Bedrock 1.1.5: PeRakNetServer (RakNet transport) + PeSession (MCPE game
+│                        #   layer) delegating to McpeProtocol, McpeCodec, McpeChunkSerializer,
+│                        #   McpeLoginIdentity, McpeSkin, PeBlockEditDecoder, McpeCompression
+│       └── v014/         # Bedrock 0.14 (protocol 45): Pe014RakNetServer + PeSession014 + the
+│                         #   pre-VarInt codec (Mcpe014Codec/Login/Packets/ChunkSerializer/Batch)
 ├── jedrock-gameloop     # Dedicated 20 TPS drift-correcting loop + Scheduler (Tickable)
 └── jedrock-core         # The server: PlayerRegistry, CoreWorld/BlockStorage, JedrockServer
 ```
@@ -279,13 +296,16 @@ network module declares it. Run the server from your IDE (`com.jedrock.core.Jedr
 which binds (defaults, configurable in `jedrock.properties`):
 
 - **Java Edition** on TCP `0.0.0.0:25565`
-- **Bedrock** on UDP `0.0.0.0:19132`
+- **Bedrock 1.1.5** on UDP `0.0.0.0:19132`
+- **Bedrock 0.14** on UDP `0.0.0.0:19133` (`server.port.pe014`; disable with `pe014.enabled=false`)
 
 The first run writes a `jedrock.properties` next to the process with the bind host/ports, server
 name, MOTD, max players, world seed, tick rate, view distance and the blind-judge limits
 (`judge.enabled`, `judge.max-reach`, `judge.max-move-delta`); edit and restart to apply, or override
 a single key with `-Dkey=value`. The RakNet protocol version defaults to `8` (MCPE 1.1.5)
-and can be overridden with `-Djedrock.pe.raknetProtocolVersion=N` for other client builds.
+and can be overridden with `-Djedrock.pe.raknetProtocolVersion=N` for other client builds. The Bedrock
+listeners bind best-effort — a busy UDP port (the Minecraft Bedrock client itself holds 19132 for LAN
+discovery) disables just that edition, never the whole server.
 
 ### Console & diagnostics
 

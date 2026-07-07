@@ -8,6 +8,22 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Bedrock / MCPE 0.14 support (protocol 45), from scratch.** A second, older Bedrock edition now
+  joins the same shared world as 1.12.2 / 1.8 / 1.1.5. 0.14 predates the modern Bedrock protocol, so it
+  is a parallel implementation rather than a tweak of the 1.1.5 layer: a big-endian wire (not VarInt), a
+  one-byte `0x8e` game wrapper on every packet, a `0x92` zlib `BatchPacket` for large packets, plaintext
+  login (no Xbox/JWT chain), and 128-tall full-column `FullChunkData` chunks (ORDER_COLUMNS: block ids +
+  metadata / sky / block-light nibbles + heightmap + biome). It lives in `network/pe/v014`
+  (`Mcpe014Codec` / `Login` / `Packets` / `ChunkSerializer` / `Batch`, a `PeSession014` that is both the
+  RakNet session and the core's `PlayerConnection`, and a `Pe014RakNetServer`). Because a Bedrock client
+  negotiates a RakNet protocol version in its offline handshake and one UDP socket serves exactly one of
+  them, 0.14 (RakNet v7) binds its **own port** (`server.port.pe014`, default 19133) next to 1.1.5
+  (v8). The Bedrock listeners now bind best-effort — a busy UDP port (the Minecraft Bedrock client
+  itself holds 19132 for LAN discovery) disables just that edition instead of aborting the server.
+  Validated with a real 0.14 phone client: login → spawn on the shared procedural terrain → move / dig /
+  build, cross-play with a Java client in one world (blocks, chat, avatars). The 0.14 client draws
+  nametags, skins and the sprint / item-use poses itself, so the server sends less than 1.1.5 needs. The
+  wire was reverse-checked against PocketMine-MP at `CURRENT_PROTOCOL = 45`.
 - **Multiversion framework for Java Edition.** One TCP listener now
   serves several JE protocol versions at once. A version-neutral `JedrockConnection` owns only what is
   stable across versions (channel + framing, movement merge, chunk streaming, keep-alive, lifecycle)
@@ -18,7 +34,7 @@ unstable — anything may change between entries.
   compatible. All legacy JE versions share the world's canonical `(id<<4)|meta` model, so no block
   translation is needed between them. 1.12.2 became the first `JavaProtocol` implementation with its
   wire format unchanged.
-- **Java Edition 1.8 support (protocol 47, beta).** A `Java1_8ProtocolHandler`
+- **Java Edition 1.8 support (protocol 47).** A `Java1_8ProtocolHandler`
   plugs into the framework above: full login → play, join sequence, movement, chat, block break/place,
   cross-platform avatars and the sneak/sprint/item-use pose. The 1.8 deltas from 1.12.2 are handled — a
   byte dimension in Join Game, VarInt keep-alive ids, fixed-point entity coordinates, the old
@@ -27,10 +43,9 @@ unstable — anything may change between entries.
   `(id<<4)|meta` shorts, then block light, then sky light, then a biome map). Placement reads the held
   block straight out of the 1.8 placement packet (legacy id + damage), so it lands in the shared world
   cross-edition. The full pose (crouch / sprint / item-use) travels in one shared entity-flags byte, so
-  the cross-edition item-use pose renders on 1.8 avatars too. Packet ids and formats are implemented
-  from the protocol spec and centralised in `Java1_8Protocol`; unit tests pin the 1.8 chunk bytes. Still
-  **beta**: the wire format wants confirmation against a real 1.8 client (an unsupported version is
-  refused at handshake, so it can't destabilise 1.12.2 or Bedrock).
+  the cross-edition item-use pose renders on 1.8 avatars too. Packet ids and formats are centralised in
+  `Java1_8Protocol`; unit tests pin the 1.8 chunk bytes. Confirmed with a real 1.8 client (an
+  unsupported version is refused at handshake, so it can't destabilise 1.12.2 or Bedrock).
 - **Crash-packet guard (blind judge, wire layer).** A new `PacketGuard` hardens the Bedrock inbound
   path against malicious packets that aim to crash or stall the server: `McpeCompression` now caps how
   far a `0xFE` batch may inflate (rejecting a tiny "zip bomb" that would balloon to gigabytes and OOM

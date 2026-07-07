@@ -109,16 +109,20 @@ public class JedrockServer implements Server, ConnectionListener {
         LOGGER.info("Starting " + getVersion());
 
         try {
-            // Java Edition 1.12.2 (TCP)
+            // Java Edition 1.12.2 (TCP) — the primary listener; a failure here is fatal.
             networkServer.bind(new InetSocketAddress(config.bindHost(), config.javaPort()), ProtocolVersion.JE_1_12_2);
-
-            // MCPE / Bedrock 1.1.5 (RakNet over UDP, handled by the PE server)
-            networkServer.bind(new InetSocketAddress(config.bindHost(), config.bedrockPort()), ProtocolVersion.PE_1_1_5);
-
         } catch (Exception e) {
-            LOGGER.error("Failed to bind network", e);
+            LOGGER.error("Failed to bind Java Edition listener on " + config.bindHost() + ":" + config.javaPort(), e);
             running.set(false);
             return;
+        }
+
+        // Bedrock listeners are bound best-effort: a busy UDP port (commonly the Minecraft Bedrock
+        // client itself holds 19132 for LAN discovery) disables just that edition, never the whole
+        // server, so Java and the other Bedrock version still come up.
+        bindBedrock("1.1.5", config.bedrockPort(), ProtocolVersion.PE_1_1_5);
+        if (config.bedrock014Enabled()) {
+            bindBedrock("0.14", config.bedrock014Port(), ProtocolVersion.PE_0_14);
         }
 
         gameLoop.start();
@@ -135,6 +139,26 @@ public class JedrockServer implements Server, ConnectionListener {
         }
 
         LOGGER.info("Jedrock server started successfully. Type 'help' for console commands.");
+    }
+
+    /** Bind one Bedrock listener without letting a busy port abort startup. */
+    private void bindBedrock(String label, int port, ProtocolVersion version) {
+        try {
+            networkServer.bind(new InetSocketAddress(config.bindHost(), port), version);
+        } catch (Exception e) {
+            LOGGER.warn("Could not bind Bedrock " + label + " on " + config.bindHost() + ":" + port
+                    + " (" + rootCauseMessage(e) + "); " + label + " disabled for this run. "
+                    + "Is the Minecraft Bedrock client (it holds UDP 19132) or another instance using the port?");
+        }
+    }
+
+    /** The deepest cause message — nukkitx wraps the real BindException in a CompletionException. */
+    private static String rootCauseMessage(Throwable t) {
+        Throwable c = t;
+        while (c.getCause() != null && c.getCause() != c) {
+            c = c.getCause();
+        }
+        return c.getMessage() != null ? c.getMessage() : c.toString();
     }
 
     @Override
