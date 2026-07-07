@@ -11,6 +11,7 @@ public enum ProtocolVersion {
     JE_1_12_2(340, "1.12.2", false),
 
     // Bedrock / MCPE
+    PE_0_14(45, "0.14", true),
     PE_1_1_5(113, "1.1.5", true);
 
     private final int protocol;

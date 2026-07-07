@@ -3,6 +3,7 @@ package com.jedrock.network;
 import com.jedrock.api.config.ServerProperties;
 import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.network.pe.PeRakNetServer;
+import com.jedrock.network.pe.v014.Pe014RakNetServer;
 import com.jedrock.network.pipeline.LazyPacketDecoder;
 import com.jedrock.network.pipeline.VarintFrameDecoder;
 import com.jedrock.network.pipeline.VarintLengthEncoder;
@@ -48,6 +49,7 @@ public class NettyNetworkServer implements NetworkServer {
     private volatile com.jedrock.api.world.World world;
     private volatile ServerProperties properties = ServerProperties.defaults();
     private volatile PeRakNetServer peServer;
+    private volatile Pe014RakNetServer pe014Server;
 
     @Override
     public void setConnectionListener(ConnectionListener listener) {
@@ -69,10 +71,17 @@ public class NettyNetworkServer implements NetworkServer {
     @Override
     public void bind(SocketAddress address, ProtocolVersion protocol) throws Exception {
         if (protocol.isBedrock()) {
-            // Bedrock: hand the whole RakNet layer to the dedicated PE server.
-            PeRakNetServer pe = new PeRakNetServer((InetSocketAddress) address, protocol, listener, world, properties);
-            pe.bind();
-            this.peServer = pe;
+            // Bedrock: hand the whole RakNet layer to the dedicated PE server. 0.14 (protocol 45) speaks
+            // a different RakNet version than 1.1.5, so it runs on its own socket via its own server.
+            if (protocol == ProtocolVersion.PE_0_14) {
+                Pe014RakNetServer pe = new Pe014RakNetServer((InetSocketAddress) address, listener, world, properties);
+                pe.bind();
+                this.pe014Server = pe;
+            } else {
+                PeRakNetServer pe = new PeRakNetServer((InetSocketAddress) address, protocol, listener, world, properties);
+                pe.bind();
+                this.peServer = pe;
+            }
             active = true;
         } else {
             // Java Edition - TCP
@@ -105,6 +114,11 @@ public class NettyNetworkServer implements NetworkServer {
         if (peServer != null) {
             peServer.close();
             peServer = null;
+        }
+
+        if (pe014Server != null) {
+            pe014Server.close();
+            pe014Server = null;
         }
 
         workerGroup.shutdownGracefully();

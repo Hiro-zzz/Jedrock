@@ -115,6 +115,12 @@ public class JedrockServer implements Server, ConnectionListener {
             // MCPE / Bedrock 1.1.5 (RakNet over UDP, handled by the PE server)
             networkServer.bind(new InetSocketAddress(config.bindHost(), config.bedrockPort()), ProtocolVersion.PE_1_1_5);
 
+            // MCPE / Bedrock 0.14 (protocol 45) — experimental, on its own port (own RakNet version).
+            if (Boolean.parseBoolean(System.getProperty("jedrock.pe014.enabled", "true"))) {
+                int pe014Port = Integer.getInteger("jedrock.pe014.port", 19133);
+                networkServer.bind(new InetSocketAddress(config.bindHost(), pe014Port), ProtocolVersion.PE_0_14);
+            }
+
         } catch (Exception e) {
             LOGGER.error("Failed to bind network", e);
             running.set(false);
