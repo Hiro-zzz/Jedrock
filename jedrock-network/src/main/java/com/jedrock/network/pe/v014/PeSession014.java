@@ -79,7 +79,9 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     public void showPlayer(UUID uuid, String name, long entityId,
                            double x, double y, double z, float yaw, float pitch) {
         // Player-list entry first (feeds the pause-menu list), then the avatar. AddPlayer takes feet y.
-        sendWrapped(b -> Mcpe014Packets.playerListAdd(b, uuid, entityId, name));
+        // The list needs a valid skin (an empty one crashes the client), so hand it a synthetic texture.
+        byte[] skin = Mcpe014Skin.synthetic(uuid);
+        sendWrapped(b -> Mcpe014Packets.playerListAdd(b, uuid, entityId, name, Mcpe014Skin.SKIN_NAME, skin));
         sendWrapped(b -> Mcpe014Packets.addPlayer(b, uuid, name, entityId,
                 (float) x, (float) y, (float) z, yaw, pitch));
     }

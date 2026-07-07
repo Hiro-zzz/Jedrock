@@ -215,16 +215,21 @@ public final class Mcpe014Packets {
         b.writeLong(eid);
     }
 
-    /** Add one entry to the pause-menu player list. Skin name/data left empty (0.14 draws its own). */
-    public static void playerListAdd(ByteBuf b, java.util.UUID uuid, long eid, String name) {
+    /**
+     * Add one entry to the pause-menu player list. The skin must be a valid RGBA texture — the 0.14
+     * client crashes on an empty one — so callers pass a real or {@link Mcpe014Skin synthetic} skin.
+     */
+    public static void playerListAdd(ByteBuf b, java.util.UUID uuid, long eid, String name,
+                                     String skinName, byte[] skinData) {
         b.writeByte(ID_PLAYER_LIST);
         b.writeByte(PLAYER_LIST_ADD);
         b.writeInt(1);                 // entry count
         Mcpe014Codec.writeUuid(b, uuid);
         b.writeLong(eid);
         Mcpe014Codec.writeString(b, name);
-        Mcpe014Codec.writeString(b, ""); // skin name / geometry
-        Mcpe014Codec.writeString(b, ""); // skin data
+        Mcpe014Codec.writeString(b, skinName);
+        b.writeShort(skinData.length); // skin data: 2-byte BE length + RGBA bytes
+        b.writeBytes(skinData);
     }
 
     /** Remove one entry from the player list. */
