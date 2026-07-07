@@ -61,6 +61,9 @@ public final class Pe014DiagServer {
     private static final int FLOOR_TOP = 63;
     private static final int SPAWN_X = 0, SPAWN_Y = FLOOR_TOP + 1, SPAWN_Z = 0;
     private static final int SPAWN_RADIUS = 3; // chunks each way around spawn to stream
+    /** MCPE positions are eye-level (feet + this); spawn Y must add it or the feet start underground. */
+    private static final float EYE_HEIGHT = 1.62f;
+    private static final float SPAWN_EYE_Y = SPAWN_Y + EYE_HEIGHT;
 
     public static void main(String[] args) throws Exception {
         int port = args.length > 0 ? Integer.parseInt(args[0])
@@ -170,7 +173,7 @@ public final class Pe014DiagServer {
                     1,                  // gamemode: creative
                     0L,                 // eid: self is always 0
                     SPAWN_X, SPAWN_Y, SPAWN_Z,
-                    SPAWN_X + 0.5f, SPAWN_Y, SPAWN_Z + 0.5f));
+                    SPAWN_X + 0.5f, SPAWN_EYE_Y, SPAWN_Z + 0.5f));
             sendWrapped(b -> Mcpe014Packets.setTime(b, 0, true));
             sendWrapped(b -> Mcpe014Packets.setSpawnPosition(b, SPAWN_X, SPAWN_Y, SPAWN_Z));
             sendWrapped(b -> Mcpe014Packets.setHealth(b, 20));
@@ -215,7 +218,7 @@ public final class Pe014DiagServer {
         /** After chunks: SetTime + Respawn + PlayStatus(PLAYER_SPAWN) — the client leaves the load screen. */
         private void doFirstSpawn() {
             sendWrapped(b -> Mcpe014Packets.setTime(b, 0, true));
-            sendWrapped(b -> Mcpe014Packets.respawn(b, SPAWN_X + 0.5f, SPAWN_Y, SPAWN_Z + 0.5f));
+            sendWrapped(b -> Mcpe014Packets.respawn(b, SPAWN_X + 0.5f, SPAWN_EYE_Y, SPAWN_Z + 0.5f));
             sendWrapped(b -> Mcpe014Packets.playStatus(b, Mcpe014Packets.PLAY_STATUS_PLAYER_SPAWN));
             System.out.println("[0.14] → doFirstSpawn sent (SetTime + Respawn + PlayStatus PLAYER_SPAWN)."
                     + " The client should now spawn standing on the flat world.");
