@@ -68,7 +68,9 @@ public final class JedrockConfig {
                 positiveInt(file, "game.view-distance", def.viewDistance()),
                 bool(file, "judge.enabled", def.judgeEnabled()),
                 positiveDouble(file, "judge.max-reach", def.maxReach()),
-                positiveDouble(file, "judge.max-move-delta", def.maxMoveDelta())
+                positiveDouble(file, "judge.max-move-delta", def.maxMoveDelta()),
+                port(file, "server.port.pe014", def.bedrock014Port()),
+                bool(file, "pe014.enabled", def.bedrock014Enabled())
         );
     }
 
