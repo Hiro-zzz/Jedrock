@@ -12,10 +12,15 @@ Target versions:
 | Edition | Version | Protocol | Transport |
 |---------|---------|----------|-----------|
 | Java Edition | **1.12.2** | 340 | Netty TCP |
+| Java Edition | **1.8** · *experimental* | 47 | Netty TCP |
 | Bedrock / Pocket Edition | **1.1.5** | 113 | RakNet over UDP |
 
+Java Edition is **multi-version on one port**: the client's handshake protocol selects the encoder,
+so 1.8 and 1.12.2 share the listener (see [Multiversion](#multiversion-experimental)).
+
 > ⚠️ **Status: early but real.** This is a from-scratch experiment, not a production server.
-> What works today is listed below — and it genuinely works with real, unmodified clients.
+> What works today is listed below — and it genuinely works with real, unmodified clients. The
+> multiversion layer (JE 1.8) is newer and lives on the `test` branch, still pending client testing.
 
 ---
 
@@ -90,6 +95,30 @@ See [Roadmap](#roadmap).
 
 ---
 
+## Multiversion (experimental)
+
+Adding a Java Edition version no longer means forking the connection. A version-neutral
+`JedrockConnection` owns only what is stable across versions (channel + framing, movement merge,
+chunk streaming, keep-alive, lifecycle); everything whose bytes differ is a `JavaProtocol` strategy.
+Each connection starts on the shared `JavaHandshakeHandler`, which reads the client's protocol from
+the handshake and installs the matching `JavaProtocol` from `JavaProtocols` (or refuses an
+unsupported version). The server-list ping echoes the client's own protocol, so the server always
+shows as compatible.
+
+This works cleanly for **legacy** versions because they all share the world's canonical
+`(id << 4) | meta` block model — no per-version block translation is needed. **1.8** (protocol 47) is
+the first added alongside 1.12.2: login → play, join sequence, movement, chat, block break/place,
+cross-edition avatars and the sneak/sprint pose, handling the 1.8 deltas (byte dimension in Join
+Game, VarInt keep-alive ids, fixed-point entity coordinates, the old header-tagged entity-metadata
+format, no teleport-confirm, and the 1.8 grouped chunk layout). Packet ids/formats are centralised in
+`Java1_8Protocol`; unit tests pin the chunk bytes.
+
+> Status: on the `test` branch. Wire details are implemented from the protocol spec and still want a
+> minecraft-data cross-check and a real 1.8 client to confirm. Modern versions (1.13+ flattening,
+> Bedrock's current palette) are deliberately out of scope — they invert the legacy world model.
+
+---
+
 ## Philosophy — the illusionist server
 
 Jedrock is not a faithful re-implementation of Mojang's world simulator. It is a **high-throughput
@@ -144,7 +173,7 @@ jedrock
 ├── jedrock-api          # Pure contracts: Server, Player, World, events. No implementation deps.
 ├── jedrock-utils        # Lazy<T>, LazyPacket, ByteBufUtils (VarInt/VarLong/zigzag), logging, ticks
 ├── jedrock-network      # Transport + protocol handling for both editions
-│   ├── handler/         # ProtocolHandler strategy (je/JavaEditionProtocolHandler)
+│   ├── handler/je/      # JavaProtocol per JE version; JavaHandshakeHandler picks 1.8 / 1.12.2
 │   ├── je/packet/       # Java Edition packets (Serverbound* / Clientbound*)
 │   ├── pipeline/        # Netty codecs: VarInt framing, lazy packet decoding
 │   └── pe/              # Bedrock, split by concern: PeRakNetServer (RakNet transport) +
@@ -163,10 +192,13 @@ layer never depends on the core; it reaches it only through the `ConnectionListe
 ## How it works
 
 ### Java Edition path
-Raw TCP → `VarintFrameDecoder` → `LazyPacketDecoder` (id + raw payload) → `JedrockConnection`,
-which delegates to `JavaEditionProtocolHandler`. On login it sends the packets a vanilla client
-needs to spawn (Join Game, Player Abilities, chunk data, Position & Look) and hands the player up
-to the core.
+Raw TCP → `VarintFrameDecoder` → `LazyPacketDecoder` (id + raw payload) → a version-neutral
+`JedrockConnection`. Every connection starts on the shared `JavaHandshakeHandler`, which reads the
+client's protocol number from the handshake and installs the matching `JavaProtocol` (1.12.2 or 1.8)
+from `JavaProtocols`, or refuses an unsupported version. From there the version handler drives login
+(Join Game, Player Abilities, chunk data, Position & Look), every clientbound encode and the hand-off
+to the core — so the connection itself carries no version-specific bytes. Framing is identical across
+JE versions.
 
 ### Bedrock path
 `PeRakNetServer` runs the RakNet transport (via the proven `com.nukkitx.network:raknet` library),
@@ -209,6 +241,7 @@ a chunk allocates nothing per section.
 |---------|-------|---------|
 | `LazyPacket` / `Lazy<T>` | utils | Hold raw bytes; parse only on demand |
 | `ProtocolHandler` | network/handler | Per-edition inbound state machine; keeps `JedrockConnection` thin |
+| `JavaProtocol` / `JavaHandshakeHandler` | network/handler/je | Per-JE-version strategy (inbound + clientbound); the handshake picks it, so one port serves 1.8 + 1.12.2 |
 | `PlayerConnection` | api | Protocol-agnostic handle the core talks to (message, tab, close) |
 | `World` / `BlockStorage` | api / core | Flat block matrix; canonical ids; the "illusion" |
 | `World.fillSection` | api / core | Bulk 16³ section read for zero-allocation chunk serialization |
@@ -285,7 +318,6 @@ and MCPE compression — no client required.
   need a damage model, and elytra gliding needs a clean cross-edition stop signal.
 - **Sharper judge** — the blind judge lands today (reach + move-delta); per-axis limits, a knockback
   allowance and interaction ray-casts would tighten it without turning into a physics engine.
-- **The blind judge** — movement-delta and interaction-sphere validation, now that movement is live.
 - **Scripting** — embedded JS (GraalJS) plugins with hot reload.
 
 ---
