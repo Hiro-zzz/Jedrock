@@ -1,8 +1,8 @@
 package com.jedrock.network.handler.je;
 
 import com.jedrock.api.world.Blocks;
+import com.jedrock.api.world.Location;
 import com.jedrock.network.JedrockConnection;
-import com.jedrock.network.handler.ProtocolHandler;
 import com.jedrock.network.je.packet.*;
 import com.jedrock.network.protocol.ProtocolState;
 import com.jedrock.utils.JLogger;
@@ -13,12 +13,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 /**
- * Handles the full JE 1.12.2 protocol state machine using lazy packets.
+ * Java Edition 1.12.2 (protocol 340) — login, play and the clientbound wire encoding.
  *
- * This class encapsulates all version-specific logic for Java Edition.
- * New versions should get their own *ProtocolHandler (or share via versioned registries).
+ * <p>The handshake and server-list ping are handled by the shared {@link JavaHandshakeHandler},
+ * which installs this handler once it sees a 1.12.2 login handshake. From there this class owns the
+ * full LOGIN → PLAY flow and every {@link JavaProtocol} clientbound op in the 1.12.2 packet format.
  */
-public final class JavaEditionProtocolHandler implements ProtocolHandler {
+public final class JavaEditionProtocolHandler implements JavaProtocol {
 
     private static final JLogger LOGGER = JLogger.getLogger(JavaEditionProtocolHandler.class);
 
@@ -26,6 +27,8 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
     // inbound), used to know which block a placement should place.
     private int heldSlot = 0;
     private final int[] hotbarState = new int[9]; // canonical states (id<<4|meta); 0 = empty
+
+    // ===== Inbound state machine (LOGIN + PLAY) =====
 
     @Override
     public void handleInbound(LazyPacket packet, JedrockConnection connection) {
@@ -40,27 +43,12 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
                     " (state=" + state + ", bytes=" + (payload != null ? payload.readableBytes() : 0) + ")");
 
             switch (state) {
-                case HANDSHAKE -> handleHandshake(id, packet, connection);
                 case LOGIN -> handleLogin(id, packet, connection);
                 case PLAY -> handlePlay(id, packet, connection);
-                case STATUS -> handleStatus(id, packet, connection);
+                default -> { /* handshake/status are owned by JavaHandshakeHandler */ }
             }
         } finally {
             packet.release();
-        }
-    }
-
-    private void handleHandshake(int id, LazyPacket lazy, JedrockConnection connection) {
-        if (id == ServerboundHandshake.PACKET_ID) {
-            ServerboundHandshake hs = lazy.materialize(ServerboundHandshake::fromBuffer);
-            LOGGER.info("Handshake from " + connection.getRemoteAddress() +
-                    " | protocol=" + hs.protocolVersion + " nextState=" + hs.nextState);
-
-            if (hs.nextState == 2) { // Login
-                connection.setState(ProtocolState.LOGIN);
-            } else if (hs.nextState == 1) {
-                connection.setState(ProtocolState.STATUS);
-            }
         }
     }
 
@@ -75,7 +63,7 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
             UUID uuid = UUID.nameUUIDFromBytes(("OfflinePlayer:" + name).getBytes(StandardCharsets.UTF_8));
 
             // 1. Login Success → client switches internally to PLAY
-            connection.sendLoginSuccess(uuid, name);
+            connection.send(new ClientboundLoginSuccess(uuid, name));
             connection.setState(ProtocolState.PLAY);
 
             // 2-5. Send the exact sequence a vanilla 1.12.2 client expects to finish "Downloading terrain"
@@ -161,31 +149,13 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
         // TODO: Client Settings (0x04), Player flying flag (0x0C), etc.
     }
 
-    private void handleStatus(int id, LazyPacket lazy, JedrockConnection connection) {
-        if (id == 0x00) {
-            // Request → Response: version, player counts and MOTD as JSON. The client renders this
-            // in the multiplayer list, then usually follows with a Ping to measure latency.
-            int online = connection.getListener() != null ? connection.getListener().getOnlinePlayerCount() : 0;
-            connection.send(ClientboundStatusResponse.of(
-                    connection.getProtocolVersion().getVersionName(),
-                    connection.getProtocolVersion().getProtocolNumber(),
-                    connection.getServerProperties().maxPlayers(),
-                    online,
-                    connection.getServerProperties().motd()));
-        } else if (id == ServerboundStatusPing.PACKET_ID) {
-            // Ping → Pong: echo the client's opaque long; the client then closes the connection.
-            ServerboundStatusPing ping = lazy.materialize(ServerboundStatusPing::fromBuffer);
-            connection.send(new ClientboundStatusPong(ping.payload));
-        }
-    }
-
-    /**
-     * Sends the mandatory packets right after Login Success so the client actually spawns.
-     */
+    /** Sends the mandatory packets right after Login Success so the client actually spawns. */
     private void sendInitialJoinSequence(JedrockConnection connection) {
+        Location spawn = connection.getWorld().getSpawnLocation();
+
         connection.send(new ClientboundJoinGame(connection.getServerProperties().maxPlayers()));
         connection.send(new ClientboundServerDifficulty());
-        connection.sendSpawnPosition();
+        connection.send(new ClientboundSpawnPosition(spawn.getBlockX(), spawn.getBlockY(), spawn.getBlockZ()));
         connection.send(new ClientboundPlayerAbilities());
         connection.send(new ClientboundHeldItemChange());
 
@@ -193,10 +163,12 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
         connection.sendSpawnChunks();
 
         // Initial position + look on top of the generated ground. Sent after chunks.
-        connection.sendSpawnPositionAndLook();
+        connection.send(new ClientboundPlayerPositionAndLook(spawn.x(), spawn.y(), spawn.z(), spawn.yaw(), spawn.pitch()));
 
         // Keep alive so the client knows the connection is alive
-        connection.sendKeepAlive(System.currentTimeMillis());
+        long now = System.currentTimeMillis();
+        connection.send(new ClientboundKeepAlive(now));
+        connection.setLastKeepAliveSent(now);
     }
 
     @Override
@@ -204,17 +176,76 @@ public final class JavaEditionProtocolHandler implements ProtocolHandler {
         if (!connection.isOpen() || connection.getState() != ProtocolState.PLAY) {
             return;
         }
-
         long now = System.currentTimeMillis();
         if (now - connection.getLastKeepAliveSent() > 15000) {
-            connection.sendKeepAlive(now);
+            connection.send(new ClientboundKeepAlive(now));
             connection.setLastKeepAliveSent(now);
         }
     }
 
+    // ===== Clientbound wire encoding (JavaProtocol), 1.12.2 packet format =====
+
     @Override
-    public void onConnectionActive(JedrockConnection connection) {
-        // JE connections start in HANDSHAKE
-        connection.setState(ProtocolState.HANDSHAKE);
+    public void sendSystemMessage(JedrockConnection c, String message) {
+        String escaped = message.replace("\\", "\\\\").replace("\"", "\\\"");
+        c.send(new ClientboundChatMessage("{\"text\":\"" + escaped + "\"}"));
+    }
+
+    @Override
+    public void addToTab(JedrockConnection c, UUID uuid, String name) {
+        c.send(ClientboundPlayerListItem.add(uuid, name, 1)); // creative gamemode in the tab
+    }
+
+    @Override
+    public void removeFromTab(JedrockConnection c, UUID uuid) {
+        c.send(ClientboundPlayerListItem.remove(uuid));
+    }
+
+    @Override
+    public void showPlayer(JedrockConnection c, UUID uuid, String name, long entityId,
+                           double x, double y, double z, float yaw, float pitch) {
+        // The uuid is already in the tab (core adds it first), which 1.12.2 requires to render.
+        c.send(new ClientboundSpawnPlayer((int) entityId, uuid, x, y, z, yaw, pitch));
+    }
+
+    @Override
+    public void hidePlayer(JedrockConnection c, UUID uuid, long entityId) {
+        c.send(new ClientboundDestroyEntities((int) entityId));
+    }
+
+    @Override
+    public void moveAvatar(JedrockConnection c, long entityId, double x, double y, double z, float yaw, float pitch) {
+        c.send(new ClientboundEntityTeleport((int) entityId, x, y, z, yaw, pitch));
+        c.send(new ClientboundEntityHeadLook((int) entityId, yaw));
+    }
+
+    @Override
+    public void teleportSelf(JedrockConnection c, double x, double y, double z, float yaw, float pitch) {
+        c.send(new ClientboundPlayerPositionAndLook(x, y, z, yaw, pitch));
+    }
+
+    @Override
+    public void swingArm(JedrockConnection c, long entityId) {
+        c.send(new ClientboundAnimation((int) entityId, ClientboundAnimation.SWING_MAIN_ARM));
+    }
+
+    @Override
+    public void setPose(JedrockConnection c, long entityId, boolean sneaking, boolean sprinting, boolean usingItem) {
+        c.send(ClientboundEntityMetadata.pose((int) entityId, sneaking, sprinting, usingItem));
+    }
+
+    @Override
+    public void sendBlockChange(JedrockConnection c, int x, int y, int z, int state) {
+        c.send(new ClientboundBlockChange(x, y, z, state));
+    }
+
+    @Override
+    public void streamChunk(JedrockConnection c, int chunkX, int chunkZ) {
+        c.send(new ClientboundChunkData(c.getWorld(), chunkX, chunkZ));
+    }
+
+    @Override
+    public void unloadChunk(JedrockConnection c, int chunkX, int chunkZ) {
+        c.send(new ClientboundUnloadChunk(chunkX, chunkZ));
     }
 }
