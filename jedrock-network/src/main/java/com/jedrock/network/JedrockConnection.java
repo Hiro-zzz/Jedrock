@@ -5,24 +5,9 @@ import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
-import com.jedrock.network.handler.ProtocolHandler;
-import com.jedrock.network.handler.je.JavaEditionProtocolHandler;
-import com.jedrock.network.je.packet.ClientboundAnimation;
-import com.jedrock.network.je.packet.ClientboundBlockChange;
-import com.jedrock.network.je.packet.ClientboundChatMessage;
-import com.jedrock.network.je.packet.ClientboundEntityMetadata;
-import com.jedrock.network.je.packet.ClientboundChunkData;
-import com.jedrock.network.je.packet.ClientboundDestroyEntities;
-import com.jedrock.network.je.packet.ClientboundEntityHeadLook;
-import com.jedrock.network.je.packet.ClientboundEntityTeleport;
-import com.jedrock.network.je.packet.ClientboundKeepAlive;
-import com.jedrock.network.je.packet.ClientboundLoginSuccess;
+import com.jedrock.network.handler.je.JavaHandshakeHandler;
+import com.jedrock.network.handler.je.JavaProtocol;
 import com.jedrock.network.je.packet.ClientboundPacket;
-import com.jedrock.network.je.packet.ClientboundPlayerListItem;
-import com.jedrock.network.je.packet.ClientboundPlayerPositionAndLook;
-import com.jedrock.network.je.packet.ClientboundSpawnPlayer;
-import com.jedrock.network.je.packet.ClientboundSpawnPosition;
-import com.jedrock.network.je.packet.ClientboundUnloadChunk;
 import com.jedrock.network.chunk.ChunkView;
 import com.jedrock.network.protocol.ConnectionProtocol;
 import com.jedrock.network.protocol.ProtocolState;
@@ -37,33 +22,38 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Full Netty-backed implementation of Connection.
+ * Netty-backed Java Edition connection — version-neutral.
  *
- * Core guarantees:
- * - Inbound packets arrive as LazyPacket (raw ID + raw payload bytes).
- * - Nothing is parsed unless someone explicitly calls materialize(...).
- * - All heavy work (login, chunk, entity metadata...) stays lazy until needed.
- * - Outbound goes through the pipeline (length framing).
+ * <p>This class owns only what does not change between JE versions: the channel and outbound
+ * framing, the movement-merge bookkeeping, chunk streaming plumbing, keep-alive timing and the
+ * lifecycle. Everything whose bytes differ per version — the inbound state machine and every
+ * clientbound encode the core drives through {@link PlayerConnection} — is delegated to the
+ * {@link JavaProtocol} installed for the client that connected.
  *
- * Protocol-specific logic lives in a {@link ProtocolHandler}.
- * This class is intentionally kept thin and protocol-agnostic.
+ * <p>A connection starts on the {@link JavaHandshakeHandler} bootstrap, which reads the handshake,
+ * learns the client's protocol number and installs the matching {@link JavaProtocol} (or refuses an
+ * unsupported version). Framing is identical across JE versions (VarInt length + VarInt id +
+ * payload), so the transport below never needs to know which version it is carrying.
  */
 public class JedrockConnection implements Connection, PlayerConnection {
 
     private static final JLogger LOGGER = JLogger.getLogger(JedrockConnection.class);
 
     private final Channel channel;
-    private final ProtocolVersion protocol;
-    private final ConnectionProtocol connectionProtocol;
     private final ConnectionListener listener;
     private final World world;
     private final ServerProperties properties;
-    private final ProtocolHandler protocolHandler;
+    private final ConnectionProtocol connectionProtocol;
+
+    /** Resolved from the client's handshake; provisional until then. */
+    private volatile ProtocolVersion protocol;
+    /** The version strategy handling this connection; swapped from the bootstrap at handshake. */
+    private volatile JavaProtocol protocolHandler;
 
     private final AtomicBoolean open = new AtomicBoolean(true);
     private volatile boolean loggedIn = false;
 
-    // Keep-alive tracking (delegated to handler)
+    // Keep-alive tracking (driven by the protocol handler's tick()).
     private volatile long lastKeepAliveSent = 0;
 
     // Last client-reported position/look. JE splits movement into three packets
@@ -75,7 +65,7 @@ public class JedrockConnection implements Connection, PlayerConnection {
     public JedrockConnection(Channel channel, ProtocolVersion protocol, ConnectionListener listener,
                              World world, ServerProperties properties) {
         this.channel = channel;
-        this.protocol = protocol;
+        this.protocol = protocol; // provisional; the handshake sets the real client version
         this.listener = listener;
         this.world = world;
         this.properties = properties;
@@ -88,8 +78,9 @@ public class JedrockConnection implements Connection, PlayerConnection {
         this.lastY = spawn.y();
         this.lastZ = spawn.z();
 
-        // JedrockConnection is the Java Edition (TCP) connection; Bedrock uses PeRakNetServer.
-        this.protocolHandler = new JavaEditionProtocolHandler();
+        // Every JE connection starts on the shared handshake/status bootstrap; it installs the
+        // version-specific handler once the client announces its protocol.
+        this.protocolHandler = new JavaHandshakeHandler();
         this.protocolHandler.onConnectionActive(this);
     }
 
@@ -98,7 +89,16 @@ public class JedrockConnection implements Connection, PlayerConnection {
         return protocol;
     }
 
-    // ===== PlayerConnection (api) =====
+    /**
+     * Swap in the version-specific protocol strategy once the handshake has identified the client,
+     * and record the resolved version. Called by {@link JavaHandshakeHandler}.
+     */
+    public void installProtocol(JavaProtocol handler, ProtocolVersion version) {
+        this.protocol = version;
+        this.protocolHandler = handler;
+    }
+
+    // ===== PlayerConnection (api) — every wire op delegates to the installed version =====
 
     @Override
     public ProtocolVersion getProtocolVersion() {
@@ -113,60 +113,57 @@ public class JedrockConnection implements Connection, PlayerConnection {
 
     @Override
     public void sendMessage(String message) {
-        sendChat(message);
+        protocolHandler.sendSystemMessage(this, message);
     }
 
     @Override
     public void addToTab(UUID uuid, String name) {
-        send(ClientboundPlayerListItem.add(uuid, name, 1)); // creative gamemode in the tab
+        protocolHandler.addToTab(this, uuid, name);
     }
 
     @Override
     public void removeFromTab(UUID uuid) {
-        send(ClientboundPlayerListItem.remove(uuid));
+        protocolHandler.removeFromTab(this, uuid);
     }
 
     @Override
     public void showPlayer(UUID uuid, String name, long entityId,
                            double x, double y, double z, float yaw, float pitch) {
-        // The uuid is already in the tab (core adds it first), which 1.12.2 requires to render.
-        send(new ClientboundSpawnPlayer((int) entityId, uuid, x, y, z, yaw, pitch));
+        protocolHandler.showPlayer(this, uuid, name, entityId, x, y, z, yaw, pitch);
     }
 
     @Override
     public void hidePlayer(UUID uuid, long entityId) {
-        send(new ClientboundDestroyEntities((int) entityId));
+        protocolHandler.hidePlayer(this, uuid, entityId);
     }
 
     @Override
     public void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch) {
-        send(new ClientboundEntityTeleport((int) entityId, x, y, z, yaw, pitch));
-        send(new ClientboundEntityHeadLook((int) entityId, yaw));
+        protocolHandler.moveAvatar(this, entityId, x, y, z, yaw, pitch);
     }
 
     @Override
     public void teleport(double x, double y, double z, float yaw, float pitch) {
-        send(new ClientboundPlayerPositionAndLook(x, y, z, yaw, pitch));
+        protocolHandler.teleportSelf(this, x, y, z, yaw, pitch);
     }
 
     @Override
     public void swingArm(long entityId) {
-        send(new ClientboundAnimation((int) entityId, ClientboundAnimation.SWING_MAIN_ARM));
+        protocolHandler.swingArm(this, entityId);
     }
 
     @Override
     public void setPose(long entityId, boolean sneaking, boolean sprinting, boolean usingItem) {
-        send(ClientboundEntityMetadata.pose((int) entityId, sneaking, sprinting, usingItem));
+        protocolHandler.setPose(this, entityId, sneaking, sprinting, usingItem);
     }
 
     @Override
-    public void sendBlockChange(int x, int y, int z, int blockId) {
-        send(new ClientboundBlockChange(x, y, z, blockId));
+    public void sendBlockChange(int x, int y, int z, int state) {
+        protocolHandler.sendBlockChange(this, x, y, z, state);
     }
 
     @Override
     public void close(String reason) {
-        // Disconnect packet with a reason is a future improvement; for now just drop the channel.
         LOGGER.debug(() -> "Closing connection " + getAddress() + (reason != null ? " (" + reason + ")" : ""));
         close();
     }
@@ -197,7 +194,7 @@ public class JedrockConnection implements Connection, PlayerConnection {
             if (data != null) data.release();
             return;
         }
-        // The length encoder in the pipeline will prepend the VarInt length
+        // The length encoder in the pipeline will prepend the VarInt length.
         channel.writeAndFlush(data);
     }
 
@@ -216,8 +213,9 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     /**
-     * Send a typed clientbound packet. Writes [VarInt id][payload]; the pipeline
-     * prepends the length. This is the primary way to send packets.
+     * Send a typed clientbound packet. Writes [VarInt id][payload]; the pipeline prepends the length.
+     * The framing is identical across JE versions, so protocol handlers of any version build their
+     * own {@link ClientboundPacket} instances and hand them here.
      */
     public void send(ClientboundPacket packet) {
         if (!isOpen()) return;
@@ -234,39 +232,16 @@ public class JedrockConnection implements Connection, PlayerConnection {
         }
     }
 
-    /** Send Login Success (switches the client to PLAY). Primarily called by protocol handlers. */
-    public void sendLoginSuccess(UUID uuid, String username) {
-        send(new ClientboundLoginSuccess(uuid, username));
-    }
-
-    /** Send keep-alive packet. Primarily called by protocol handlers. */
-    public void sendKeepAlive(long id) {
-        send(new ClientboundKeepAlive(id));
-    }
-
-    /** Send a simple system chat message. */
-    public void sendChat(String message) {
-        String escaped = message.replace("\\", "\\\\").replace("\"", "\\\"");
-        send(new ClientboundChatMessage("{\"text\":\"" + escaped + "\"}"));
-    }
-
-    /** Send the world's spawn as the client's compass/respawn point. */
-    public void sendSpawnPosition() {
-        Location s = world.getSpawnLocation();
-        send(new ClientboundSpawnPosition(s.getBlockX(), s.getBlockY(), s.getBlockZ()));
-    }
-
-    /** Teleport the client to the world spawn (feet on the generated ground). */
-    public void sendSpawnPositionAndLook() {
-        Location s = world.getSpawnLocation();
-        send(new ClientboundPlayerPositionAndLook(s.x(), s.y(), s.z(), s.yaw(), s.pitch()));
+    /** The shared world clients serialize chunks from; used by protocol handlers during the join. */
+    public World getWorld() {
+        return world;
     }
 
     /** View distance (in chunks) streamed around the player — from server config. */
     private final ChunkView chunkView;
     private final ChunkView.Sink chunkSink = new ChunkView.Sink() {
-        @Override public void load(int cx, int cz) { send(new ClientboundChunkData(world, cx, cz)); }
-        @Override public void unload(int cx, int cz) { send(new ClientboundUnloadChunk(cx, cz)); }
+        @Override public void load(int cx, int cz) { protocolHandler.streamChunk(JedrockConnection.this, cx, cz); }
+        @Override public void unload(int cx, int cz) { protocolHandler.unloadChunk(JedrockConnection.this, cx, cz); }
     };
 
     /**
@@ -316,9 +291,7 @@ public class JedrockConnection implements Connection, PlayerConnection {
         this.loggedIn = value;
     }
 
-    /**
-     * Accessor for protocol handlers (and core via listener).
-     */
+    /** Accessor for protocol handlers (and core via listener). */
     public ConnectionListener getListener() {
         return listener;
     }

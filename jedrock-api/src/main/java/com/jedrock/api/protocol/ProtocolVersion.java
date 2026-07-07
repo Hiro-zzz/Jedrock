@@ -7,6 +7,7 @@ package com.jedrock.api.protocol;
 public enum ProtocolVersion {
 
     // Java Edition
+    JE_1_8(47, "1.8", false),
     JE_1_12_2(340, "1.12.2", false),
 
     // Bedrock / MCPE
