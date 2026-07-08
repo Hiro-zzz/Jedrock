@@ -228,8 +228,8 @@ public class JedrockServer implements Server, ConnectionListener {
             return;
         }
 
-        player.sendMessage("§aWelcome to Jedrock!");
-        broadcast("§e" + username + " joined the game", player);
+        player.sendMessage("{green}Welcome to **Jedrock**!");
+        broadcast("{yellow}" + username + " joined the game", player);
 
         // Tab list: give the newcomer the whole roster, and add the newcomer to everyone else's.
         // Tab entries must land before the avatar spawns below (JE renders only listed uuids).
@@ -266,7 +266,7 @@ public class JedrockServer implements Server, ConnectionListener {
         }
         defaultWorld.removePlayer(player);
         eventBus.post(new PlayerQuitEvent(player));
-        broadcast("§e" + player.getName() + " left the game", null);
+        broadcast("{yellow}" + player.getName() + " left the game", null);
 
         // Drop the leaver from everyone else's tab and world.
         for (Player other : playerRegistry.all()) {
@@ -391,8 +391,11 @@ public class JedrockServer implements Server, ConnectionListener {
         if (sender == null) {
             return;
         }
-        String line = "<" + sender.getName() + "> " + message;
-        LOGGER.info("[chat] " + line);
+        // Name in the unified markup; the player's own text is rendered too, so they can use
+        // {color} / Markdown in chat. (Escape any '{' they typed so it stays literal? Left as a
+        // feature for now.)
+        String line = "{gray}<{aqua}" + sender.getName() + "{gray}>{reset} " + message;
+        LOGGER.info("[chat] <" + sender.getName() + "> " + message);
         broadcast(line, null); // relay to everyone, including the sender
     }
 
