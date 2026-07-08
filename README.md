@@ -31,6 +31,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
 ## What works today
 
 - ✅ **Java 1.12.2 client joins** into a procedurally generated world (login → join game → chunks → spawn).
+- ✅ **Java 1.8 client joins too** (protocol 47) — the same listener serves it, picking the encoder from
+  the handshake; a real 1.8 client shares the world, chat and avatars with 1.12.2 (see [Multiversion](#multiversion)).
 - ✅ **Procedural terrain** — a deterministic value-noise heightmap (rolling hills, grass/dirt/stone
   layers) generated as a pure function of a seed; players spawn standing on the surface.
 - ✅ **Collision** — comes for free: the client collides against the solid ground we serialize to it;
@@ -41,12 +43,17 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   from scratch: big-endian wire, a one-byte game wrapper, plaintext (no-Xbox) login, a `0x92` zlib
   batch and 128-tall full-column chunks. A real 0.14 phone client logs in, spawns on the shared
   procedural terrain, and moves / digs / builds — cross-play with a Java 1.12.2 client in one world
-  (shared blocks, chat, avatars). Nametags, skins and the sprint / item-use poses are drawn by the
-  0.14 client itself, so the server sends less than 1.1.5 needs.
+  (shared blocks, chat, avatars). Other players show in the 0.14 **pause-menu list** (`PlayerList`
+  with a synthetic skin) and the crouch pose is relayed onto avatars; nametags, skins and the sprint /
+  item-use poses are drawn by the 0.14 client itself, so the server sends less than 1.1.5 needs.
 - ✅ **One shared world** — Java and Bedrock render the **same blocks** from a single `CoreWorld`;
   the Bedrock side serializes chunks in the MCPE 1.0/1.1 network format (blocks + metadata + sky/block
   light + heightmap), so a Bedrock client stands on exactly the terrain a Java client sees.
 - ✅ **Cross-platform chat** — a message typed on Java shows up on Bedrock and vice versa.
+- ✅ **Unified chat markup** — messages are authored once in an edition-agnostic format (`{color}` tags
+  plus Markdown `**bold**` / `*italic*` / `__underline__` / `~~strike~~`) and rendered to the legacy
+  `§` codes every version understands, so one string formats identically on Java and Bedrock alike
+  (`ChatText`, unit-tested). Players can use it in chat too.
 - ✅ **Presence** — join/leave announcements reach every player, on both platforms.
 - ✅ **Shared player registry** — Java and Bedrock players live in the same core state and fire
   the same `PlayerJoinEvent` / `PlayerQuitEvent`.
@@ -162,27 +169,6 @@ packet switch that spends CPU and memory only when it absolutely must**. Five pi
 Concretely, the codebase holds to three rules: **lightweight** (few deps, few allocations),
 **absolute abstraction** (the `api` module knows nothing about packets or wire formats), and
 **lazy parsing**.
-
----
-
-## Performance
-
-The illusionist design spends almost nothing per player. A quick smoke test — **101 players**
-(100 bots) on one default world, read straight off the server's own `status` command:
-
-```
-TPS 20.0 | MSPT 0.04 (peak 4.01) | players 101 | mem 78/4004 MB | up 1m39s
-```
-
-- **TPS 20.0** — the loop never falls behind.
-- **~0.04 ms per tick** — the game loop does almost no per-player work: movement and edits are
-  *relayed* (on the network threads), not simulated, so the tick thread stays essentially idle.
-- **~78 MB heap for 101 connections** — the world is a lazily-allocated id matrix, not a live
-  simulation, and inbound bytes stay raw until something needs a value.
-
-Numbers are from bots (lighter than humans exploring fresh terrain), so treat them as a floor, not a
-benchmark — but the shape is the point: **"system requirements" is, generously, a formality.** Watch
-it live with the `status` command or `-Djedrock.status.seconds=N` (see [Console & diagnostics](#console--diagnostics)).
 
 ---
 
