@@ -78,7 +78,10 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     @Override
     public void showPlayer(UUID uuid, String name, long entityId,
                            double x, double y, double z, float yaw, float pitch) {
-        // AddPlayer takes feet y.
+        // Player-list entry first (feeds the pause-menu list), then the avatar. AddPlayer takes feet y.
+        // The list needs a valid skin (an empty one crashes the client), so hand it a synthetic texture.
+        byte[] skin = Mcpe014Skin.synthetic(uuid);
+        sendWrapped(b -> Mcpe014Packets.playerListAdd(b, uuid, entityId, name, Mcpe014Skin.SKIN_NAME, skin));
         sendWrapped(b -> Mcpe014Packets.addPlayer(b, uuid, name, entityId,
                 (float) x, (float) y, (float) z, yaw, pitch));
     }
@@ -86,6 +89,7 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     @Override
     public void hidePlayer(UUID uuid, long entityId) {
         sendWrapped(b -> Mcpe014Packets.removeEntity(b, entityId));
+        sendWrapped(b -> Mcpe014Packets.playerListRemove(b, uuid));
     }
 
     @Override
@@ -108,7 +112,9 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
 
     @Override
     public void setPose(long entityId, boolean sneaking, boolean sprinting, boolean usingItem) {
-        // Pose metadata for 0.14 is a later refinement; avatars still spawn and move without it.
+        // Crouch needs the DATA_FLAGS byte; the 0.14 client draws sprint / item-use itself, but sending
+        // them too is harmless and keeps a late joiner in sync with the full pose.
+        sendWrapped(b -> Mcpe014Packets.setEntityDataFlags(b, entityId, sneaking, sprinting, usingItem));
     }
 
     @Override

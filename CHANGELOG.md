@@ -8,6 +8,19 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Unified chat markup.** Chat and system messages are authored once in an edition-agnostic format —
+  `{color}` braces for the 16 Minecraft colours (+ aliases) and `{reset}`, plus Markdown styles
+  (`**bold**`, `*italic*` / `_italic_`, `__underline__`, `~~strike~~`; style names also work in braces)
+  — and `ChatText` (in `jedrock-utils`) renders it to the legacy `§` codes every version understands
+  (Java inside the JSON text component, Bedrock in a raw `TextPacket`). It is colour/style aware (a
+  legacy colour code clears styles on the client, so it emits colour first, re-applies styles, and adds
+  `§r` only when a style must actually turn off), so one rendered string formats identically on every
+  edition. Rendering happens once in `CorePlayer.sendMessage`; raw `§` and unknown `{tags}` pass through.
+  Players can use the markup in chat too. Unit-tested.
+- **MCPE 0.14 player list + crouch pose.** Other players now appear in the 0.14 pause-menu list
+  (`PlayerList` 0xc3, with a synthetic `Mcpe014Skin` — the client crashes on an empty skin), and the
+  crouch pose is relayed onto 0.14 avatars via `SetEntityData` 0xad (the DATA_FLAGS byte; sprint /
+  item-use the client already draws itself).
 - **Bedrock / MCPE 0.14 support (protocol 45), from scratch.** A second, older Bedrock edition now
   joins the same shared world as 1.12.2 / 1.8 / 1.1.5. 0.14 predates the modern Bedrock protocol, so it
   is a parallel implementation rather than a tweak of the 1.1.5 layer: a big-endian wire (not VarInt), a

@@ -6,6 +6,7 @@ import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
 import com.jedrock.core.world.CoreWorld;
+import com.jedrock.utils.text.ChatText;
 
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
@@ -126,7 +127,9 @@ public final class CorePlayer implements Player {
 
     @Override
     public void sendMessage(String message) {
-        connection.sendMessage(message);
+        // Messages are authored in the unified {color} + Markdown markup; render to the legacy §
+        // codes every edition understands before it reaches the protocol layer.
+        connection.sendMessage(ChatText.toLegacy(message));
     }
 
     @Override
