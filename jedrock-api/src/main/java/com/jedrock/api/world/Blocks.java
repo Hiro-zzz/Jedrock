@@ -20,7 +20,9 @@ public final class Blocks {
     public static final int PLANKS = 5;
     public static final int WOOL = 35;
     public static final int SAND = 12;
+    public static final int WATER = 9;   // stationary (still) water — calm decoration lakes
     public static final int LOG = 17;
+    public static final int LEAVES = 18;
     public static final int GLASS = 20;
 
     /** Maximum numeric ID that safely fits into a single byte for the legacy protocol chunk matrix. */

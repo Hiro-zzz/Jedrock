@@ -8,6 +8,74 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Finite-world edge wall (world-generation Phase 4).** The bounded world now has an edge. A move whose
+  target column falls outside the bounds is refused and the player snapped back to their last in-bounds
+  spot (an invisible wall, keeping their look angles); if a player is somehow already outside, they're
+  teleported home to spawn. Block edits outside the bounds are likewise refused and the client corrected
+  with the real (void = air) block, so the world can't grow past its edge. Enforced on the network
+  thread regardless of the anti-cheat toggle — the edge is a world constraint, not a cheat check.
+  `CoreWorld` exposes the bounds (`minBound` / `maxBound` / `isInsideBounds`, unit-tested in
+  `WorldBoundsTest`). This completes the finite "bake once, then serve" world — terrain, biomes,
+  decoration and now a bounded edge. (Bounds stay the fixed 48×48; making them a config key is a
+  possible follow-up.)
+
+- **World decoration — trees, lakes, caves (world-generation Phase 3).** The finite world is no longer
+  bare terrain: a `WorldDecorator` runs three deterministic passes at bake time (after terrain + biomes,
+  with `generated == true`, so they read/write the same storage the client sees). **Caves** — a 3D-noise
+  "cheese" carve below the surface; **lakes** — shallow still-water ponds, one candidate per chunk, with
+  a keep-out around spawn; **trees** — per-column, biome-weighted density (dense forest, medium taiga,
+  sparse plains/savanna), oak logs+leaves (spruce in taiga), planted only on a grass surface a lake or
+  cave didn't take. Every placement is position-hashed (no sequential RNG), so a seed always yields the
+  same world; because the whole finite world is in memory at bake time, features cross chunk borders
+  with no populate-ordering. Since all of this is baked into storage, it costs nothing at runtime — the
+  server still simulates nothing. New block ids `WATER` / `LEAVES` in the api. Measured on a real boot:
+  a decorated 48×48 bake is ~11 500 sections in ~3.5 s and a ~1 MB level file; later boots just load it.
+  Unit-tested (`WorldDecorationTest`: features appear + determinism).
+
+- **Biomes (world-generation Phase 2).** The finite world now has biomes instead of plains everywhere.
+  A deterministic `BiomeGenerator` (two broad temperature/humidity noise fields) assigns one of four
+  grass-surfaced biomes — plains, forest, taiga, savanna — in large blobby regions; the bake freezes a
+  per-column biome map into a `BiomeStorage` (2D companion to `BlockStorage`) that is served at runtime
+  and persisted in the level file (format bumped to v2 — a 256-byte biome map per chunk after the block
+  sections; DEFLATE keeps it to ~17 KB for a 48×48 world). The biome id is exposed protocol-agnostically
+  via `World.getBiome` / `World.fillBiomes` and wired through **all four** chunk serializers, replacing
+  the hardcoded plains: JE 1.12.2 / JE 1.8 / PE 1.1.5 send the per-column biome-id byte, and PE 0.14
+  (which sends grass *colours*, not ids) maps each biome to a grass tint, so a player sees the biome
+  render — grass/foliage tint — correctly on every edition. Blocks are unchanged (all four biomes are
+  grass-surfaced); per-biome terrain and decoration (trees / lakes / caves) come with Phase 3.
+  Unit-tested (`BiomeGeneratorTest`, `BiomeStorageTest`, biome round-trip in `LevelIOTest` /
+  `CoreWorldBakeTest`); existing chunk-serializer tests still pin plains via the default biome.
+
+- **Finite "bake once" world (world-generation Phase 1).** On first run the world is now generated once
+  over a bounded region (48×48 chunks, `CoreWorld.BOUNDS_CHUNKS`) and **frozen into storage**; from then
+  on the terrain generator is never consulted at runtime — `CoreWorld` serves blocks straight from the
+  baked `BlockStorage`, matching the "generate once, then serve static decoration" design. `bake()`
+  resolves every cell of the bounds (procedural terrain plus any pre-bake overlay edits) into full
+  sections, so it also cleanly migrates a pre-bake world; a coordinate outside the bounds reads air (the
+  world is finite). Serving switches on the persisted `generated` flag: a fresh/pre-bake world keeps the
+  on-demand terrain + edit-overlay path (with the explicit-air sentinel), while a baked world reads
+  storage only and a break stores genuine air. `JedrockServer` bakes-or-loads before any listener binds
+  and saves the freshly baked world; a `dirty` flag lets autosave and the shutdown save skip an
+  unchanged world instead of rewriting it. Measured on a real boot: 48×48 bakes to 10 240 sections in
+  ~0.3 s and saves to a ~420 KB level file (DEFLATE collapses the uniform terrain); the second boot just
+  loads it, no re-bake. Biomes, decoration (trees / lakes / caves) and the edge wall are the next phases.
+  Unit-tested (`CoreWorldBakeTest`).
+
+- **World persistence (world-generation foundation, Phase 0).** The world now survives a restart. A
+  compact, Jedrock-specific level file (`world/level.jdw`) stores an uncompressed header (format
+  version, seed, the finite 48×48-chunk bounds, spawn, a `generated` flag) followed by every allocated
+  16³ `BlockStorage` section in a single DEFLATE stream — close to a raw dump of the in-memory
+  `short`-per-block model, so DEFLATE collapses the uniform stone/air runs to a small file. `LevelIO`
+  reads/writes it; saves are atomic (write a sibling `.tmp`, then move into place, so a crash
+  mid-write can't corrupt an existing world). The world is loaded once at startup **before any
+  listener binds** (a joining player sees the persisted edits), saved on shutdown, and autosaved every
+  `-Djedrock.world.save-seconds` (default 300; `0` disables) on a background thread that skips if a
+  save is still running. Terrain itself stays procedural — only player edits are stored, and a broken
+  natural block persists via the explicit-air sentinel, which round-trips byte-exact. This is the
+  groundwork for the finite "bake once, then serve" world (bounds enforcement, biomes and decoration
+  to follow); the `generated` flag and bounds are recorded but not yet enforced. Unit-tested
+  (`LevelIOTest`, `CoreWorldPersistenceTest`) and validated with a real boot → restart cycle.
+
 - **Unified chat markup.** Chat and system messages are authored once in an edition-agnostic format —
   `{color}` braces for the 16 Minecraft colours (+ aliases) and `{reset}`, plus Markdown styles
   (`**bold**`, `*italic*` / `_italic_`, `__underline__`, `~~strike~~`; style names also work in braces)
@@ -179,6 +247,14 @@ unstable — anything may change between entries.
 
 - **PE server-list ping advertised the wrong port.** `onQuery` used the querying client's port for
   the advertised IPv4/IPv6 port fields instead of the server's own bind port.
+- **Usernames leaked into chat markup.** A username was embedded into the `{color}` markup of the
+  chat, join and leave lines without escaping, so an ordinary `_` in a name (e.g. `Steve_123`) toggled
+  italic mid-line, and a self-named 0.14 client (plaintext login) could inject `{color}` tags or raw
+  `§` codes. Added `ChatText.escape` (backslash-escapes `\ { * _ ~`, drops raw `§`) and apply it to the
+  three name-in-markup sites; the chat message body stays raw (the documented player-markup feature).
+  The username is also sanitized once at ingress (`ChatText.stripCodes` — drops raw `§` / control chars)
+  so it can't colour the nametag / tab entry either, which render the name verbatim (not via markup).
+  Unit-tested.
 
 ### Removed
 

@@ -43,6 +43,7 @@ final class McpeChunkSerializer {
     /** Per-thread section + metadata-nibble buffers so serializing a column allocates nothing. */
     private static final ThreadLocal<short[]> SCRATCH = ThreadLocal.withInitial(() -> new short[4096]);
     private static final ThreadLocal<byte[]> META = ThreadLocal.withInitial(() -> new byte[2048]);
+    private static final ThreadLocal<byte[]> BIOMES = ThreadLocal.withInitial(() -> new byte[256]);
 
     /** Serialize the given chunk column of {@code world} into a network-format payload. */
     static byte[] serialize(World world, int chunkX, int chunkZ) {
@@ -86,7 +87,9 @@ final class McpeChunkSerializer {
                 payload.writeZero(2048);        // block light (none)
             }
             payload.writeZero(512);               // heightmap (256 shorts; client recomputes)
-            payload.writeZero(256);               // biome map
+            byte[] biomes = BIOMES.get();
+            world.fillBiomes(chunkX, chunkZ, biomes);
+            payload.writeBytes(biomes);           // biome map (256 columns, index (z<<4)|x)
             payload.writeByte(0);                 // border block count
             ByteBufUtils.writeVarInt(payload, 0); // extra data count
 

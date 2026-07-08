@@ -26,11 +26,8 @@ public final class ClientboundChunkData implements ClientboundPacket {
 
     /** 2048 bytes of full sky light (0xF per nibble); block light is all-dark, written as zeros. */
     private static final byte[] FULL_LIGHT = new byte[2048];
-    /** 256 biome bytes, all "plains" (1). */
-    private static final byte[] PLAINS_BIOMES = new byte[256];
     static {
         Arrays.fill(FULL_LIGHT, (byte) 0xFF);
-        Arrays.fill(PLAINS_BIOMES, (byte) 1);
     }
 
     /** Per-thread reusable working buffers so serializing a chunk's 16 sections allocates nothing. */
@@ -39,6 +36,7 @@ public final class ClientboundChunkData implements ClientboundPacket {
         final int[] palette = new int[256];        // JE states; 8-bit indirect ⇒ at most 256 entries
         final byte[] indices = new byte[4096];      // palette index per block (0..255, read unsigned)
         final long[] data = new long[64 * MAX_BITS_PER_BLOCK]; // packed indices; sized for 8 bits/block
+        final byte[] biomes = new byte[256];        // per-column biome ids, index (z<<4)|x
     }
     private static final ThreadLocal<Scratch> SCRATCH = ThreadLocal.withInitial(Scratch::new);
 
@@ -66,7 +64,9 @@ public final class ClientboundChunkData implements ClientboundPacket {
                     primaryBitMask |= (1 << sectionY);
                 }
             }
-            data.writeBytes(PLAINS_BIOMES); // biomes: plains
+            byte[] biomes = SCRATCH.get().biomes;
+            world.fillBiomes(chunkX, chunkZ, biomes);
+            data.writeBytes(biomes, 0, 256); // 256-column biome map
 
             ByteBufUtils.writeVarInt(buf, primaryBitMask);
             ByteBufUtils.writeVarInt(buf, data.readableBytes());

@@ -74,6 +74,29 @@ public interface World {
     }
 
     /**
+     * Legacy Minecraft biome id (0..255) at a column. Protocol-agnostic: each edition's chunk
+     * serializer maps it to its own wire form (a biome-id byte on Java / PE 1.1.5, a grass-tint colour
+     * on PE 0.14). Defaults to {@code 1} (plains) so a minimal {@link World} needs no biome data.
+     */
+    default int getBiome(int x, int z) {
+        return 1; // plains
+    }
+
+    /**
+     * Bulk-read a chunk's 16×16 biome map into {@code out} (length 256), ordered {@code out[(z<<4)|x]}
+     * — the chunk-serialization companion to {@link #fillSection}. The default loops {@link #getBiome};
+     * storage-backed worlds override it with a single lookup.
+     */
+    default void fillBiomes(int chunkX, int chunkZ, byte[] out) {
+        int baseX = chunkX << 4, baseZ = chunkZ << 4;
+        for (int z = 0; z < 16; z++) {
+            for (int x = 0; x < 16; x++) {
+                out[(z << 4) | x] = (byte) getBiome(baseX + x, baseZ + z);
+            }
+        }
+    }
+
+    /**
      * Spawn location for this world.
      */
     Location getSpawnLocation();

@@ -70,6 +70,60 @@ public final class ChatText {
         for (String n : names) STYLES.put(n, bit);
     }
 
+    /**
+     * Escape untrusted text so {@link #toLegacy} renders it verbatim — colour tags, Markdown styles
+     * and raw {@code §} codes it contains take no effect. Use this on anything a player controls
+     * (usernames, chat fragments) before embedding it in authored markup, e.g.
+     * {@code "{yellow}" + escape(name) + " joined"}.
+     *
+     * <p>Backslash-escapes the markup-significant characters ({@code \ { * _ ~}) and drops any raw
+     * {@code §} (a backslash can't neutralize a section sign — the client would still read the code,
+     * so it's removed). Note a lone {@code _} in a name would otherwise toggle italic, so common
+     * names like {@code Steve_123} need this too, not just adversarial input.
+     *
+     * <p>{@code null} in → {@code null} out.
+     */
+    public static String escape(String input) {
+        if (input == null || input.isEmpty()) {
+            return input;
+        }
+        StringBuilder sb = new StringBuilder(input.length() + 8);
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (c == SECTION) {
+                continue; // drop raw legacy codes — escaping can't stop the client reading a §
+            }
+            if (c == '\\' || c == '{' || c == '*' || c == '_' || c == '~') {
+                sb.append('\\');
+            }
+            sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Strip what an untrusted string shown <em>verbatim</em> (a username in a nametag / tab list —
+     * surfaces that render no markup) must not carry: raw legacy {@code §} codes and control
+     * characters. Unlike {@link #escape}, it adds nothing — the result is meant to be displayed as-is,
+     * not fed back through {@link #toLegacy}. Sanitize an untrusted name once at ingress with this;
+     * still {@link #escape} it at the point it's embedded in authored markup (a {@code _} it keeps
+     * would otherwise italicise there). {@code null} in → {@code null} out.
+     */
+    public static String stripCodes(String input) {
+        if (input == null || input.isEmpty()) {
+            return input;
+        }
+        StringBuilder sb = new StringBuilder(input.length());
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (c == SECTION || c < ' ') {
+                continue; // drop legacy colour/style codes and control chars (newlines, tabs, …)
+            }
+            sb.append(c);
+        }
+        return sb.toString();
+    }
+
     /** Render unified markup to a legacy {@code §} string. {@code null} in → {@code null} out. */
     public static String toLegacy(String input) {
         if (input == null || input.isEmpty()) {

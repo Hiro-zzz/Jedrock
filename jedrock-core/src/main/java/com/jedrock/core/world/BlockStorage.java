@@ -1,5 +1,7 @@
 package com.jedrock.core.world;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -93,6 +95,44 @@ public final class BlockStorage {
     public short[] section(int chunkX, int sectionY, int chunkZ) {
         short[][] column = columns.get(columnKey(chunkX, chunkZ));
         return column == null ? null : column[sectionY];
+    }
+
+    /**
+     * One allocated section: its chunk column, its y-index, and the live backing array. {@code data}
+     * is not copied — a persistence pass reads it directly (a concurrent edit is a benign torn read,
+     * same tolerance as {@link #getId}).
+     */
+    public record SectionEntry(int chunkX, int sectionY, int chunkZ, short[] data) {}
+
+    /**
+     * Snapshot every currently allocated section for saving. The list is a fresh structure but the
+     * section arrays are shared (not copied), so hold it only for the duration of a save.
+     */
+    public List<SectionEntry> snapshotSections() {
+        List<SectionEntry> out = new ArrayList<>();
+        for (var e : columns.entrySet()) {
+            long key = e.getKey();
+            int chunkX = (int) (key >> 32);
+            int chunkZ = (int) key;
+            short[][] column = e.getValue();
+            for (int sy = 0; sy < column.length; sy++) {
+                if (column[sy] != null) {
+                    out.add(new SectionEntry(chunkX, sy, chunkZ, column[sy]));
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Install a whole section array at the given position, allocating the column if needed. For
+     * single-threaded bulk load (world load / bake); {@code data} must have length 4096 and is
+     * adopted, not copied.
+     */
+    public void putSection(int chunkX, int sectionY, int chunkZ, short[] data) {
+        short[][] column = columns.computeIfAbsent(columnKey(chunkX, chunkZ),
+                k -> new short[SECTIONS_PER_COLUMN][]);
+        column[sectionY] = data;
     }
 
     /** Number of currently allocated sections — useful for tests and introspection. */

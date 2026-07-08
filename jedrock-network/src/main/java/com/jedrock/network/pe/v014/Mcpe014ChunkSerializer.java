@@ -15,7 +15,8 @@ import com.jedrock.api.world.World;
  * Ordering is column-major, x outer / z inner, each column 128 tall: {@code blockIds[(x*16+z)*128 + y]}.
  * The nibble arrays are half-columns (64 bytes/col): byte {@code k} packs {@code val(2k) | val(2k+1)<<4}.
  * skyLight is full daylight (0xFF), blockLight is 0. The heightMap and per-column biome value are indexed
- * {@code (z<<4)+x}; the biome is a big-endian uint32 grass-tint (a constant plains value is fine).
+ * {@code (z<<4)+x}; the biome is a big-endian uint32 whose top byte is the legacy biome id and low three
+ * bytes are its grass tint — 0.14 renders grass from this colour, so per-biome tints show up client-side.
  *
  * <p>The world exposes the canonical {@code (id<<4)|meta} state via {@link World#getBlockId}; 0.14 wants
  * the legacy id byte plus a 4-bit meta nibble, which is exactly that state split.
@@ -27,10 +28,17 @@ public final class Mcpe014ChunkSerializer {
     private static final int NIBBLES = BLOCKS / 2;           // 16384
     private static final int BLOB = BLOCKS + NIBBLES * 3 + 256 + 1024; // 103200
 
-    /** Plains grass tint (big-endian uint32 per column). Only affects grass colour, not spawn. */
-    private static final int PLAINS_BIOME_COLOR = 0x0185B24A;
-
     private Mcpe014ChunkSerializer() {}
+
+    /** Legacy grass tint (24-bit RGB) for a biome id — MCPE 0.14 sends grass colours, not biome ids. */
+    private static int grassRgb(int biomeId) {
+        return switch (biomeId) {
+            case 4 -> 0x59AE30;   // forest
+            case 5 -> 0x86B87F;   // taiga
+            case 35 -> 0xBFB755;  // savanna
+            default -> 0x85B24A;  // plains (and anything unknown)
+        };
+    }
 
     public static byte[] serialize(World world, int chunkX, int chunkZ) {
         byte[] out = new byte[BLOB];
@@ -76,11 +84,13 @@ public final class Mcpe014ChunkSerializer {
 
                 int hz = (z << 4) + x;
                 out[heightBase + hz] = (byte) Math.min(topSolid, 255);
+                int biomeId = world.getBiome(baseX + x, baseZ + z);
+                int color = (biomeId << 24) | grassRgb(biomeId); // [biomeId, R, G, B]
                 int bo = biomeBase + hz * 4;
-                out[bo] = (byte) (PLAINS_BIOME_COLOR >> 24);
-                out[bo + 1] = (byte) (PLAINS_BIOME_COLOR >> 16);
-                out[bo + 2] = (byte) (PLAINS_BIOME_COLOR >> 8);
-                out[bo + 3] = (byte) PLAINS_BIOME_COLOR;
+                out[bo] = (byte) (color >> 24);
+                out[bo + 1] = (byte) (color >> 16);
+                out[bo + 2] = (byte) (color >> 8);
+                out[bo + 3] = (byte) color;
             }
         }
         return out;

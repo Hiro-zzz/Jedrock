@@ -41,3 +41,5 @@ build/
 ### Jedrock ###
 # Runtime config written on first run (the template lives in jedrock-core resources).
 /jedrock.properties
+# Saved world data (level file + future region files), written at runtime.
+/world/

@@ -57,4 +57,33 @@ class ChatTextTest {
     void rawLegacyCodesPassThrough() {
         assertEquals(S + "araw", ChatText.toLegacy(S + "araw"));
     }
+
+    @Test
+    void escapeLeavesPlainTextAlone() {
+        assertEquals("Steve", ChatText.escape("Steve"));
+        assertNull(ChatText.escape(null));
+        assertEquals("", ChatText.escape(""));
+    }
+
+    @Test
+    void escapedNameRendersVerbatim() {
+        // A '_' in a name must not toggle italic once embedded in markup and rendered.
+        assertEquals("Steve_123", ChatText.toLegacy("{aqua}" + ChatText.escape("Steve_123")).substring(2));
+        // Colour-tag and raw § injection in a name are neutralised.
+        assertEquals("{red}Admin", ChatText.toLegacy(ChatText.escape("{red}Admin")));
+        assertEquals("4Admin", ChatText.toLegacy(ChatText.escape(S + "4Admin")));
+        // Markdown-style characters stay literal too.
+        assertEquals("a*b~~c", ChatText.toLegacy(ChatText.escape("a*b~~c")));
+    }
+
+    @Test
+    void stripCodesDropsSectionAndControlChars() {
+        assertEquals("Steve", ChatText.stripCodes("Steve"));
+        assertNull(ChatText.stripCodes(null));
+        // Raw legacy codes and control chars go; the surrounding text (and a legitimate '_') stays.
+        assertEquals("4Admin", ChatText.stripCodes(S + "4Admin"));
+        assertEquals("Steve_123", ChatText.stripCodes("Steve_123"));
+        assertEquals("ab", ChatText.stripCodes("a\nb"));
+        assertEquals("with space", ChatText.stripCodes("with space")); // real spaces survive
+    }
 }

@@ -8,6 +8,9 @@ import com.jedrock.api.world.Dimension;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
 
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Set;
@@ -27,13 +30,33 @@ public final class CoreWorld implements World {
     /** Default world seed — fixed so restarts reproduce the same terrain (until config lands). */
     private static final long DEFAULT_SEED = 0x5EED1EAFL;
 
+    /**
+     * Finite world extent, in chunks per side, centred on the origin. The world is a bounded
+     * "decoration" (see the world-generation roadmap): 48×48 chunks = 768×768 blocks. Recorded in the
+     * level file today; enforced (edge wall) once the bake/edge phases land.
+     */
+    public static final int BOUNDS_CHUNKS = 48;
+
     private final String name;
     private final UUID uniqueId;
     private final Dimension dimension;
+    private final long seed;
     private final Location spawnLocation;
     private final BlockStorage storage = new BlockStorage();
+    private final BiomeStorage biomes = new BiomeStorage();
     private final TerrainGenerator terrain;
+    private final BiomeGenerator biomeGen;
     private final Set<Player> players = new CopyOnWriteArraySet<>();
+
+    /**
+     * True once the one-time world bake has run (or a baked world was loaded); persisted in the level
+     * file. While false the world serves procedural terrain on demand with an edit overlay; once true
+     * the generator is never consulted again and storage <em>is</em> the whole world.
+     */
+    private volatile boolean generated = false;
+
+    /** Set by any edit (and by bake); cleared by a successful save, so autosave can skip a clean world. */
+    private volatile boolean dirty = false;
 
     public CoreWorld(String name, Dimension dimension) {
         this(name, dimension, DEFAULT_SEED);
@@ -43,7 +66,9 @@ public final class CoreWorld implements World {
         this.name = name;
         this.uniqueId = UUID.randomUUID();
         this.dimension = dimension;
+        this.seed = seed;
         this.terrain = new TerrainGenerator(seed);
+        this.biomeGen = new BiomeGenerator(seed);
         // Spawn standing on top of the generated ground at the origin column.
         int surface = surfaceHeight(0, 0);
         this.spawnLocation = new Location(this, 0.5, surface + 1, 0.5);
@@ -104,6 +129,11 @@ public final class CoreWorld implements World {
 
     @Override
     public int getBlockId(int x, int y, int z) {
+        if (generated) {
+            // Baked world: storage IS the world — air is genuinely air, the generator is never touched.
+            return storage.getId(x, y, z);
+        }
+        // Pre-bake overlay: player edits layered over on-demand procedural terrain.
         int stored = storage.getId(x, y, z);
         if (stored == REMOVED) {
             return Blocks.AIR;          // a player broke a (possibly natural) block here
@@ -141,6 +171,21 @@ public final class CoreWorld implements World {
      */
     @Override
     public boolean fillSection(int chunkX, int sectionY, int chunkZ, short[] out) {
+        if (generated) {
+            // Baked world: copy the stored section straight out (or fill all-air if unallocated).
+            short[] sec = storage.section(chunkX, sectionY, chunkZ);
+            if (sec == null) {
+                Arrays.fill(out, (short) 0);
+                return false;
+            }
+            System.arraycopy(sec, 0, out, 0, out.length);
+            for (short v : out) {
+                if (v != 0) {
+                    return true;
+                }
+            }
+            return false;
+        }
         short[] stored = storage.section(chunkX, sectionY, chunkZ);
         int baseX = chunkX << 4;
         int baseY = sectionY << 4;
@@ -181,10 +226,146 @@ public final class CoreWorld implements World {
     }
 
     @Override
+    public int getBiome(int x, int z) {
+        // Baked world reads the frozen map; pre-bake resolves it on demand from the generator.
+        return generated ? biomes.getBiome(x, z) : biomeGen.biomeAt(x, z).id();
+    }
+
+    @Override
+    public void fillBiomes(int chunkX, int chunkZ, byte[] out) {
+        if (generated) {
+            biomes.fill(chunkX, chunkZ, out);
+            return;
+        }
+        int baseX = chunkX << 4, baseZ = chunkZ << 4;
+        for (int z = 0; z < 16; z++) {
+            for (int x = 0; x < 16; x++) {
+                out[(z << 4) | x] = (byte) biomeGen.biomeAt(baseX + x, baseZ + z).id();
+            }
+        }
+    }
+
+    @Override
     public void setBlockId(int x, int y, int z, int state) {
-        // Store the explicit-air sentinel so a broken natural block stays broken (plain air in the
-        // overlay reads as "not stored" and would fall through to the generated terrain again).
-        storage.setId(x, y, z, state == Blocks.AIR ? REMOVED : state);
+        if (generated) {
+            // Full world in storage: air genuinely clears the cell (there's no terrain to fall back to).
+            storage.setId(x, y, z, state);
+        } else {
+            // Overlay: store the explicit-air sentinel so a broken natural block stays broken (plain
+            // air in the overlay reads as "not stored" and would fall through to the generated terrain).
+            storage.setId(x, y, z, state == Blocks.AIR ? REMOVED : state);
+        }
+        dirty = true;
+    }
+
+    // ===== Persistence =====
+
+    public long getSeed() {
+        return seed;
+    }
+
+    /** Number of allocated storage sections (player edits today) — for logging and tests. */
+    public int loadedSections() {
+        return storage.loadedSections();
+    }
+
+    // ===== Finite bounds (the world edge) =====
+
+    /** Inclusive minimum block coordinate on the x and z axes. */
+    public int minBound() {
+        return (-BOUNDS_CHUNKS / 2) << 4;
+    }
+
+    /** Exclusive maximum block coordinate on the x and z axes. */
+    public int maxBound() {
+        return (BOUNDS_CHUNKS - BOUNDS_CHUNKS / 2) << 4;
+    }
+
+    /** Whether a column {@code (x, z)} lies inside the finite world; outside is void (the edge wall). */
+    public boolean isInsideBounds(double x, double z) {
+        return x >= minBound() && x < maxBound() && z >= minBound() && z < maxBound();
+    }
+
+    /** True once this world has been baked (or a baked world was loaded). */
+    public boolean isGenerated() {
+        return generated;
+    }
+
+    /** True if the world changed since the last successful save — lets autosave skip a clean world. */
+    public boolean isDirty() {
+        return dirty;
+    }
+
+    /**
+     * One-time bake of the finite world into storage using the world's {@link #BOUNDS_CHUNKS} bounds:
+     * resolve every cell of the bounded region — procedural terrain plus any pre-bake overlay edits —
+     * into full sections, store them, mark the world {@code generated}, then run the
+     * {@link WorldDecorator} passes (caves / lakes / trees) over the baked storage. After this the
+     * generator is never consulted again; {@link #getBlockId} / {@link #fillSection} read storage only,
+     * so a coordinate outside the baked region reads air (the world is finite). A no-op if already baked.
+     */
+    public void bake() {
+        bake(BOUNDS_CHUNKS, true);
+    }
+
+    /** Bake a square of {@code chunksPerSide}×{@code chunksPerSide} chunks centred on the origin. */
+    void bake(int chunksPerSide) {
+        bake(chunksPerSide, true);
+    }
+
+    /** Bake, optionally running the {@link WorldDecorator} passes ({@code decorate == false} = bare terrain). */
+    void bake(int chunksPerSide, boolean decorate) {
+        if (generated) {
+            return;
+        }
+        int half = chunksPerSide / 2;
+        int lo = -half;
+        int hi = chunksPerSide - half; // exclusive
+        short[] scratch = new short[4096];
+        for (int cx = lo; cx < hi; cx++) {
+            for (int cz = lo; cz < hi; cz++) {
+                // Freeze this chunk's biome map (generated is still false, so this reads the generator).
+                byte[] bio = new byte[256];
+                fillBiomes(cx, cz, bio);
+                biomes.putChunk(cx, cz, bio);
+                for (int sy = 0; sy < 16; sy++) {
+                    // fillSection resolves terrain + any loaded edits; store a private copy so the
+                    // reused scratch buffer doesn't alias the section.
+                    if (fillSection(cx, sy, cz, scratch)) {
+                        storage.putSection(cx, sy, cz, scratch.clone());
+                    }
+                }
+            }
+        }
+        generated = true; // storage is now the world; decoration reads/writes it in generated mode
+        if (decorate) {
+            WorldDecorator.decorate(this, seed, lo, hi);
+        }
+        dirty = true;
+    }
+
+    /**
+     * Write this world (metadata + the {@link BlockStorage} overlay of player edits) to {@code file}.
+     * Everything not stored is still procedural terrain, reproduced from the seed on load.
+     */
+    public void save(Path file) throws IOException {
+        Location s = spawnLocation;
+        LevelData meta = new LevelData(LevelIO.FORMAT_VERSION, seed, BOUNDS_CHUNKS, BOUNDS_CHUNKS,
+                generated, s.x(), s.y(), s.z(), s.yaw(), s.pitch());
+        // Clear before writing so an edit arriving mid-save re-marks the world dirty for the next cycle.
+        dirty = false;
+        LevelIO.save(file, meta, storage, biomes);
+    }
+
+    /**
+     * Load a saved world into this instance's storage and adopt its {@code generated} flag. Call once
+     * at startup before any player joins. Returns the file's header so the caller can validate it
+     * (e.g. warn on a seed mismatch).
+     */
+    public LevelData load(Path file) throws IOException {
+        LevelData meta = LevelIO.load(file, storage, biomes);
+        this.generated = meta.generated();
+        return meta;
     }
 
     // ===== Player membership (managed by the server on join/quit) =====

@@ -81,6 +81,27 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   it (JE global-palette id, Bedrock's 4-bit nibble array), as do single-block edits.
 - ✅ **Wide JE chunk palette** — each JE section picks the smallest legal bits-per-block (4–8) for its
   palette, so a section with more than 16 distinct states no longer overflows and corrupts.
+- ✅ **Finite "bake once" world** — on first run the world is generated once over a bounded region
+  (48×48 chunks) and **frozen into storage**; from then on the terrain generator is never consulted at
+  runtime — blocks are served straight from the baked matrix, so the world is static "decoration" with
+  no server-side simulation. A coordinate outside the bounds reads air (the world is finite). Measured:
+  48×48 bakes to ~11 500 sections in ~3.5 s on first boot; every later boot just loads it. The world
+  has an **edge**: stepping past the bounds hits an invisible wall (the move is refused and the player
+  snapped back; a player found outside is sent home to spawn), and edits outside the bounds are refused.
+- ✅ **Biomes** — the world spans four grass biomes (plains, forest, taiga, savanna), assigned by a
+  deterministic temperature/humidity noise into broad regions, baked into a per-column biome map and
+  served to **every edition**: JE 1.12.2 / 1.8 and PE 1.1.5 get the biome-id byte, PE 0.14 gets the
+  matching grass-tint colour — so grass/foliage renders per biome cross-edition.
+- ✅ **Decoration — trees, lakes, caves** — three deterministic bake-time passes shape the frozen world:
+  a 3D-noise cave network under the surface, shallow water lakes (one candidate per chunk, kept clear of
+  spawn), and biome-weighted trees (dense in forest, sparse on plains; spruce in taiga, oak elsewhere).
+  All position-hashed, so a seed always yields the same world, and all baked into storage — no runtime
+  simulation. Features cross chunk borders freely (the whole finite world is in memory at bake time).
+- ✅ **World persistence** — the world (baked terrain + player edits) survives a restart, written to a
+  compact Jedrock level file (`world/level.jdw` — an uncompressed metadata header plus every allocated
+  16³ section in one DEFLATE stream; ~420 KB for a 48×48 world). Loaded before any client can join,
+  saved on shutdown, and autosaved every `-Djedrock.world.save-seconds` (default 300, `0` = off) — a
+  dirty flag skips rewriting an unchanged world. Saves are atomic (temp + move).
 - ✅ **File-based config** — `jedrock.properties` (auto-created on first run) sets the bind host and
   ports, server name, world seed, tick rate, view distance and the server-list MOTD / max players;
   any key is overridable with `-Dkey=value`, and bad values fall back to defaults instead of failing.
@@ -229,16 +250,21 @@ in one `PlayerRegistry`, so broadcasting a chat line or a tab update is a single
 
 ### The shared world
 `CoreWorld` exposes a canonical, protocol-agnostic block **state** — the packed `(id << 4) | meta`
-value both legacy protocols use (`World.getBlockId`, see `Blocks`) — over a procedural heightmap
-(`TerrainGenerator` — deterministic value noise, computed on demand, never stored), with
-`BlockStorage` — a lazily-allocated flat matrix of `short` states — as the edit overlay. Each
-protocol maps that state to its own wire form when serializing chunks (Java global-palette id vs.
-Bedrock id + a 4-bit meta nibble), so both clients see — and collide against — the same terrain.
+value both legacy protocols use (`World.getBlockId`, see `Blocks`). The world is **finite and baked
+once**: on first run a bounded 48×48-chunk region is generated — a deterministic value-noise heightmap
+(`TerrainGenerator`), a temperature/humidity biome map (`BiomeGenerator`), and decoration passes
+(`WorldDecorator` — caves, lakes, trees) — and frozen into a flat `short`-per-cell matrix
+(`BlockStorage`, lazily allocated per 16³ section) plus a per-column biome map (`BiomeStorage`). From
+then on **the generator is never consulted again**: `CoreWorld` serves blocks straight from storage,
+player edits write straight to it, and the whole world is persisted to a compact level file (`LevelIO`,
+`world/level.jdw`) so later boots just load it. A column outside the bounds is void (air), enforced as
+an invisible edge wall on movement and edits. Each protocol maps a state to its own wire form when
+serializing chunks (Java global-palette id vs. Bedrock id + a 4-bit meta nibble) and reads the biome
+per column, so both clients see — and collide against — the same terrain, biomes and trees.
 
-For the chunk hot path, both editions bulk-read a section through `World.fillSection`, which resolves
-terrain + overlay for a whole 16³ section with a single storage lookup and one height evaluation per
-column (no per-block map lookup or boxing). Serializers reuse per-thread scratch buffers, so encoding
-a chunk allocates nothing per section.
+For the chunk hot path, both editions bulk-read a section through `World.fillSection` (a single copy
+out of the baked matrix) and the biome map through `World.fillBiomes`. Serializers reuse per-thread
+scratch buffers, so encoding a chunk allocates nothing per section.
 
 ---
 
@@ -252,6 +278,8 @@ a chunk allocates nothing per section.
 | `PlayerConnection` | api | Protocol-agnostic handle the core talks to (message, tab, close) |
 | `World` / `BlockStorage` | api / core | Flat block matrix; canonical ids; the "illusion" |
 | `World.fillSection` | api / core | Bulk 16³ section read for zero-allocation chunk serialization |
+| `TerrainGenerator` / `BiomeGenerator` / `WorldDecorator` | core | One-time bake: heightmap, biomes, trees / lakes / caves — then frozen |
+| `LevelIO` / `BiomeStorage` | core | Persist the baked world + biome map to a compact `world/level.jdw` |
 | `PlayerRegistry` | core | Thread-safe roster indexed by uuid / name / connection |
 | `EventBus` | api | Zero-reflection listener registration |
 | `GameLoop` / `Scheduler` | gameloop | 20 TPS heartbeat, run-later / repeating tasks |
@@ -321,6 +349,11 @@ and MCPE compression — no client required.
 
 ## Roadmap
 
+- **Finite "bake once" world — landed.** A bounded (48×48-chunk) world generated once on first run
+  then frozen (all generation disabled, served as static decoration): persistence, the terrain bake,
+  biomes, tree/lake/cave decoration and the edge wall are all in. Optional follow-ups: per-biome ground
+  blocks (e.g. desert sand), configurable bounds, and disk-paged chunks if the world ever grows past a
+  comfortable in-RAM size (48×48 is tens of MB, so this isn't pressing).
 - **Held-item / equipment relay** — show what each player holds in-hand on their avatar; this also
   makes the item-use pose render as the specific eat / drink / block animation, and unblocks a
   Bedrock-initiated item-use signal.

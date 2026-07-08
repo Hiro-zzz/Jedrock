@@ -17,6 +17,7 @@ import com.jedrock.core.config.JedrockConfig;
 import com.jedrock.core.player.CorePlayer;
 import com.jedrock.core.player.PlayerRegistry;
 import com.jedrock.core.world.CoreWorld;
+import com.jedrock.core.world.LevelData;
 import com.jedrock.gameloop.GameLoop;
 import com.jedrock.gameloop.Scheduler;
 import com.jedrock.network.ConnectionListener;
@@ -24,8 +25,12 @@ import com.jedrock.network.NetworkServer;
 import com.jedrock.network.NettyNetworkServer;
 import com.jedrock.utils.JLogger;
 import com.jedrock.utils.TickUtil;
+import com.jedrock.utils.text.ChatText;
 
+import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -60,6 +65,7 @@ public class JedrockServer implements Server, ConnectionListener {
     private final BlindJudge judge;
 
     private final AtomicLong tickCounter = new AtomicLong(0);
+    private final AtomicBoolean saving = new AtomicBoolean(false);
 
     public JedrockServer() {
         // Load configuration first — everything below is parameterized by it.
@@ -108,6 +114,10 @@ public class JedrockServer implements Server, ConnectionListener {
 
         LOGGER.info("Starting " + getVersion());
 
+        // Load (or, on first run, generate) the world before any listener accepts logins, so a joining
+        // player sees the baked terrain and persisted edits rather than a half-built world.
+        prepareWorld();
+
         try {
             // Java Edition 1.12.2 (TCP) — the primary listener; a failure here is fatal.
             networkServer.bind(new InetSocketAddress(config.bindHost(), config.javaPort()), ProtocolVersion.JE_1_12_2);
@@ -129,6 +139,15 @@ public class JedrockServer implements Server, ConnectionListener {
 
         // Interactive console (status / players / debug / stop). Daemon thread; headless-safe.
         new ConsoleCommands(this).start();
+
+        // Periodic world autosave (edits are otherwise only in memory). Off with 0; the save runs on
+        // a background thread so it never stalls a tick, guarded so two saves can't overlap.
+        long saveSeconds = Long.getLong("jedrock.world.save-seconds", 300L);
+        if (saveSeconds > 0) {
+            long periodTicks = saveSeconds * TickUtil.TPS;
+            scheduler.runTaskTimer(this::autosave, periodTicks, periodTicks);
+            LOGGER.info("World autosave enabled (every " + saveSeconds + "s)");
+        }
 
         // Optional periodic status line, e.g. -Djedrock.status.seconds=30 (0 = off).
         long statusSeconds = Long.getLong("jedrock.status.seconds", 0L);
@@ -170,7 +189,85 @@ public class JedrockServer implements Server, ConnectionListener {
         gameLoop.stop();
         networkServer.shutdown();
 
+        // Save last, with the loop stopped and listeners closed, so no edit races the snapshot.
+        if (defaultWorld.isDirty()) {
+            saveWorld();
+        }
+
         LOGGER.info("Shutdown complete.");
+    }
+
+    // ===== World persistence =====
+
+    /** Path of the level file for the default world, e.g. {@code world/level.jdw}. */
+    private Path levelFile() {
+        return Path.of(defaultWorld.getName(), "level.jdw");
+    }
+
+    /**
+     * Bring the world up: load a saved level if present, then bake if it isn't generated yet (a fresh
+     * world, or a pre-bake file). A freshly baked world is saved immediately. A file we can't read is
+     * left untouched and we bake a fresh world over it in memory rather than clobber it.
+     */
+    private void prepareWorld() {
+        Path file = levelFile();
+        if (Files.isRegularFile(file)) {
+            try {
+                LevelData meta = defaultWorld.load(file);
+                if (meta.seed() != defaultWorld.getSeed()) {
+                    LOGGER.warn("Saved world seed " + meta.seed() + " differs from configured seed "
+                            + defaultWorld.getSeed() + " — edits were made against the saved terrain");
+                }
+                LOGGER.info("Loaded world from " + file.toAbsolutePath()
+                        + " (" + defaultWorld.loadedSections() + " sections)");
+            } catch (IOException e) {
+                LOGGER.error("Failed to load world from " + file.toAbsolutePath()
+                        + " — leaving it untouched and generating a fresh world in memory", e);
+            }
+        } else {
+            LOGGER.info("No saved world at " + file.toAbsolutePath() + " — generating a fresh one");
+        }
+
+        if (!defaultWorld.isGenerated()) {
+            LOGGER.info("Baking finite " + CoreWorld.BOUNDS_CHUNKS + "x" + CoreWorld.BOUNDS_CHUNKS
+                    + "-chunk world (one-time)...");
+            long t0 = System.nanoTime();
+            defaultWorld.bake();
+            long ms = (System.nanoTime() - t0) / 1_000_000;
+            LOGGER.info("Baked " + defaultWorld.loadedSections() + " sections in " + ms + " ms");
+            saveWorld(); // persist the freshly baked world so the next run just loads it
+        }
+    }
+
+    /** Save the world synchronously (used on shutdown). Best-effort: an I/O failure is logged, not fatal. */
+    private void saveWorld() {
+        Path file = levelFile();
+        try {
+            defaultWorld.save(file);
+            LOGGER.info("Saved world to " + file.toAbsolutePath()
+                    + " (" + defaultWorld.loadedSections() + " sections)");
+        } catch (IOException e) {
+            LOGGER.error("Failed to save world to " + file.toAbsolutePath(), e);
+        }
+    }
+
+    /** Periodic autosave: runs {@link #saveWorld()} off-thread if the world changed, else skips. */
+    private void autosave() {
+        if (!defaultWorld.isDirty()) {
+            return; // nothing changed since the last save — don't rewrite the level file
+        }
+        if (!saving.compareAndSet(false, true)) {
+            return; // a previous save is still running — skip this round rather than pile up
+        }
+        Thread t = new Thread(() -> {
+            try {
+                saveWorld();
+            } finally {
+                saving.set(false);
+            }
+        }, "jedrock-autosave");
+        t.setDaemon(true);
+        t.start();
     }
 
     @Override
@@ -211,6 +308,11 @@ public class JedrockServer implements Server, ConnectionListener {
 
     @Override
     public void onLogin(PlayerConnection connection, UUID uuid, String username) {
+        // The username is untrusted (a 0.14 client picks its own over a plaintext login): strip raw
+        // § codes and control chars once here so it's safe to show verbatim in every nametag / tab
+        // entry below. Markup sites still escape() it — stripCodes keeps a legitimate '_' intact.
+        username = ChatText.stripCodes(username);
+
         Location spawn = defaultWorld.getSpawnLocation();
         CorePlayer player = new CorePlayer(uuid, username, connection, defaultWorld, spawn);
 
@@ -229,7 +331,7 @@ public class JedrockServer implements Server, ConnectionListener {
         }
 
         player.sendMessage("{green}Welcome to **Jedrock**!");
-        broadcast("{yellow}" + username + " joined the game", player);
+        broadcast("{yellow}" + ChatText.escape(username) + " joined the game", player);
 
         // Tab list: give the newcomer the whole roster, and add the newcomer to everyone else's.
         // Tab entries must land before the avatar spawns below (JE renders only listed uuids).
@@ -266,7 +368,7 @@ public class JedrockServer implements Server, ConnectionListener {
         }
         defaultWorld.removePlayer(player);
         eventBus.post(new PlayerQuitEvent(player));
-        broadcast("{yellow}" + player.getName() + " left the game", null);
+        broadcast("{yellow}" + ChatText.escape(player.getName()) + " left the game", null);
 
         // Drop the leaver from everyone else's tab and world.
         for (Player other : playerRegistry.all()) {
@@ -283,9 +385,24 @@ public class JedrockServer implements Server, ConnectionListener {
         if (player == null) {
             return;
         }
+        Location from = player.getLocation();
+
+        // Edge wall: the world is finite. Refuse a step past the bounds and snap the player back inside
+        // (an invisible wall, keeping their look angles); if they're somehow already outside, send them
+        // home to spawn. Enforced regardless of the anti-cheat toggle — the edge is a world constraint.
+        if (!defaultWorld.isInsideBounds(x, z)) {
+            if (defaultWorld.isInsideBounds(from.x(), from.z())) {
+                connection.teleport(from.x(), from.y(), from.z(), yaw, pitch);
+            } else {
+                Location spawn = defaultWorld.getSpawnLocation();
+                player.setLocation(new Location(player.getWorld(), spawn.x(), spawn.y(), spawn.z(), yaw, pitch));
+                connection.teleport(spawn.x(), spawn.y(), spawn.z(), yaw, pitch);
+            }
+            return;
+        }
+
         // Blind judge: refuse to believe a blatant teleport / speed jump and snap the client back to
         // its last valid spot (keeping its new look angles, which aren't cheating), then drop the move.
-        Location from = player.getLocation();
         if (!judge.allowsMove(from.x(), from.y(), from.z(), x, y, z)) {
             connection.teleport(from.x(), from.y(), from.z(), yaw, pitch);
             return;
@@ -304,6 +421,12 @@ public class JedrockServer implements Server, ConnectionListener {
 
     @Override
     public void onBlockChange(PlayerConnection connection, int x, int y, int z, int state) {
+        // Edge wall: an edit outside the finite world is refused and the client corrected with the
+        // real (void = air) block, so the world can't grow past its bounds.
+        if (!defaultWorld.isInsideBounds(x, z)) {
+            connection.sendBlockChange(x, y, z, defaultWorld.getBlockId(x, y, z));
+            return;
+        }
         // Blind judge: reject an edit outside the editor's reach sphere and correct their client by
         // re-sending the real (unchanged) block, so a reach hack can't touch distant blocks.
         CorePlayer editor = playerRegistry.getByConnectionOrNull(connection);
@@ -391,10 +514,10 @@ public class JedrockServer implements Server, ConnectionListener {
         if (sender == null) {
             return;
         }
-        // Name in the unified markup; the player's own text is rendered too, so they can use
-        // {color} / Markdown in chat. (Escape any '{' they typed so it stays literal? Left as a
-        // feature for now.)
-        String line = "{gray}<{aqua}" + sender.getName() + "{gray}>{reset} " + message;
+        // The name is escaped so an untrusted username (a 0.14 client picks its own; a '_' would
+        // otherwise italicise) can't inject markup. The message body is intentionally left raw —
+        // rendering it is the documented "players can use {color} / Markdown in chat" feature.
+        String line = "{gray}<{aqua}" + ChatText.escape(sender.getName()) + "{gray}>{reset} " + message;
         LOGGER.info("[chat] <" + sender.getName() + "> " + message);
         broadcast(line, null); // relay to everyone, including the sender
     }

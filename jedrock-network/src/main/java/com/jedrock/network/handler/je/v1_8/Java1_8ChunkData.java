@@ -65,10 +65,10 @@ public final class Java1_8ChunkData implements ClientboundPacket {
             for (int s = 0; s < present; s++) {
                 data.writeBytes(FULL_LIGHT_SECTION);
             }
-            // Biome map: 256 columns, plains. Sent because this is a ground-up-continuous column.
-            for (int i = 0; i < 256; i++) {
-                data.writeByte(Java1_8Protocol.PLAINS_BIOME);
-            }
+            // Biome map: 256 columns (index (z<<4)|x). Sent because this is a ground-up-continuous column.
+            byte[] biomes = new byte[256];
+            world.fillBiomes(chunkX, chunkZ, biomes);
+            data.writeBytes(biomes);
 
             buf.writeInt(chunkX);
             buf.writeInt(chunkZ);
