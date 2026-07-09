@@ -611,46 +611,8 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             Blocks.PLANKS, Blocks.SAND, Blocks.LOG, Blocks.GLASS,
     };
 
-    /**
-     * The creative menu's block palette: the full set of standard legacy MCPE 1.1.5 blocks (base
-     * variant, meta 0 — the world stores only a block id, so per-meta variants like wool colours or
-     * stone types can't be rendered distinctly yet). Any id in 0..255 places and serializes fine
-     * (see {@link Blocks#isKnown}); the client sorts them into its own tabs. Liquids, air and purely
-     * technical / multi-block ids (doors, beds, signs, wire, pistons heads, portals, fire) are left
-     * out because they don't render as a static full block without metadata.
-     */
-    private static final int[] CREATIVE = {
-            // Stone & manufactured building blocks
-            1, 4, 48, 98, 45, 24, 155, 168, 169, 172, 173,
-            // Wood
-            5, 17, 162, 47,
-            // Dirt / natural ground
-            2, 3, 60, 110, 12, 13, 82, 87, 88, 121,
-            // Ice / snow / desert
-            79, 174, 80, 78, 81,
-            // Foliage
-            18, 161, 106, 111,
-            // Ores
-            14, 15, 16, 21, 56, 73, 129, 153,
-            // Metal / mineral blocks
-            41, 42, 57, 133, 22, 152, 89, 49, 19, 30,
-            // Glass & panes
-            20, 102, 101,
-            // Wool / clay / decoration
-            35, 171, 159,
-            // Utility & interactive blocks
-            54, 58, 61, 84, 25, 46, 116, 145, 130, 138, 23, 158, 137, 165, 170, 52,
-            // Plants that are full blocks
-            86, 91, 103,
-            // Nether & end
-            112,
-            // Stairs
-            53, 67, 108, 109, 114, 128, 156, 134, 135, 136, 163, 164,
-            // Slabs / walls / fences
-            44, 126, 139, 85, 107,
-            // Redstone-ish blocks
-            29, 33, 123,
-    };
+    /** The creative menu's block palette — variant-rich, shared with 0.14 ({@link PeCreativePalette}). */
+    private static final int[] CREATIVE = PeCreativePalette.states();
 
     /**
      * The player's own entity id. StartGame assigns it 1, and the ContainerSetContent packets are
@@ -660,7 +622,8 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
 
     /** Populate the player inventory: the first slots (hotbar) with placeable blocks, the rest empty. */
     private void sendInventory() {
-        sendContainerContent(WINDOW_ID_PLAYER, 36, slot -> slot < HOTBAR.length ? HOTBAR[slot] : Blocks.AIR, 64);
+        sendContainerContent(WINDOW_ID_PLAYER, 36,
+                slot -> slot < HOTBAR.length ? Blocks.state(HOTBAR[slot], 0) : Blocks.AIR, 64);
     }
 
     /**
@@ -676,14 +639,14 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
      * Send a ContainerSetContent (0x34) for protocol 113: windowId, targetEid, slot count, the slots
      * themselves, then a hotbar-link count (0 — we don't remap the hotbar). Verified against PMMP.
      */
-    private void sendContainerContent(int windowId, int slotCount, java.util.function.IntUnaryOperator slotId, int count) {
+    private void sendContainerContent(int windowId, int slotCount, java.util.function.IntUnaryOperator slotState, int count) {
         sendGameBatch(b -> {
             ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_CONTENT);
             ByteBufUtils.writeVarInt(b, windowId);                 // window id (unsigned varint)
             ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);    // targetEid (zigzag varlong)
             ByteBufUtils.writeVarInt(b, slotCount);                // slot count
             for (int slot = 0; slot < slotCount; slot++) {
-                McpeCodec.writeSlot(b, slotId.applyAsInt(slot), count);
+                McpeCodec.writeSlot(b, slotState.applyAsInt(slot), count);
             }
             ByteBufUtils.writeVarInt(b, 0);                        // hotbar-link count (none)
         });

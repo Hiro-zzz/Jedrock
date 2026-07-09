@@ -8,6 +8,22 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Richer Bedrock creative menu, and a creative menu on 0.14.** The creative palette now carries
+  per-meta **variants** — all 16 wool / terracotta / carpet colours, every wood and leaf type, and the
+  stone / stone-brick / sandstone / quartz / dirt / sand variants — instead of one item per block id
+  (~170 states). The 1.1.5 item `writeSlot` packs the variant into the protocol-113 aux field
+  (`meta << 8 | count`), which placement already decodes, so a variant placed from the menu round-trips
+  and renders distinctly cross-edition. **MCPE 0.14, which previously had no creative menu at all, now
+  gets one too** via a protocol-45 `ContainerSetContent` (0xb9, creative window 0x79) in its login
+  sequence — item slot `short id, byte count, short meta, short nbtLen`, matching what the client already
+  sends inbound, and sent as a zlib **batch** (0x92, like chunks) since it's too large to go raw. The
+  ancient 0.14 client has no "unknown item" fallback — an id it can't render *crashes* it — so 0.14 is
+  hard-limited to a conservative classic block set (`Pe014Blocks`) on **both** paths: the creative menu
+  is filled only from it, and the 0.14 chunk serializer maps any other id (a block a Java/1.1.5 player
+  placed that 0.14 doesn't know) to **air**, so an unsupported block never reaches the client at all.
+  1.1.5 keeps the full rich palette. Unit-tested (`PeCreativePaletteTest`, `Mcpe014ContainerContentTest`,
+  `Pe014BlocksTest`).
+
 - **Finite-world edge wall (world-generation Phase 4).** The bounded world now has an edge. A move whose
   target column falls outside the bounds is refused and the player snapped back to their last in-bounds
   spot (an invisible wall, keeping their look angles); if a player is somehow already outside, they're

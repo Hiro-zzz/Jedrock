@@ -285,6 +285,9 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         sendWrapped(b -> Mcpe014Packets.setSpawnPosition(b, sx, sy, sz));
         sendWrapped(b -> Mcpe014Packets.setHealth(b, 20));
         sendWrapped(b -> Mcpe014Packets.setDifficulty(b, 2));
+        // Creative menu: the 0.14-safe palette, sent as a zlib batch (it's too large to send raw, and
+        // an id 0.14 can't render would crash the menu — hence the hard-limited Pe014Blocks list).
+        sendBatched(b -> Mcpe014Packets.containerSetContent(b, WINDOW_ID_CREATIVE, Pe014Blocks.creativePalette(), 1));
     }
 
     private void streamWorldAndSpawn(int radius) {
@@ -312,12 +315,11 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         session.send(out, RakNetReliability.RELIABLE_ORDERED);
     }
 
-    /** One chunk column, FullChunkData in a 0x92 zlib batch, 0x8e-wrapped. */
-    private void sendChunk(int cx, int cz) {
-        byte[] blob = Mcpe014ChunkSerializer.serialize(world, cx, cz);
-        ByteBuf pkt = Unpooled.buffer(14 + blob.length);
-        Mcpe014Packets.fullChunkDataHeader(pkt, cx, cz, blob.length);
-        pkt.writeBytes(blob);
+    /** One packet, zlib-batched (0x92) and 0x8e-wrapped — for packets too large to send raw. */
+    private void sendBatched(Consumer<ByteBuf> body) {
+        if (session.isClosed()) return;
+        ByteBuf pkt = Unpooled.buffer();
+        body.accept(pkt);
         byte[] pktBytes = new byte[pkt.readableBytes()];
         pkt.readBytes(pktBytes);
         pkt.release();
@@ -327,5 +329,14 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         out.writeByte(WRAPPER);
         out.writeBytes(batch);
         session.send(out, RakNetReliability.RELIABLE_ORDERED);
+    }
+
+    /** One chunk column, FullChunkData in a 0x92 zlib batch. */
+    private void sendChunk(int cx, int cz) {
+        sendBatched(b -> {
+            byte[] blob = Mcpe014ChunkSerializer.serialize(world, cx, cz);
+            Mcpe014Packets.fullChunkDataHeader(b, cx, cz, blob.length);
+            b.writeBytes(blob);
+        });
     }
 }

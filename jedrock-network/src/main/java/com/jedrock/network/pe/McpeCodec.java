@@ -21,13 +21,19 @@ final class McpeCodec {
         b.writeLongLE(uuid.getLeastSignificantBits());
     }
 
-    /** Write one network Item slot (id, aux = meta&lt;&lt;8 | count, no NBT / can-place / can-destroy). */
-    static void writeSlot(ByteBuf b, int id, int count) {
+    /**
+     * Write one network Item slot from a canonical {@code (id << 4) | meta} state. The protocol-113
+     * aux field packs {@code meta << 8 | count}, so a variant (wool colour, wood type, …) rides in the
+     * high byte and round-trips with {@link #readItemState}. No NBT / can-place / can-destroy.
+     */
+    static void writeSlot(ByteBuf b, int state, int count) {
+        int id = Blocks.idOf(state);
         ByteBufUtils.writeSignedVarInt(b, id);
         if (id == Blocks.AIR) {
             return; // air carries no further fields
         }
-        ByteBufUtils.writeSignedVarInt(b, count & 0xFF); // meta 0, count in the low byte
+        int aux = (Blocks.metaOf(state) << 8) | (count & 0xFF);
+        ByteBufUtils.writeSignedVarInt(b, aux);          // meta << 8 | count
         b.writeShortLE(0);                               // NBT length
         ByteBufUtils.writeVarInt(b, 0);                  // can place on: none
         ByteBufUtils.writeVarInt(b, 0);                  // can destroy: none

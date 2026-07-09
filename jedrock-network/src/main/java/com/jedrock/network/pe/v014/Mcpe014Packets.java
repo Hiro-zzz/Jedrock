@@ -37,6 +37,7 @@ public final class Mcpe014Packets {
     public static final int ID_SET_SPAWN_POSITION = 0xb1;
     public static final int ID_ANIMATE = 0xb2;
     public static final int ID_RESPAWN = 0xb3;
+    public static final int ID_CONTAINER_SET_CONTENT = 0xb9;
     public static final int ID_FULL_CHUNK_DATA = 0xbf;
     public static final int ID_SET_DIFFICULTY = 0xc0;
     public static final int ID_PLAYER_LIST = 0xc3;
@@ -79,6 +80,9 @@ public final class Mcpe014Packets {
     // PlayStatus values.
     public static final int PLAY_STATUS_LOGIN_SUCCESS = 0;
     public static final int PLAY_STATUS_PLAYER_SPAWN = 3;
+
+    // ContainerSetContent window ids (PocketMine protocol 45: SPECIAL_INVENTORY=0, SPECIAL_CREATIVE=0x79).
+    public static final int WINDOW_ID_CREATIVE = 0x79;
 
     // FullChunkData order.
     public static final int ORDER_COLUMNS = 0;
@@ -253,6 +257,38 @@ public final class Mcpe014Packets {
         b.writeByte((DATA_TYPE_BYTE << 5) | DATA_FLAGS_INDEX); // metadata key header
         b.writeByte(flags);
         b.writeByte(META_END);
+    }
+
+    /**
+     * Fill a container window with items — used for the creative menu (windowId {@link #WINDOW_ID_CREATIVE}).
+     * Protocol-45 body: {@code byte windowId, short slotCount, slots..., short 0} (the trailing short is
+     * the hotbar-link count, always 0 for a non-inventory window). Each state is a canonical
+     * {@code (id << 4) | meta}, so per-meta variants (wool colours, wood types, …) show as distinct items.
+     */
+    public static void containerSetContent(ByteBuf b, int windowId, int[] states, int count) {
+        b.writeByte(ID_CONTAINER_SET_CONTENT);
+        b.writeByte(windowId);
+        b.writeShort(states.length);
+        for (int state : states) {
+            writeSlot(b, state, count);
+        }
+        b.writeShort(0); // hotbar-link count (none)
+    }
+
+    /**
+     * One 0.14 network item slot from a canonical {@code (id << 4) | meta} state:
+     * {@code short id} (0 = air, nothing more), else {@code byte count, short meta, short nbtLen(0)}.
+     */
+    public static void writeSlot(ByteBuf b, int state, int count) {
+        int id = state >> 4;
+        if (id <= 0) {
+            b.writeShort(0); // air
+            return;
+        }
+        b.writeShort(id);
+        b.writeByte(count);
+        b.writeShort(state & 0x0F); // meta / damage
+        b.writeShort(0);            // NBT length (none)
     }
 
     /** Single-block change. {@code id}/{@code meta} are the split canonical state. */

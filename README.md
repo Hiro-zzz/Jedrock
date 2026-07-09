@@ -72,9 +72,12 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   Block Placement; Bedrock's Win10 1.1.5 client reports breaks via `PlayerAction` and places via its
   own use-item packet, both decoded from captured bytes. Each edit is reflected to Bedrock as a single
   typed `UpdateBlock` packet (not a whole-chunk resend).
-- ✅ **Bedrock creative inventory + flight** — the PE creative menu is filled with the full standard
-  legacy block palette (via the protocol-113 `ContainerSetContent` packet), the player can fly (fixed
-  `AdventureSettings`), and a movement-speed attribute kills the runaway acceleration.
+- ✅ **Bedrock creative inventory + flight** — the PE creative menu is filled via `ContainerSetContent`:
+  **1.1.5** (protocol-113, 0x34) gets a variant-rich legacy palette (~170 states — every wool /
+  terracotta / carpet colour, wood and stone type), and **0.14** (protocol-45, 0xb9), which previously
+  had no creative menu, gets its own narrower, 0.14-safe block set (the old client crashes on an id it
+  can't render). The player can fly (fixed `AdventureSettings`), and a movement-speed attribute kills the
+  runaway acceleration.
 - ✅ **Block metadata (variants)** — the world stores a packed `(id << 4) | meta` state per cell, so
   wool colours, wood/stone types and the like are preserved and rendered distinctly on both editions.
   Placement reads the variant from the held item (JE creative damage, Bedrock item aux); chunks carry

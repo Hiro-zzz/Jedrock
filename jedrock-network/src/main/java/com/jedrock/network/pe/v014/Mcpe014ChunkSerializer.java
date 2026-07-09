@@ -68,6 +68,13 @@ public final class Mcpe014ChunkSerializer {
                     int id = (state >> 4) & 0xFF;
                     int meta = state & 0x0F;
 
+                    // 0.14 crashes on a block id it doesn't know, even inside a chunk — so a block a
+                    // Java/1.1.5 player placed that 0.14 can't render is sent as air instead.
+                    if (id != 0 && !Pe014Blocks.supports(id)) {
+                        id = 0;
+                        meta = 0;
+                    }
+
                     out[idCol + y] = (byte) id;
                     if (meta != 0) {
                         int nibbleIdx = halfCol + (y >> 1);
