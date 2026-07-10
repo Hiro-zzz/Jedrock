@@ -1,5 +1,6 @@
 package com.jedrock.network.handler.je;
 
+import com.jedrock.api.player.GameMode;
 import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.Location;
 import com.jedrock.network.JedrockConnection;
@@ -7,6 +8,7 @@ import com.jedrock.network.je.packet.*;
 import com.jedrock.network.protocol.ProtocolState;
 import com.jedrock.utils.JLogger;
 import com.jedrock.utils.lazy.LazyPacket;
+import com.jedrock.utils.text.JsonText;
 import io.netty.buffer.ByteBuf;
 
 import java.nio.charset.StandardCharsets;
@@ -67,7 +69,7 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
             connection.setState(ProtocolState.PLAY);
 
             // 2-5. Send the exact sequence a vanilla 1.12.2 client expects to finish "Downloading terrain"
-            sendInitialJoinSequence(connection);
+            sendInitialJoinSequence(connection, uuid);
 
             LOGGER.info("Player " + name + " has joined the game (PLAY state).");
 
@@ -99,11 +101,16 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
             connection.clientMoved(null, null, null, p.yaw, p.pitch);
         } else if (id == ServerboundPlayerDigging.PACKET_ID) {
             ServerboundPlayerDigging dig = lazy.materialize(ServerboundPlayerDigging::fromBuffer);
-            if (connection.getListener() != null) {
-                if (dig.isBreak()) {
-                    connection.getListener().onBlockChange(connection, dig.x, dig.y, dig.z, 0); // 0 = air
+            var listener = connection.getListener();
+            if (listener != null) {
+                boolean creative = listener.gameModeOf(connection) == GameMode.CREATIVE;
+                // Creative mines instantly (STARTED); survival removes the block only when digging
+                // FINISHED — otherwise a single click would break it on the first hit.
+                if ((dig.status == ServerboundPlayerDigging.STATUS_STARTED && creative)
+                        || dig.status == ServerboundPlayerDigging.STATUS_FINISHED) {
+                    listener.onBlockChange(connection, dig.x, dig.y, dig.z, 0); // 0 = air
                 } else if (dig.status == ServerboundPlayerDigging.STATUS_RELEASE_USE) {
-                    connection.getListener().onUseItem(connection, false); // finished eating / released
+                    listener.onUseItem(connection, false); // finished eating / released
                 }
             }
         } else if (id == ServerboundUseItem.PACKET_ID) {
@@ -150,13 +157,17 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     }
 
     /** Sends the mandatory packets right after Login Success so the client actually spawns. */
-    private void sendInitialJoinSequence(JedrockConnection connection) {
+    private void sendInitialJoinSequence(JedrockConnection connection, UUID uuid) {
         Location spawn = connection.getWorld().getSpawnLocation();
+        // The mode this client joins in: its remembered choice this run, else the config default.
+        GameMode mode = connection.getListener() != null
+                ? connection.getListener().gameModeFor(uuid)
+                : connection.getServerProperties().defaultGameMode();
 
-        connection.send(new ClientboundJoinGame(connection.getServerProperties().maxPlayers()));
+        connection.send(new ClientboundJoinGame(connection.getServerProperties().maxPlayers(), mode.getId()));
         connection.send(new ClientboundServerDifficulty());
         connection.send(new ClientboundSpawnPosition(spawn.getBlockX(), spawn.getBlockY(), spawn.getBlockZ()));
-        connection.send(new ClientboundPlayerAbilities());
+        connection.send(new ClientboundPlayerAbilities(mode));
         connection.send(new ClientboundHeldItemChange());
 
         // Terrain around spawn — without chunks the client hangs on "Downloading terrain"
@@ -187,8 +198,7 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
 
     @Override
     public void sendSystemMessage(JedrockConnection c, String message) {
-        String escaped = message.replace("\\", "\\\\").replace("\"", "\\\"");
-        c.send(new ClientboundChatMessage("{\"text\":\"" + escaped + "\"}"));
+        c.send(new ClientboundChatMessage("{\"text\":\"" + JsonText.escape(message) + "\"}"));
     }
 
     @Override
@@ -222,6 +232,29 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     @Override
     public void teleportSelf(JedrockConnection c, double x, double y, double z, float yaw, float pitch) {
         c.send(new ClientboundPlayerPositionAndLook(x, y, z, yaw, pitch));
+    }
+
+    @Override
+    public void setGameMode(JedrockConnection c, GameMode mode) {
+        // Change Game State (reason 3) flips the HUD; Player Abilities re-grants/revokes flight.
+        c.send(new ClientboundChangeGameState(ClientboundChangeGameState.REASON_CHANGE_GAMEMODE, mode.getId()));
+        c.send(new ClientboundPlayerAbilities(mode));
+    }
+
+    @Override
+    public void setInventory(JedrockConnection c, int[] states, int[] counts) {
+        c.send(new ClientboundWindowItems(JeInventoryCodec.encode(states, counts, JeInventoryCodec.WINDOW_SLOTS_1_12)));
+    }
+
+    @Override
+    public void setHealth(JedrockConnection c, int health) {
+        c.send(new ClientboundUpdateHealth(health));
+    }
+
+    @Override
+    public void setInventorySlot(JedrockConnection c, int slot, int state, int count) {
+        // Set Slot (0x16): byte windowId=0, short slot, Slot data.
+        c.send(new ClientboundSetSlot(JeInventoryCodec.windowSlot(slot), state, count));
     }
 
     @Override

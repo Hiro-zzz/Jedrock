@@ -64,6 +64,35 @@ public interface PlayerConnection {
      */
     void teleport(double x, double y, double z, float yaw, float pitch);
 
+    /**
+     * Change <em>this</em> client's own game mode live (survival ↔ creative …), so the client flips its
+     * HUD and abilities (flight allowed only in creative / spectator). Each edition encodes it in its
+     * own way; a connection that can't switch mode on the wire (e.g. MCPE 0.14) applies it on next join.
+     */
+    void setGameMode(GameMode mode);
+
+    /**
+     * Replace this client's shown inventory with a 36-slot model (indices 0-8 hotbar, 9-35 main); each
+     * entry is a canonical {@code (id << 4) | meta} state (0 = empty) with a parallel count. Used for
+     * the minimal survival inventory — a mined block appears, a placed one is consumed. A connection
+     * with no server-side inventory concept (e.g. creative, or MCPE 0.14) may ignore it.
+     */
+    default void setInventory(int[] states, int[] counts) {}
+
+    /**
+     * Update a single inventory slot (0-8 hotbar, 9-35 main) to a canonical {@code (id << 4) | meta}
+     * state and count (0 = empty). Used for a live survival pickup / consume so the hotbar refreshes
+     * immediately, where a full {@link #setInventory} resend does not.
+     */
+    default void setInventorySlot(int slot, int state, int count) {}
+
+    /**
+     * Set the player's health bar (0..20, in half-heart points). The server is authoritative for health
+     * even in the illusionist model — the client only <em>reports</em> damage events (e.g. a fall); the
+     * core decides the number and pushes it here. A connection that doesn't model health may ignore it.
+     */
+    default void setHealth(int health) {}
+
     /** Play another player's arm-swing animation on this client (attack / dig / interact). */
     void swingArm(long entityId);
 

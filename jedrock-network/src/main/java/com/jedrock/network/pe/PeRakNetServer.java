@@ -123,7 +123,7 @@ public final class PeRakNetServer {
         public void onSessionCreation(RakNetServerSession session) {
             LOGGER.info("[PE] session from " + session.getAddress()
                     + " (mtu=" + session.getMtu() + ", raknet v" + session.getProtocolVersion() + ")");
-            session.setListener(new PeSession(session, listener, protocol, world, skins));
+            session.setListener(new PeSession(session, listener, protocol, world, properties, skins));
         }
 
         @Override

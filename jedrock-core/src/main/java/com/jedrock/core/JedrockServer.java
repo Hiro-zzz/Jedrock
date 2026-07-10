@@ -7,12 +7,18 @@ import com.jedrock.api.config.ServerProperties;
 import com.jedrock.api.event.EventBus;
 import com.jedrock.api.event.player.PlayerJoinEvent;
 import com.jedrock.api.event.player.PlayerQuitEvent;
+import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Dimension;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
+import com.jedrock.core.command.CommandManager;
+import com.jedrock.core.command.GameModeCommand;
+import com.jedrock.core.command.HelpCommand;
+import com.jedrock.core.command.SpawnCommand;
+import com.jedrock.core.command.TeleportCommand;
 import com.jedrock.core.config.JedrockConfig;
 import com.jedrock.core.player.CorePlayer;
 import com.jedrock.core.player.PlayerRegistry;
@@ -63,6 +69,9 @@ public class JedrockServer implements Server, ConnectionListener {
     private final PlayerRegistry playerRegistry = new PlayerRegistry();
     private final CoreWorld defaultWorld;
     private final BlindJudge judge;
+    private final CommandManager commandManager = new CommandManager(this);
+    /** Remembers each player's last chosen game mode this run, so it survives a reconnect. */
+    private final java.util.Map<UUID, GameMode> gameModes = new java.util.concurrent.ConcurrentHashMap<>();
 
     private final AtomicLong tickCounter = new AtomicLong(0);
     private final AtomicBoolean saving = new AtomicBoolean(false);
@@ -84,6 +93,74 @@ public class JedrockServer implements Server, ConnectionListener {
         this.networkServer.setConnectionListener(this);
         this.networkServer.setProperties(config);
         this.networkServer.setWorld(defaultWorld); // clients serialize chunks from this shared world
+
+        registerCommands();
+    }
+
+    /** Wire up the built-in in-game commands. */
+    private void registerCommands() {
+        commandManager.register(new HelpCommand());
+        commandManager.register(new GameModeCommand());
+        commandManager.register(new TeleportCommand());
+        commandManager.register(new SpawnCommand());
+    }
+
+    /** The in-game command registry — used by commands (e.g. {@code /help}) to introspect. */
+    public CommandManager getCommandManager() {
+        return commandManager;
+    }
+
+    @Override
+    public List<ConnectionListener.CommandInfo> commands() {
+        // Bedrock refuses to send a command it wasn't advertised; the PE session turns this into an
+        // AvailableCommands manifest at spawn. Java clients need nothing.
+        List<ConnectionListener.CommandInfo> out = new java.util.ArrayList<>();
+        for (com.jedrock.core.command.Command c : commandManager.commands()) {
+            out.add(new ConnectionListener.CommandInfo(c.name(), c.description(), c.aliases()));
+        }
+        return out;
+    }
+
+    @Override
+    public GameMode gameModeFor(UUID uuid) {
+        // The join sequence reads this (on an I/O thread) to pick the mode a client spawns in.
+        return gameModes.getOrDefault(uuid, config.defaultGameMode());
+    }
+
+    @Override
+    public GameMode gameModeOf(PlayerConnection connection) {
+        CorePlayer p = playerRegistry.getByConnectionOrNull(connection);
+        return p != null ? p.getGameMode() : config.defaultGameMode();
+    }
+
+    /**
+     * Change a player's game mode: remember it (so a reconnect keeps it — the only way MCPE 0.14
+     * ever changes mode) and push the live switch to the client where the edition supports it.
+     */
+    public void setGameMode(CorePlayer player, GameMode mode) {
+        gameModes.put(player.getUniqueId(), mode);
+        player.setGameMode(mode);
+        // Entering survival, show the survival inventory (empty, or what's been mined) so any items the
+        // creative menu left in hand don't linger.
+        if (mode == GameMode.SURVIVAL) {
+            player.syncInventory();
+        }
+    }
+
+    /**
+     * Server-authoritative teleport: reposition {@code player} and relay the move to every other
+     * player's avatar. Bypasses the blind judge (the server initiated it) and the edge wall; callers
+     * are responsible for sane destinations.
+     */
+    public void teleport(CorePlayer player, Location to) {
+        player.setLocation(to);
+        player.getConnection().teleport(to.x(), to.y(), to.z(), to.yaw(), to.pitch());
+        long entityId = player.getEntityId();
+        for (CorePlayer other : playerRegistry.online()) {
+            if (other != player) {
+                other.getConnection().moveAvatar(entityId, to.x(), to.y(), to.z(), to.yaw(), to.pitch());
+            }
+        }
     }
 
     private void serverTick(long currentTick) {
@@ -314,7 +391,9 @@ public class JedrockServer implements Server, ConnectionListener {
         username = ChatText.stripCodes(username);
 
         Location spawn = defaultWorld.getSpawnLocation();
-        CorePlayer player = new CorePlayer(uuid, username, connection, defaultWorld, spawn);
+        // Match the mode the client actually joined in (the same value the join packets used): the
+        // remembered choice from earlier this run, or the config default for a first join.
+        CorePlayer player = new CorePlayer(uuid, username, connection, defaultWorld, spawn, gameModeFor(uuid));
 
         playerRegistry.add(player);
         defaultWorld.addPlayer(player);
@@ -408,6 +487,16 @@ public class JedrockServer implements Server, ConnectionListener {
             return;
         }
         player.setLocation(new Location(player.getWorld(), x, y, z, yaw, pitch));
+
+        // Fall damage for Java, which has no client fall-report packet: watch the descent server-side and
+        // apply damage on landing. Bedrock 1.1.5 is skipped here — it reports falls itself via EntityFall.
+        if (connection.getProtocolVersion().isJava()) {
+            double fell = player.trackFall(from.y(), y);
+            if (fell > 0) {
+                applyFallDamage(player, connection, fell);
+            }
+        }
+
         // Relay at the sender's own rate; both clients interpolate between updates. Iterate the live
         // roster view directly and skip the Optional/capturing lambda, so a move packet allocates
         // only the immutable Location snapshot (kept immutable so getLocation stays an atomic swap).
@@ -437,12 +526,58 @@ public class JedrockServer implements Server, ConnectionListener {
                 return;
             }
         }
+        // The block that was here, captured before the edit — a survival miner picks it up.
+        int previous = defaultWorld.getBlockId(x, y, z);
+
         // Apply to the shared world, then push the edit to every client (including the editor, so
         // the server stays authoritative). {@code state} is the canonical (id << 4 | meta) value;
         // each connection serializes it in its own protocol.
         defaultWorld.setBlockId(x, y, z, state);
         for (Player p : playerRegistry.all()) {
             p.getConnection().sendBlockChange(x, y, z, state);
+        }
+
+        // Minimal survival inventory: mining a block drops it straight into the inventory, placing one
+        // consumes it. Creative is untouched (the client has the creative menu). state 0 = air = a break.
+        // Push just the changed slot so the hotbar HUD refreshes live (a full resend didn't).
+        if (editor != null && editor.getGameMode() == GameMode.SURVIVAL) {
+            int slot = state == 0 ? editor.giveItem(previous) : editor.takeItem(state);
+            if (slot >= 0) {
+                editor.syncSlot(slot);
+            }
+        }
+    }
+
+    @Override
+    public void onFall(PlayerConnection connection, float fallDistance) {
+        // Bedrock 1.1.5 reports its own falls (EntityFall) — apply the damage from the client's report.
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player != null) {
+            applyFallDamage(player, connection, fallDistance);
+        }
+    }
+
+    /**
+     * Turn a fall distance into vanilla fall damage (one point per block past the first three), survival
+     * only. A lethal fall skips the death-screen handshake and just respawns the player at spawn with
+     * full health. Shared by the Bedrock client's {@code EntityFall} report and Java's server-side fall
+     * tracking (Java has no fall-report packet).
+     */
+    private void applyFallDamage(CorePlayer player, PlayerConnection connection, double fallDistance) {
+        if (player.getGameMode() != GameMode.SURVIVAL) {
+            return;
+        }
+        int damage = (int) Math.floor(fallDistance) - 3;
+        if (damage <= 0) {
+            return;
+        }
+        if (player.damage(damage) <= 0) {
+            player.setHealth(CorePlayer.MAX_HEALTH);
+            teleport(player, defaultWorld.getSpawnLocation());
+            connection.setHealth(CorePlayer.MAX_HEALTH);
+            broadcast("{gray}" + ChatText.escape(player.getName()) + " fell to their death", null);
+        } else {
+            connection.setHealth(player.getHealth());
         }
     }
 
@@ -512,6 +647,11 @@ public class JedrockServer implements Server, ConnectionListener {
     public void onChat(PlayerConnection connection, String message) {
         CorePlayer sender = playerRegistry.getByConnectionOrNull(connection);
         if (sender == null) {
+            return;
+        }
+        // A line starting with '/' is a command, not chat — dispatch it and never broadcast it.
+        if (message.startsWith("/")) {
+            commandManager.dispatch(sender, message);
             return;
         }
         // The name is escaped so an untrusted username (a 0.14 client picks its own; a '_' would

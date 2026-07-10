@@ -20,6 +20,8 @@ public final class Java1_8Protocol {
     public static final int CB_KEEP_ALIVE = 0x00;        // VarInt id (1.12.2 uses a Long)
     public static final int CB_JOIN_GAME = 0x01;
     public static final int CB_CHAT = 0x02;
+    public static final int CB_CHANGE_GAME_STATE = 0x2B; // reason byte + float value (gamemode switch)
+    public static final int CB_UPDATE_HEALTH = 0x06;     // float health + food varint + saturation float
     public static final int CB_SPAWN_POSITION = 0x05;
     public static final int CB_POSITION = 0x08;          // player position and look (no teleport id in 1.8)
     public static final int CB_HELD_ITEM = 0x09;
@@ -29,6 +31,8 @@ public final class Java1_8Protocol {
     public static final int CB_ENTITY_TELEPORT = 0x18;   // fixed-point coords
     public static final int CB_ENTITY_HEAD_ROTATION = 0x19;
     public static final int CB_ENTITY_METADATA = 0x1C;
+    public static final int CB_WINDOW_ITEMS = 0x30; // replace a window's contents (player inventory)
+    public static final int CB_SET_SLOT = 0x2F;      // update one window slot
     public static final int CB_CHUNK_DATA = 0x21;
     public static final int CB_BLOCK_CHANGE = 0x23;
     public static final int CB_PLAYER_LIST_ITEM = 0x38;

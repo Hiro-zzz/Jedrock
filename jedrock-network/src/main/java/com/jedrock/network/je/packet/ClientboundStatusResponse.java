@@ -1,6 +1,7 @@
 package com.jedrock.network.je.packet;
 
 import com.jedrock.utils.ByteBufUtils;
+import com.jedrock.utils.text.JsonText;
 import io.netty.buffer.ByteBuf;
 
 /**
@@ -20,16 +21,11 @@ public final class ClientboundStatusResponse implements ClientboundPacket {
     public static ClientboundStatusResponse of(String versionName, int protocol,
                                                int maxPlayers, int online, String motd) {
         String json = "{"
-                + "\"version\":{\"name\":\"" + escape(versionName) + "\",\"protocol\":" + protocol + "},"
+                + "\"version\":{\"name\":\"" + JsonText.escape(versionName) + "\",\"protocol\":" + protocol + "},"
                 + "\"players\":{\"max\":" + maxPlayers + ",\"online\":" + online + ",\"sample\":[]},"
-                + "\"description\":{\"text\":\"" + escape(motd) + "\"}"
+                + "\"description\":{\"text\":\"" + JsonText.escape(motd) + "\"}"
                 + "}";
         return new ClientboundStatusResponse(json);
-    }
-
-    /** Minimal JSON string escaping (backslash + double-quote) — enough for the fields we emit. */
-    private static String escape(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     public void write(ByteBuf buf) {

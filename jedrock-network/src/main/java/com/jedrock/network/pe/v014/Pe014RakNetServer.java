@@ -86,7 +86,7 @@ public final class Pe014RakNetServer {
         @Override
         public void onSessionCreation(RakNetServerSession session) {
             LOGGER.info("[0.14] session from " + session.getAddress() + " (mtu=" + session.getMtu() + ")");
-            session.setListener(new PeSession014(session, listener, world));
+            session.setListener(new PeSession014(session, listener, world, properties));
         }
 
         @Override

@@ -151,7 +151,7 @@ public final class ChatText {
             if (c == '{') {
                 int close = input.indexOf('}', i + 1);
                 if (close > i) {
-                    String tag = input.substring(i + 1, close).trim().toLowerCase();
+                    String tag = input.substring(i + 1, close).trim().toLowerCase(java.util.Locale.ROOT);
                     Character col = COLORS.get(tag);
                     Integer sty = STYLES.get(tag);
                     if (tag.equals("reset") || tag.equals("r")) {

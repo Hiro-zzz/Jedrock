@@ -148,6 +148,26 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void setGameMode(com.jedrock.api.player.GameMode mode) {
+        protocolHandler.setGameMode(this, mode);
+    }
+
+    @Override
+    public void setInventory(int[] states, int[] counts) {
+        protocolHandler.setInventory(this, states, counts);
+    }
+
+    @Override
+    public void setHealth(int health) {
+        protocolHandler.setHealth(this, health);
+    }
+
+    @Override
+    public void setInventorySlot(int slot, int state, int count) {
+        protocolHandler.setInventorySlot(this, slot, state, count);
+    }
+
+    @Override
     public void swingArm(long entityId) {
         protocolHandler.swingArm(this, entityId);
     }

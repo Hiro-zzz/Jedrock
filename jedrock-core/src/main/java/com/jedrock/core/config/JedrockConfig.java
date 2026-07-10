@@ -1,6 +1,7 @@
 package com.jedrock.core.config;
 
 import com.jedrock.api.config.ServerProperties;
+import com.jedrock.api.player.GameMode;
 import com.jedrock.utils.JLogger;
 
 import java.io.IOException;
@@ -70,8 +71,23 @@ public final class JedrockConfig {
                 positiveDouble(file, "judge.max-reach", def.maxReach()),
                 positiveDouble(file, "judge.max-move-delta", def.maxMoveDelta()),
                 port(file, "server.port.pe014", def.bedrock014Port()),
-                bool(file, "pe014.enabled", def.bedrock014Enabled())
+                bool(file, "pe014.enabled", def.bedrock014Enabled()),
+                gameMode(file, "game.default-gamemode", def.defaultGameMode())
         );
+    }
+
+    /** Parse a game mode (name / shorthand / id); an unrecognised value falls back with a warning. */
+    private static GameMode gameMode(Properties file, String key, GameMode def) {
+        String v = raw(file, key);
+        if (v == null || v.isBlank()) {
+            return def;
+        }
+        GameMode parsed = GameMode.fromString(v);
+        if (parsed == null) {
+            LOGGER.warn(key + " is not a game mode ('" + v.trim() + "'); using default " + def.displayName());
+            return def;
+        }
+        return parsed;
     }
 
     /** File value, unless a matching {@code -Dkey} system property overrides it. */

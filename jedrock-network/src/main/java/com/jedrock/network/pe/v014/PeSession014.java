@@ -1,5 +1,7 @@
 package com.jedrock.network.pe.v014;
 
+import com.jedrock.api.config.ServerProperties;
+import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Blocks;
@@ -42,6 +44,7 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     private final RakNetServerSession session;
     private final ConnectionListener listener;
     private final World world;
+    private final ServerProperties properties;
 
     private volatile boolean loggedIn = false;
     private volatile UUID uuid;
@@ -53,10 +56,12 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         @Override public void unload(int cx, int cz) { /* 0.14 client culls by distance */ }
     };
 
-    public PeSession014(RakNetServerSession session, ConnectionListener listener, World world) {
+    public PeSession014(RakNetServerSession session, ConnectionListener listener, World world,
+                        ServerProperties properties) {
         this.session = session;
         this.listener = listener;
         this.world = world;
+        this.properties = properties;
     }
 
     // ===== PlayerConnection (api) =====
@@ -103,6 +108,19 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     public void teleport(double x, double y, double z, float yaw, float pitch) {
         sendWrapped(b -> Mcpe014Packets.movePlayerSelf(b,
                 (float) x, (float) y + EYE_HEIGHT, (float) z, yaw, pitch, MOVE_MODE_RESET));
+    }
+
+    @Override
+    public void setGameMode(GameMode mode) {
+        // 0.14 has no verified live game-mode packet, and this client crashes on a wrong id, so we don't
+        // guess one on the wire — the mode is applied at StartGame on the next join (the server remembers
+        // it, so a reconnect comes back in the chosen mode). Tell the player.
+        sendMessage("§eGame mode set to " + mode.displayName() + " — reconnect to apply on 0.14.");
+    }
+
+    /** The mode this client joins in: its remembered choice this run, else the config default. */
+    private GameMode joinGameMode() {
+        return listener != null ? listener.gameModeFor(uuid) : properties.defaultGameMode();
     }
 
     @Override
@@ -280,7 +298,8 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
 
         sendWrapped(b -> Mcpe014Packets.playStatus(b, PLAY_STATUS_LOGIN_SUCCESS));
         sendWrapped(b -> Mcpe014Packets.startGame(b,
-                -1, 0, 1, 1, 0L, sx, sy, sz, (float) spawn.x(), eyeY, (float) spawn.z()));
+                -1, 0, 1, joinGameMode().getId(), 0L, sx, sy, sz,
+                (float) spawn.x(), eyeY, (float) spawn.z()));
         sendWrapped(b -> Mcpe014Packets.setTime(b, 0, true));
         sendWrapped(b -> Mcpe014Packets.setSpawnPosition(b, sx, sy, sz));
         sendWrapped(b -> Mcpe014Packets.setHealth(b, 20));

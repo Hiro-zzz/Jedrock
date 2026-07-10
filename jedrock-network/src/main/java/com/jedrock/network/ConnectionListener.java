@@ -1,7 +1,9 @@
 package com.jedrock.network;
 
+import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -55,4 +57,43 @@ public interface ConnectionListener {
 
     /** A player swung their arm (attack / dig / interact); the core relays it to everyone else. */
     default void onSwingArm(PlayerConnection connection) {}
+
+    /**
+     * The game mode a client should join in: its last {@code /gamemode} choice this run if it has one,
+     * otherwise the configured default. Queried by the join sequence (JE Join Game / PE StartGame) so a
+     * returning player keeps their mode — the only way MCPE 0.14, which can't switch mode live, ever
+     * changes. Called on an I/O thread before {@code onLogin}; must be cheap and thread-safe.
+     */
+    default GameMode gameModeFor(UUID uuid) {
+        return GameMode.CREATIVE;
+    }
+
+    /**
+     * The current game mode of an in-game player, by connection — lets an edition decide break timing
+     * (creative mines instantly; survival breaks only when digging finishes). Defaults to creative
+     * (instant) for an unknown connection, matching the pre-survival behaviour.
+     */
+    default GameMode gameModeOf(PlayerConnection connection) {
+        return GameMode.CREATIVE;
+    }
+
+    /**
+     * A player's client reported falling {@code fallDistance} blocks. In the illusionist model the
+     * client is authoritative for its own physics, so it tells us (MCPE {@code EntityFall}); the core
+     * turns the distance into fall damage rather than simulating gravity. Fires on an I/O thread.
+     */
+    default void onFall(PlayerConnection connection, float fallDistance) {}
+
+    /** Name, help text and aliases of one in-game command — all an edition needs to advertise it. */
+    record CommandInfo(String name, String description, List<String> aliases) {}
+
+    /**
+     * The in-game commands the core has registered. A Bedrock client validates a typed slash command
+     * against a manifest the server sends it and silently drops anything it wasn't told about, so the
+     * PE session advertises these in an {@code AvailableCommands} packet at spawn. Java clients need
+     * nothing — they send {@code /…} straight through as chat.
+     */
+    default List<CommandInfo> commands() {
+        return List.of();
+    }
 }

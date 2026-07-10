@@ -1,5 +1,7 @@
 package com.jedrock.network.pe;
 
+import com.jedrock.api.config.ServerProperties;
+import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Blocks;
@@ -46,6 +48,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     private final ConnectionListener listener;
     private final ProtocolVersion protocol;
     private final World world;
+    private final ServerProperties properties;
     /** Shared uuid → skin map (owned by the PE server); lets us render other PE players' real skins. */
     private final Map<UUID, McpeSkin.Skin> skins;
 
@@ -65,11 +68,12 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     };
 
     PeSession(RakNetServerSession session, ConnectionListener listener, ProtocolVersion protocol,
-              World world, Map<UUID, McpeSkin.Skin> skins) {
+              World world, ServerProperties properties, Map<UUID, McpeSkin.Skin> skins) {
         this.session = session;
         this.listener = listener;
         this.protocol = protocol;
         this.world = world;
+        this.properties = properties;
         this.skins = skins;
     }
 
@@ -370,10 +374,12 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
                 registerPlayer(); // fully in-game now — hand it to the core like a JE player
             }
             case ID_TEXT -> handleInboundText(pk);
+            case ID_COMMAND_STEP -> handleCommandStep(pk);
             case ID_MOVE_PLAYER -> handleInboundMove(pk);
             case ID_INVENTORY_TRANSACTION -> applyEdit(PeBlockEditDecoder.decodeInventoryTransaction(pk));
             case ID_USE_ITEM -> applyEdit(PeBlockEditDecoder.decodeUseItem(pk));
             case ID_PLAYER_ACTION -> handlePlayerAction(pk);
+            case ID_ENTITY_FALL -> handleEntityFall(pk);
             case ID_ANIMATE -> handleInboundAnimate(pk);
             default -> { /* other gameplay packet — nothing to answer yet */ }
         }
@@ -408,20 +414,75 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         }
     }
 
-    /** Dispatch a PlayerAction: an instant creative break, or a sneak-pose toggle. */
+    /** The block a survival player is currently mining (from START_BREAK), broken on STOP_BREAK. */
+    private long pendingBreak = NO_BREAK;
+    private static final long NO_BREAK = Long.MIN_VALUE;
+
+    /**
+     * Dispatch a PlayerAction. Block breaking differs by mode: <b>creative</b> mines instantly, so a
+     * START/CONTINUE break removes the block right away; <b>survival</b> takes time, so START only marks
+     * the target and the block is removed on STOP_BREAK (mining finished) — otherwise every progress
+     * packet would break the block on the first touch and hand out the item many times over.
+     */
     private void handlePlayerAction(ByteBuf pk) {
         PeBlockEditDecoder.PlayerAction a = PeBlockEditDecoder.decodePlayerAction(pk);
         if (a == null || !loggedIn || listener == null) {
             return;
         }
+        LOGGER.debug(() -> "[PE] PlayerAction action=" + a.action()
+                + " @ " + a.x() + "," + a.y() + "," + a.z());
+        boolean instantBreak = joinGameMode() == GameMode.CREATIVE;
         switch (a.action()) {
-            case ACTION_START_BREAK, ACTION_CONTINUE_BREAK ->
+            case ACTION_START_BREAK -> {
+                if (instantBreak) {
                     listener.onBlockChange(this, a.x(), a.y(), a.z(), Blocks.AIR);
+                } else {
+                    pendingBreak = packBlock(a.x(), a.y(), a.z()); // remember; break when mining finishes
+                }
+            }
+            case ACTION_CONTINUE_BREAK -> {
+                if (instantBreak) {
+                    listener.onBlockChange(this, a.x(), a.y(), a.z(), Blocks.AIR);
+                }
+            }
+            case ACTION_STOP_BREAK -> {
+                if (!instantBreak && pendingBreak != NO_BREAK) {
+                    listener.onBlockChange(this, unpackX(pendingBreak), unpackY(pendingBreak),
+                            unpackZ(pendingBreak), Blocks.AIR);
+                    pendingBreak = NO_BREAK;
+                }
+            }
+            case ACTION_ABORT_BREAK -> pendingBreak = NO_BREAK; // mining cancelled — leave the block
             case ACTION_START_SNEAK -> listener.onSneak(this, true);
             case ACTION_STOP_SNEAK -> listener.onSneak(this, false);
             case ACTION_START_SPRINT -> listener.onSprint(this, true);
             case ACTION_STOP_SPRINT -> listener.onSprint(this, false);
             default -> { /* other actions (jump, glide…) not relayed yet */ }
+        }
+    }
+
+    // Pack a block position into one long so a survival mine can remember its target across packets.
+    private static long packBlock(int x, int y, int z) {
+        return ((long) (x & 0x3FFFFFF) << 38) | ((long) (y & 0xFFF) << 26) | (z & 0x3FFFFFF);
+    }
+    private static int unpackX(long v) { return (int) (v >> 38); }
+    private static int unpackY(long v) { return (int) ((v >> 26) & 0xFFF); }
+    private static int unpackZ(long v) { return (int) (v << 38 >> 38); }
+
+    /**
+     * The client reported a fall (its own physics decided the distance). Hand the distance to the core,
+     * which turns it into fall damage — we never simulate gravity or poll positions for it.
+     */
+    private void handleEntityFall(ByteBuf pk) {
+        try {
+            ByteBufUtils.readVarLong(pk);        // entity runtime id (self)
+            float fallDistance = pk.readFloatLE();
+            // trailing bool ignored
+            if (loggedIn && listener != null) {
+                listener.onFall(this, fallDistance);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debug(() -> "[PE] could not parse EntityFall: " + e);
         }
     }
 
@@ -434,6 +495,23 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             }
         } catch (RuntimeException e) {
             LOGGER.debug(() -> "[PE] could not parse Animate: " + e);
+        }
+    }
+
+    /**
+     * Rebuild the slash command a Bedrock client parsed client-side and hand it to the core as a chat
+     * line — {@code onChat} routes anything starting with {@code /} to the command system, so a PE
+     * command takes exactly the same path a Java one does.
+     */
+    private void handleCommandStep(ByteBuf pk) {
+        try {
+            String line = McpeCommandStep.readCommandLine(pk);
+            LOGGER.debug(() -> "[PE] CommandStep -> " + line);
+            if (line != null && loggedIn && listener != null) {
+                listener.onChat(this, line);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debug(() -> "[PE] could not parse CommandStep: " + e);
         }
     }
 
@@ -503,7 +581,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             // Player entity ids + gamemode
             ByteBufUtils.writeSignedVarLong(b, 1L);
             ByteBufUtils.writeVarLong(b, 1L);
-            ByteBufUtils.writeSignedVarInt(b, 1);   // creative
+            ByteBufUtils.writeSignedVarInt(b, joinGameMode().getId()); // join game mode (remembered / config)
 
             // Position + rotation
             b.writeFloatLE((float) spawn.x());
@@ -551,22 +629,12 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
 
     /** Reply to the chunk-radius request: set the radius, stream the initial window, spawn. */
     private void sendWorld(int radius) {
-        sendGameBatch(
-                b -> {
-                    ByteBufUtils.writeVarInt(b, ID_CHUNK_RADIUS_UPDATED);
-                    ByteBufUtils.writeSignedVarInt(b, radius);
-                },
-                b -> {
-                    ByteBufUtils.writeVarInt(b, ID_ADVENTURE_SETTINGS);
-                    ByteBufUtils.writeVarInt(b, ADVENTURE_ALLOW_FLIGHT); // let the client toggle flight
-                    ByteBufUtils.writeVarInt(b, 2);           // command permission (OP)
-                    ByteBufUtils.writeVarInt(b, 0);           // action permissions
-                    ByteBufUtils.writeVarInt(b, 2);           // permission level (OP)
-                    ByteBufUtils.writeVarInt(b, 0);           // custom extension flags
-                    b.writeLongLE(1L);                        // player entity unique id — an LE long,
-                                                              // NOT a varint (a short write here drops
-                                                              // the whole packet, so flight never applied)
-                });
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_CHUNK_RADIUS_UPDATED);
+            ByteBufUtils.writeSignedVarInt(b, radius);
+        });
+        // Flight is only allowed outside survival (creative / spectator).
+        sendAdventureSettings(joinGameMode().allowsFlight());
 
         // Movement-speed attribute + starter hotbar before streaming chunks.
         sendAttributes();
@@ -586,6 +654,108 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         // Creative palette, once, right after the spawn status — the point PocketMine sends it, when
         // the client's inventory UI is up and will accept it.
         sendCreativeContent();
+
+        // Commands, also post-spawn (where PocketMine sends them).
+        sendCommandData();
+    }
+
+    /**
+     * Turn the client's "/" input on and hand it the manifest of commands it may send.
+     *
+     * <p>Both are required. With commands disabled the client refuses the input outright ("cheats must
+     * be enabled"); with them enabled but no manifest it silently drops any command it wasn't told
+     * about. Only once both land does it parse the line and send back a {@code CommandStep} packet —
+     * which {@link #handleCommandStep} turns back into a {@code "/…"} line for the core.
+     */
+    private void sendCommandData() {
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_SET_COMMANDS_ENABLED);
+            b.writeBoolean(true);
+        });
+        if (listener == null) {
+            return;
+        }
+        var commands = listener.commands();
+        if (commands.isEmpty()) {
+            return; // nothing to advertise
+        }
+        String json = McpeAvailableCommands.buildJson(commands);
+        LOGGER.debug(() -> "[PE] AvailableCommands: " + json);
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_AVAILABLE_COMMANDS);
+            ByteBufUtils.writeString(b, json);
+            ByteBufUtils.writeString(b, ""); // unused second JSON blob
+        });
+    }
+
+    /**
+     * Send AdventureSettings — mainly the flight permission. {@code allowFlight} rides the flags field;
+     * the player entity id is an LE long (NOT a varint — a short write drops the whole packet, so flight
+     * would never apply). OP command/permission level is kept so the creative menu and edits work.
+     */
+    private void sendAdventureSettings(boolean allowFlight) {
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_ADVENTURE_SETTINGS);
+            ByteBufUtils.writeVarInt(b, allowFlight ? ADVENTURE_ALLOW_FLIGHT : 0);
+            ByteBufUtils.writeVarInt(b, 2);           // command permission (OP)
+            ByteBufUtils.writeVarInt(b, 0);           // action permissions
+            ByteBufUtils.writeVarInt(b, 2);           // permission level (OP)
+            ByteBufUtils.writeVarInt(b, 0);           // custom extension flags
+            b.writeLongLE(1L);                        // player entity unique id (LE long)
+        });
+    }
+
+    @Override
+    public void setHealth(int health) {
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_SET_HEALTH);
+            ByteBufUtils.writeSignedVarInt(b, health); // PMMP SetHealth uses a signed (zigzag) varint
+        });
+    }
+
+    /** The mode this client joins in: its remembered choice this run, else the config default. */
+    private GameMode joinGameMode() {
+        return listener != null ? listener.gameModeFor(uuid) : properties.defaultGameMode();
+    }
+
+    @Override
+    public void setGameMode(GameMode mode) {
+        // SetPlayerGameType flips the HUD; AdventureSettings re-grants/revokes flight to match.
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_SET_PLAYER_GAME_TYPE);
+            ByteBufUtils.writeSignedVarInt(b, mode.getId());
+        });
+        sendAdventureSettings(mode.allowsFlight());
+    }
+
+    @Override
+    public void setInventorySlot(int slot, int state, int count) {
+        // ContainerSetSlot (0x32): a single-slot update, which refreshes the hotbar HUD live (a full
+        // ContainerSetContent updates the data but the client only shows it after the inventory opens).
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_SLOT);
+            b.writeByte(WINDOW_ID_PLAYER);            // window id (byte, not a varint here)
+            ByteBufUtils.writeSignedVarInt(b, slot);  // inventory slot
+            ByteBufUtils.writeSignedVarInt(b, slot < 9 ? slot : 0); // hotbar link (self for a hotbar slot)
+            McpeCodec.writeSlot(b, state, count);
+            b.writeByte(0);                           // selectSlot
+        });
+    }
+
+    @Override
+    public void setInventory(int[] states, int[] counts) {
+        // Bedrock's player window (id 0) numbers slots 0-8 hotbar / 9-35 main — the same order as the
+        // core model, so it maps 1:1. ContainerSetContent replaces the whole window.
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_CONTENT);
+            ByteBufUtils.writeVarInt(b, WINDOW_ID_PLAYER);
+            ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);
+            ByteBufUtils.writeVarInt(b, states.length);
+            for (int i = 0; i < states.length; i++) {
+                McpeCodec.writeSlot(b, states[i], counts[i]);
+            }
+            ByteBufUtils.writeVarInt(b, 0); // hotbar-link count
+        });
     }
 
     /** Send the standard movement-speed attribute (0.1) to stop the PE client's runaway acceleration. */
@@ -605,12 +775,6 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         });
     }
 
-    /** Placeable blocks handed to a joining Bedrock player's hotbar (creative). */
-    private static final int[] HOTBAR = {
-            Blocks.STONE, Blocks.DIRT, Blocks.GRASS, Blocks.COBBLESTONE,
-            Blocks.PLANKS, Blocks.SAND, Blocks.LOG, Blocks.GLASS,
-    };
-
     /** The creative menu's block palette — variant-rich, shared with 0.14 ({@link PeCreativePalette}). */
     private static final int[] CREATIVE = PeCreativePalette.states();
 
@@ -620,10 +784,13 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
      */
     private static final long SELF_ENTITY_ID = 1L;
 
-    /** Populate the player inventory: the first slots (hotbar) with placeable blocks, the rest empty. */
+    /**
+     * Start with an empty player inventory, both modes. Creative fills its hands from the creative menu
+     * (client-side, like vanilla), and survival fills it by mining (via {@code setInventory}). Sending a
+     * starter hotbar here was the bug where "creative blocks" leaked into a survival inventory.
+     */
     private void sendInventory() {
-        sendContainerContent(WINDOW_ID_PLAYER, 36,
-                slot -> slot < HOTBAR.length ? Blocks.state(HOTBAR[slot], 0) : Blocks.AIR, 64);
+        sendContainerContent(WINDOW_ID_PLAYER, 36, slot -> Blocks.AIR, 1);
     }
 
     /**
@@ -674,30 +841,38 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     }
 
     /**
+     * Per-thread batch + scratch buffers. An outbound packet is built and fully consumed (deflated)
+     * within a single {@link #sendGameBatch} call before the method returns, so a thread can reuse the
+     * same two heap buffers across every send instead of allocating a fresh pair each time — and a
+     * given session is written to from several threads (its own RakNet thread plus other players'
+     * threads relaying moves/chat), so keeping these per-thread rather than per-session avoids sharing.
+     * Heap-backed and never released: they live for the thread's lifetime (bounded by the pool size).
+     */
+    private static final ThreadLocal<ByteBuf> BATCH_BUF = ThreadLocal.withInitial(Unpooled::buffer);
+    private static final ThreadLocal<ByteBuf> SCRATCH_BUF = ThreadLocal.withInitial(Unpooled::buffer);
+
+    /**
      * Wrap one or two MCPE packets in a zlib batch behind the 0xFE game-packet header and send them
      * reliably. Each packet is encoded into a reused {@code scratch} buffer purely to measure its
      * VarInt length prefix, then framed into the batch — so no per-packet {@code byte[]} is
      * allocated, and we deflate straight from the batch's backing array.
      */
     private void sendGameBatch(Consumer<ByteBuf> first, Consumer<ByteBuf> second) {
-        ByteBuf batch = Unpooled.buffer();
-        ByteBuf scratch = Unpooled.buffer();
-        try {
-            appendPacket(batch, scratch, first);
-            if (second != null) {
-                appendPacket(batch, scratch, second);
-            }
-            byte[] compressed = McpeCompression.deflate(
-                    batch.array(), batch.arrayOffset() + batch.readerIndex(), batch.readableBytes(), rawDeflate);
-
-            ByteBuf out = Unpooled.buffer(1 + compressed.length);
-            out.writeByte(GAME_PACKET_WRAPPER);
-            out.writeBytes(compressed);
-            session.send(out, RakNetReliability.RELIABLE_ORDERED);
-        } finally {
-            scratch.release();
-            batch.release();
+        ByteBuf batch = BATCH_BUF.get();
+        ByteBuf scratch = SCRATCH_BUF.get();
+        batch.clear();
+        appendPacket(batch, scratch, first);
+        if (second != null) {
+            appendPacket(batch, scratch, second);
         }
+        byte[] compressed = McpeCompression.deflate(
+                batch.array(), batch.arrayOffset() + batch.readerIndex(), batch.readableBytes(), rawDeflate);
+
+        // The outbound frame is handed to RakNet, which owns and releases it — so it can't be pooled here.
+        ByteBuf out = Unpooled.buffer(1 + compressed.length);
+        out.writeByte(GAME_PACKET_WRAPPER);
+        out.writeBytes(compressed);
+        session.send(out, RakNetReliability.RELIABLE_ORDERED);
     }
 
     /** Encode one packet into {@code scratch}, then frame it (VarInt length + body) into {@code batch}. */

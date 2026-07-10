@@ -1,5 +1,6 @@
 package com.jedrock.network.je.packet;
 
+import com.jedrock.api.player.GameMode;
 import io.netty.buffer.ByteBuf;
 
 /**
@@ -12,7 +13,21 @@ public final class ClientboundPlayerAbilities implements ClientboundPacket {
     public float fovModifier;  // also called "walkSpeed" in some client mappings, but it's the fov modifier
 
     public ClientboundPlayerAbilities() {
-        this.flags = 0x0C; // allow flying + creative (good default)
+        this(GameMode.CREATIVE);
+    }
+
+    /**
+     * Abilities matching a game mode: creative gets the creative + allow-flight bits (and stays
+     * invulnerable), survival/adventure get neither, so the client can't free-fly outside creative.
+     */
+    public ClientboundPlayerAbilities(GameMode mode) {
+        int f = 0;
+        if (mode == GameMode.CREATIVE) {
+            f |= 0x08 | 0x04 | 0x01; // creative | allow-fly | invulnerable
+        } else if (mode.allowsFlight()) {
+            f |= 0x04; // spectator: fly allowed, not creative
+        }
+        this.flags = (byte) f;
         this.flyingSpeed = 0.05f;
         this.fovModifier = 0.1f;
     }

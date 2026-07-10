@@ -25,6 +25,8 @@ final class McpeProtocol {
     static final int ID_MOVE_PLAYER = 0x13;
     static final int ID_UPDATE_BLOCK = 0x16;
     static final int ID_UPDATE_ATTRIBUTES = 0x1D; // movement-speed fix
+    static final int ID_ENTITY_FALL = 0x25;       // inbound: the client reports a fall (its distance)
+    static final int ID_SET_HEALTH = 0x2A;        // outbound: set the player's health (0..20)
     static final int ID_INVENTORY_TRANSACTION = 0x1E;
     static final int ID_USE_ITEM = 0x23;          // Win10 1.1.5 carries block placement here
     static final int ID_PLAYER_ACTION = 0x24;
@@ -33,9 +35,14 @@ final class McpeProtocol {
     // MCPE 1.1 (protocol 113) uses ContainerSetContent (0x34) for inventory/creative content — NOT
     // the InventoryContent (0x31) of 1.2+. Its layout is: windowId, targetEid (entity id), slot count,
     // slots, then a hotbar-link count. Verified against PocketMine-MP at CURRENT_PROTOCOL = 113.
+    static final int ID_CONTAINER_SET_SLOT = 0x32;    // update one inventory slot (live hotbar refresh)
     static final int ID_CONTAINER_SET_CONTENT = 0x34;
     static final int ID_ADVENTURE_SETTINGS = 0x37;
+    static final int ID_SET_COMMANDS_ENABLED = 0x3B;  // toggle client-side "/" command parsing
+    static final int ID_AVAILABLE_COMMANDS = 0x4E;    // JSON manifest of the commands the client may send
+    static final int ID_COMMAND_STEP = 0x4F;          // inbound: a slash command the client parsed
     static final int ID_FULL_CHUNK_DATA = 0x3A;
+    static final int ID_SET_PLAYER_GAME_TYPE = 0x3E; // live game-mode switch (gameType as signed varint)
     static final int ID_PLAYER_LIST = 0x3F;
     static final int ID_REQUEST_CHUNK_RADIUS = 0x45;
     static final int ID_CHUNK_RADIUS_UPDATED = 0x46;
@@ -65,6 +72,8 @@ final class McpeProtocol {
     // --- PlayerAction action ids ---
     // In creative the client reports a break with CONTINUE_BREAK carrying the block position.
     static final int ACTION_START_BREAK = 0;
+    static final int ACTION_ABORT_BREAK = 1;   // mining cancelled before completion
+    static final int ACTION_STOP_BREAK = 2;    // mining finished (the survival break completion)
     static final int ACTION_CONTINUE_BREAK = 18;
     static final int ACTION_START_SPRINT = 9;
     static final int ACTION_STOP_SPRINT = 10;

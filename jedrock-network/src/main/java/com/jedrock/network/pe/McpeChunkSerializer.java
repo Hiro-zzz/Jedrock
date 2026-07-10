@@ -50,12 +50,15 @@ final class McpeChunkSerializer {
         short[] blocks = SCRATCH.get();
         byte[] meta = META.get();
 
-        // Pass 1: find the highest non-empty section. fillSection is allocation-free and far cheaper
-        // than the old per-block scan (one storage lookup + one height eval per column, no boxing).
+        // Pass 1: find the highest non-empty section. Scan top-down and stop at the first hit — the
+        // terrain surface sits low (a few sections up), so this fills far fewer sections than a full
+        // 0..15 sweep, and never more. fillSection is allocation-free (one storage lookup + one height
+        // eval per column, no boxing).
         int topSection = -1;
-        for (int sy = 0; sy < 16; sy++) {
+        for (int sy = 15; sy >= 0; sy--) {
             if (world.fillSection(chunkX, sy, chunkZ, blocks)) {
                 topSection = sy;
+                break;
             }
         }
         int subChunkCount = topSection + 1; // sub-chunks are sent contiguously from y=0

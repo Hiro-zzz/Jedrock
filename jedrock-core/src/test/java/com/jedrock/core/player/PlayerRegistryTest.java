@@ -19,7 +19,8 @@ class PlayerRegistryTest {
 
     private CorePlayer newPlayer(String name, PlayerConnection connection) {
         UUID uuid = UUID.nameUUIDFromBytes(name.getBytes());
-        return new CorePlayer(uuid, name, connection, world, world.getSpawnLocation());
+        return new CorePlayer(uuid, name, connection, world, world.getSpawnLocation(),
+                com.jedrock.api.player.GameMode.CREATIVE);
     }
 
     @Test
@@ -79,6 +80,7 @@ class PlayerRegistryTest {
         @Override public void hidePlayer(java.util.UUID uuid, long entityId) { }
         @Override public void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch) { }
         @Override public void teleport(double x, double y, double z, float yaw, float pitch) { }
+        @Override public void setGameMode(com.jedrock.api.player.GameMode mode) { }
         @Override public void swingArm(long entityId) { }
         @Override public void setPose(long entityId, boolean sneaking, boolean sprinting, boolean usingItem) { }
         @Override public void sendBlockChange(int x, int y, int z, int blockId) { }

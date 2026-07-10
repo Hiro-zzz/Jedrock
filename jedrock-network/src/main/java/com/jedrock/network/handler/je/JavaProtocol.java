@@ -1,5 +1,6 @@
 package com.jedrock.network.handler.je;
 
+import com.jedrock.api.player.GameMode;
 import com.jedrock.network.JedrockConnection;
 import com.jedrock.network.handler.ProtocolHandler;
 
@@ -45,6 +46,18 @@ public interface JavaProtocol extends ProtocolHandler {
 
     /** Reposition this client's own player (the blind judge snapping an illegal move back). */
     void teleportSelf(JedrockConnection c, double x, double y, double z, float yaw, float pitch);
+
+    /** Switch this client's own game mode live (HUD + fly ability), in this version's packet format. */
+    void setGameMode(JedrockConnection c, GameMode mode);
+
+    /** Replace the client's inventory (36-slot model, 0-8 hotbar / 9-35 main) — the survival inventory. */
+    void setInventory(JedrockConnection c, int[] states, int[] counts);
+
+    /** Set the player's health bar (0..20) — used for server-tracked fall damage. */
+    void setHealth(JedrockConnection c, int health);
+
+    /** Update one inventory slot (core index 0-8 hotbar / 9-35 main) for a live survival pickup / consume. */
+    void setInventorySlot(JedrockConnection c, int slot, int state, int count);
 
     /** Play another player's arm-swing animation. */
     void swingArm(JedrockConnection c, long entityId);

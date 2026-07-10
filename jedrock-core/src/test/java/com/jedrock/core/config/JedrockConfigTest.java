@@ -114,6 +114,19 @@ class JedrockConfigTest {
     }
 
     @Test
+    void defaultGameModeIsParsedAndFallsBack() {
+        Properties valid = new Properties();
+        valid.setProperty("game.default-gamemode", "survival");
+        assertEquals(com.jedrock.api.player.GameMode.SURVIVAL,
+                JedrockConfig.parse(valid).defaultGameMode());
+
+        Properties bad = new Properties();
+        bad.setProperty("game.default-gamemode", "god-mode");
+        assertEquals(ServerProperties.defaults().defaultGameMode(),
+                JedrockConfig.parse(bad).defaultGameMode());
+    }
+
+    @Test
     void randomSeedIsNotTheDefault() {
         Properties p = new Properties();
         p.setProperty("world.seed", "random");

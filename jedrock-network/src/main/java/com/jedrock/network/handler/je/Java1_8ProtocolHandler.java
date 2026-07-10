@@ -1,5 +1,6 @@
 package com.jedrock.network.handler.je;
 
+import com.jedrock.api.player.GameMode;
 import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.Location;
 import com.jedrock.network.JedrockConnection;
@@ -10,6 +11,7 @@ import com.jedrock.network.protocol.ProtocolState;
 import com.jedrock.utils.ByteBufUtils;
 import com.jedrock.utils.JLogger;
 import com.jedrock.utils.lazy.LazyPacket;
+import com.jedrock.utils.text.JsonText;
 import io.netty.buffer.ByteBuf;
 
 import java.nio.charset.StandardCharsets;
@@ -62,7 +64,7 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
 
         connection.send(new ClientboundLoginSuccess(uuid, name)); // 0x02, uuid+name strings (same as 1.12.2)
         connection.setState(ProtocolState.PLAY);
-        sendJoinSequence(connection);
+        sendJoinSequence(connection, uuid);
 
         connection.setLoggedIn(true);
         if (connection.getListener() != null) {
@@ -93,7 +95,9 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
             int status = in.readByte();
             long pos = in.readLong();
             if (listener != null) {
-                if (status == 0 || status == 2) {          // start (creative instant) / finish → break
+                boolean creative = listener.gameModeOf(connection) == GameMode.CREATIVE;
+                // Creative breaks on start (0, instant); survival only when digging finishes (2).
+                if ((status == 0 && creative) || status == 2) {
                     listener.onBlockChange(connection, posX(pos), posY(pos), posZ(pos), Blocks.AIR);
                 } else if (status == 5) {                    // release use item
                     listener.onUseItem(connection, false);
@@ -144,13 +148,17 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
 
     // ===== Join sequence =====
 
-    private void sendJoinSequence(JedrockConnection c) {
+    private void sendJoinSequence(JedrockConnection c, UUID uuid) {
         Location spawn = c.getWorld().getSpawnLocation();
         int max = Math.min(255, c.getServerProperties().maxPlayers());
+        // The mode this client joins in: its remembered choice this run, else the config default.
+        GameMode mode = c.getListener() != null
+                ? c.getListener().gameModeFor(uuid)
+                : c.getServerProperties().defaultGameMode();
 
         send(c, CB_JOIN_GAME, b -> {
             b.writeInt(1);                                   // entity id
-            b.writeByte(1);                                  // gamemode: creative
+            b.writeByte(mode.getId());                       // gamemode (from config)
             b.writeByte(0);                                  // dimension: overworld (signed byte in 1.8)
             b.writeByte(2);                                  // difficulty: normal
             b.writeByte(max);                                // max players (unsigned byte)
@@ -159,7 +167,7 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
         });
         send(c, CB_SERVER_DIFFICULTY, b -> b.writeByte(2));
         send(c, CB_SPAWN_POSITION, b -> b.writeLong(packPos(spawn.getBlockX(), spawn.getBlockY(), spawn.getBlockZ())));
-        send(c, CB_PLAYER_ABILITIES, b -> { b.writeByte(0x0D); b.writeFloat(0.05f); b.writeFloat(0.1f); }); // inv|allowFly|creative
+        send(c, CB_PLAYER_ABILITIES, b -> { b.writeByte(abilityFlags(mode)); b.writeFloat(0.05f); b.writeFloat(0.1f); });
         send(c, CB_HELD_ITEM, b -> b.writeByte(0));
 
         c.sendSpawnChunks();
@@ -190,8 +198,7 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
 
     @Override
     public void sendSystemMessage(JedrockConnection c, String message) {
-        String escaped = message.replace("\\", "\\\\").replace("\"", "\\\"");
-        send(c, CB_CHAT, b -> { ByteBufUtils.writeString(b, "{\"text\":\"" + escaped + "\"}"); b.writeByte(0); });
+        send(c, CB_CHAT, b -> { ByteBufUtils.writeString(b, "{\"text\":\"" + JsonText.escape(message) + "\"}"); b.writeByte(0); });
     }
 
     @Override
@@ -253,6 +260,42 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
             b.writeFloat(yaw); b.writeFloat(pitch);
             b.writeByte(0);
         });
+    }
+
+    @Override
+    public void setGameMode(JedrockConnection c, GameMode mode) {
+        // Change Game State (0x2B): byte reason 3 = change game mode, float value = the mode id.
+        send(c, CB_CHANGE_GAME_STATE, b -> { b.writeByte(3); b.writeFloat(mode.getId()); });
+        send(c, CB_PLAYER_ABILITIES, b -> { b.writeByte(abilityFlags(mode)); b.writeFloat(0.05f); b.writeFloat(0.1f); });
+    }
+
+    @Override
+    public void setInventory(JedrockConnection c, int[] states, int[] counts) {
+        send(c, CB_WINDOW_ITEMS, b -> JeInventoryCodec.writeWindowItems(b, states, counts, JeInventoryCodec.WINDOW_SLOTS_1_8));
+    }
+
+    @Override
+    public void setHealth(JedrockConnection c, int health) {
+        // 1.8 Update Health (0x06): float health, VarInt food, float saturation.
+        send(c, CB_UPDATE_HEALTH, b -> { b.writeFloat(health); ByteBufUtils.writeVarInt(b, 20); b.writeFloat(5.0f); });
+    }
+
+    @Override
+    public void setInventorySlot(JedrockConnection c, int slot, int state, int count) {
+        // Set Slot (0x2F): byte windowId=0, short slot, Slot data (same Slot format as 1.12.2).
+        send(c, CB_SET_SLOT, b -> {
+            b.writeByte(0);
+            b.writeShort(JeInventoryCodec.windowSlot(slot));
+            JeInventoryCodec.writeSlot(b, state, count);
+        });
+    }
+
+    /** 1.8 Player Abilities flags for a mode: creative → invuln|allowFly|creative; else no flight. */
+    private static int abilityFlags(GameMode mode) {
+        if (mode == GameMode.CREATIVE) {
+            return 0x0D; // invulnerable | allow-fly | creative
+        }
+        return mode.allowsFlight() ? 0x04 : 0x00; // spectator flies; survival/adventure don't
     }
 
     @Override

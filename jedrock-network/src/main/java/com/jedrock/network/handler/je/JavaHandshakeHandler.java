@@ -115,6 +115,10 @@ public final class JavaHandshakeHandler implements JavaProtocol {
     @Override public void moveAvatar(JedrockConnection c, long entityId,
                                      double x, double y, double z, float yaw, float pitch) { throw noPlayer(); }
     @Override public void teleportSelf(JedrockConnection c, double x, double y, double z, float yaw, float pitch) { throw noPlayer(); }
+    @Override public void setGameMode(JedrockConnection c, com.jedrock.api.player.GameMode mode) { throw noPlayer(); }
+    @Override public void setInventory(JedrockConnection c, int[] states, int[] counts) { throw noPlayer(); }
+    @Override public void setHealth(JedrockConnection c, int health) { throw noPlayer(); }
+    @Override public void setInventorySlot(JedrockConnection c, int slot, int state, int count) { throw noPlayer(); }
     @Override public void swingArm(JedrockConnection c, long entityId) { throw noPlayer(); }
     @Override public void setPose(JedrockConnection c, long entityId, boolean sneaking, boolean sprinting, boolean usingItem) { throw noPlayer(); }
     @Override public void sendBlockChange(JedrockConnection c, int x, int y, int z, int state) { throw noPlayer(); }
