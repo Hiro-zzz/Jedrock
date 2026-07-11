@@ -32,8 +32,10 @@ public final class Java1_8Protocol {
     public static final int CB_ENTITY_HEAD_ROTATION = 0x19;
     public static final int CB_ENTITY_STATUS = 0x1A;     // int entityId + byte status (2 = hurt)
     public static final int CB_ENTITY_METADATA = 0x1C;
+    public static final int CB_OPEN_WINDOW = 0x2D;   // open a container GUI (chest)
     public static final int CB_WINDOW_ITEMS = 0x30; // replace a window's contents (player inventory)
     public static final int CB_SET_SLOT = 0x2F;      // update one window slot
+    public static final int CB_CONFIRM_TRANSACTION = 0x32; // ack a click (we always accept)
     public static final int CB_CHUNK_DATA = 0x21;
     public static final int CB_BLOCK_CHANGE = 0x23;
     public static final int CB_PLAYER_LIST_ITEM = 0x38;
@@ -52,6 +54,10 @@ public final class Java1_8Protocol {
     public static final int SB_HELD_ITEM = 0x09;
     public static final int SB_ARM_ANIMATION = 0x0A;
     public static final int SB_ENTITY_ACTION = 0x0B;
+    public static final int SB_CLOSE_WINDOW = 0x0D;
+    public static final int SB_CLICK_WINDOW = 0x0E;         // mode is a BYTE in 1.8 (VarInt only from 1.9)
+    public static final int SB_CONFIRM_TRANSACTION = 0x0F;  // client's ack — ignored
+    public static final int SB_CREATIVE_ACTION = 0x10;      // creative set-slot (slot short + item)
 
     // ===== 1.8 entity metadata (old format): header = (type << 5) | index, list ends with 0x7F =====
     public static final int META_TYPE_BYTE = 0;

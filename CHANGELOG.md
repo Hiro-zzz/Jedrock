@@ -8,6 +8,23 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Interactive inventories and chests (Java Edition).** The player inventory became a real,
+  server-authoritative container instead of a display: a `Container` abstraction (shared by players and
+  blocks) plus `InventoryClick` — left / right / shift click semantics (pick up, place, merge, split,
+  swap, quick-move) with a server-tracked `Cursor`. The player model grew to 41 slots (added armor +
+  off-hand), mapped onto each edition's window layout. **Chests** are a new placeable block (id 54) backed
+  by a 27-slot container keyed by position: right-click opens the window (`onUseBlock` suppresses the
+  placement the same packet would be), items move between the chest and the player inventory (including
+  shift quick-transfer), and closing returns the cursor. Works in **survival and creative** — the creative
+  inventory is now mirrored server-side (via Creative Inventory Action → `onCreativeSetSlot`) so a chest's
+  player-inventory half is tracked. Chest contents **persist**: the level file is bumped to **v3** with a
+  container section (only non-empty chests; positions + slots), and load stays back-compatible with v2
+  worlds (they upgrade in place on the next save). New Java packets: Click Window (0x07 / 0x0E), Confirm
+  Transaction, Open Window, generalized Set Slot (window id, for the cursor). Wired for **JE 1.12.2 and
+  1.8**; the Bedrock port is next. The server only stores and moves items — no crafting/smelting
+  simulation, no item entities (overflow simply vanishes). Unit-tested (`InventoryClickTest`,
+  `JeInventoryCodecTest`, `LevelIOTest` chest round-trip).
+
 - **Survival mode, in-game commands, and a minimal survival inventory.** A player can play in survival;
   the mode is persisted per player, so a reconnect keeps it (the only way MCPE 0.14, which has no live
   game-mode packet, ever switches). **In-game commands** work cross-edition — `/help`, `/gamemode`, `/tp`,
@@ -288,6 +305,11 @@ unstable — anything may change between entries.
 
 ### Fixed
 
+- **A wrong Click Window id dropped 1.12.2 connections on creative interaction.** `ServerboundClickWindow`
+  was mapped to 0x08 (which is Close Window at 1.12.2 — a 1-byte body); a real Close Window then over-read
+  past the buffer (`readerIndex(1) + length(2) exceeds writerIndex(1)`) and killed the connection. Click
+  Window is **0x07**; 0x08 is now handled as Close Window. Also gated window clicks to survival so a
+  creative click never resyncs an empty server inventory over the client's creative hotbar.
 - **Bedrock 1.1.5 players ran too fast (runaway acceleration).** The movement-speed attribute
   (`minecraft:movement` = 0.1) was byte-correct but sent under the wrong packet id — `UpdateAttributes`
   is **0x1E** at protocol 113, not the 0x1D we used — so the client never recognized it and stayed on its

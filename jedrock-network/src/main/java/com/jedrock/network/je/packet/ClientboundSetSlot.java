@@ -8,11 +8,19 @@ import io.netty.buffer.ByteBuf;
  */
 public final class ClientboundSetSlot implements ClientboundPacket {
 
+    private final int windowId;
     private final int windowSlot;
     private final int state; // canonical (id<<4)|meta, 0 = empty
     private final int count;
 
+    /** Update a slot of the player inventory (window 0). */
     public ClientboundSetSlot(int windowSlot, int state, int count) {
+        this(0, windowSlot, state, count);
+    }
+
+    /** Update a slot of an arbitrary window ({@code windowId} -1 / {@code windowSlot} -1 = the cursor). */
+    public ClientboundSetSlot(int windowId, int windowSlot, int state, int count) {
+        this.windowId = windowId;
         this.windowSlot = windowSlot;
         this.state = state;
         this.count = count;
@@ -20,7 +28,7 @@ public final class ClientboundSetSlot implements ClientboundPacket {
 
     @Override
     public void write(ByteBuf buf) {
-        buf.writeByte(0);              // window id 0 = the player inventory
+        buf.writeByte(windowId);
         buf.writeShort(windowSlot);
         if (state == 0 || count <= 0) {
             buf.writeShort(-1);        // empty slot

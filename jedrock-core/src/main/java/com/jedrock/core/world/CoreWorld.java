@@ -366,7 +366,7 @@ public final class CoreWorld implements World {
                 generated, s.x(), s.y(), s.z(), s.yaw(), s.pitch());
         // Clear before writing so an edit arriving mid-save re-marks the world dirty for the next cycle.
         dirty = false;
-        LevelIO.save(file, meta, storage, biomes);
+        LevelIO.save(file, meta, storage, biomes, containers);
     }
 
     /**
@@ -375,9 +375,36 @@ public final class CoreWorld implements World {
      * (e.g. warn on a seed mismatch).
      */
     public LevelData load(Path file) throws IOException {
-        LevelData meta = LevelIO.load(file, storage, biomes);
+        LevelData meta = LevelIO.load(file, storage, biomes, containers);
         this.generated = meta.generated();
         return meta;
+    }
+
+    // ===== Block containers (chests) =====
+    //
+    // A chest is a block plus a 27-slot container keyed by its position. In-memory only for now — chest
+    // contents do NOT yet survive a restart (level-file persistence is the next step).
+
+    private final java.util.Map<Long, com.jedrock.core.inventory.Container> containers =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static long packPos(int x, int y, int z) {
+        return ((long) (x & 0x3FFFFFF) << 38) | ((long) (y & 0xFFF) << 26) | (z & 0x3FFFFFF);
+    }
+
+    /** The 27-slot container backing the chest at {@code (x, y, z)}, created empty on first access. */
+    public com.jedrock.core.inventory.Container getChestContainer(int x, int y, int z) {
+        return containers.computeIfAbsent(packPos(x, y, z), k -> new com.jedrock.core.inventory.Container(27));
+    }
+
+    /** Drop a chest's container (its block was broken); the contents are lost — no item entities. */
+    public void removeChestContainer(int x, int y, int z) {
+        containers.remove(packPos(x, y, z));
+    }
+
+    /** Mark the world changed (e.g. a chest's contents were edited) so autosave / shutdown persists it. */
+    public void markDirty() {
+        dirty = true;
     }
 
     // ===== Player membership (managed by the server on join/quit) =====

@@ -35,6 +35,7 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     private static final JLogger LOGGER = JLogger.getLogger(Java1_8ProtocolHandler.class);
 
     private int keepAliveId = 0;
+    private int openWindowId = 0; // a container (chest) window this client has open; 0 = none
 
     // ===== Inbound =====
 
@@ -121,8 +122,45 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
                     default -> { /* leave bed etc. */ }
                 }
             }
+        } else if (id == SB_CLICK_WINDOW) {
+            int windowId = in.readUnsignedByte();
+            int slot = in.readShort();
+            int button = in.readByte();
+            int actionNumber = in.readShort();
+            int mode = in.readByte();                        // 1.8: a byte (VarInt only from 1.9)
+            // Confirm (accept) first — the resync is the real correction.
+            send(connection, CB_CONFIRM_TRANSACTION, b -> {
+                b.writeByte(windowId);
+                b.writeShort(actionNumber);
+                b.writeBoolean(true);
+            });
+            if (listener != null) {
+                boolean modeOk = mode == 0 || mode == 1;
+                if (windowId == 0) {
+                    int coreSlot = modeOk ? JeInventoryCodec.modelIndex(slot) : -1;
+                    listener.onWindowClick(connection, coreSlot, button, modeOk && mode == 1);
+                } else if (windowId == openWindowId && openWindowId != 0) {
+                    listener.onChestClick(connection, modeOk ? slot : -1, button, modeOk && mode == 1);
+                }
+            }
+        } else if (id == SB_CLOSE_WINDOW) {
+            openWindowId = 0;
+            if (listener != null) listener.onWindowClose(connection);
+        } else if (id == SB_CREATIVE_ACTION) {
+            int slot = in.readShort();
+            int itemId = in.readShort();
+            int count = 1, damage = 0;
+            if (itemId != -1 && in.readableBytes() >= 3) {
+                count = in.readUnsignedByte();
+                damage = in.readShort() & 0xFFFF;
+            }
+            int state = itemId <= 0 ? 0 : Blocks.state(itemId, damage);
+            int coreSlot = JeInventoryCodec.modelIndex(slot);
+            if (coreSlot >= 0 && listener != null) {
+                listener.onCreativeSetSlot(connection, coreSlot, state, count);
+            }
         }
-        // SB_KEEP_ALIVE / SB_HELD_ITEM — accepted, nothing to do.
+        // SB_KEEP_ALIVE / SB_HELD_ITEM / SB_CONFIRM_TRANSACTION — accepted, nothing to do.
     }
 
     /** 1.8 block placement: face 255 is a use-item; otherwise place the held block at face offset. */
@@ -132,6 +170,11 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
         int face = in.readByte() & 0xFF;
         if (face == 255) {                                   // right-click with item (eat / draw bow)
             if (listener != null) listener.onUseItem(connection, true);
+            return;
+        }
+        // Right-click a block: if it's interactable (a chest) the core uses it (opens the window) and we
+        // suppress the placement the same packet would otherwise be.
+        if (listener != null && listener.onUseBlock(connection, posX(pos), posY(pos), posZ(pos))) {
             return;
         }
         int state = readHeldSlotState(in);                   // the 1.8 slot carries a legacy id + damage
@@ -292,6 +335,35 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
             b.writeShort(JeInventoryCodec.windowSlot(slot));
             JeInventoryCodec.writeSlot(b, state, count);
         });
+    }
+
+    @Override
+    public void setCursorItem(JedrockConnection c, int state, int count) {
+        // Set Slot to window -1 / slot -1 = the cursor (carried item).
+        send(c, CB_SET_SLOT, b -> {
+            b.writeByte(-1);
+            b.writeShort(-1);
+            JeInventoryCodec.writeSlot(b, state, count);
+        });
+    }
+
+    @Override
+    public void openContainer(JedrockConnection c, int windowId, String title, int slots) {
+        openWindowId = windowId;
+        // Open Window (0x2D): windowId, window type string, chat title, slot count.
+        send(c, CB_OPEN_WINDOW, b -> {
+            b.writeByte(windowId);
+            ByteBufUtils.writeString(b, "minecraft:chest");
+            ByteBufUtils.writeString(b, "{\"text\":\""
+                    + title.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}");
+            b.writeByte(slots);
+        });
+    }
+
+    @Override
+    public void setWindowItems(JedrockConnection c, int windowId, int[] states, int[] counts) {
+        // Window Items (0x30) — the core assembled the slots in wire order, so write the raw body.
+        send(c, CB_WINDOW_ITEMS, b -> b.writeBytes(JeInventoryCodec.encodeRaw(windowId, states, counts)));
     }
 
     /** 1.8 Player Abilities flags for a mode: creative → invuln|allowFly|creative; else no flight. */

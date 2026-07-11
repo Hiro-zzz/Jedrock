@@ -808,16 +808,21 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         });
     }
 
+    /** Bedrock's player window (id 0) holds only the 36 storage slots (0-8 hotbar / 9-35 main). */
+    private static final int PE_PLAYER_SLOTS = 36;
+
     @Override
     public void setInventory(int[] states, int[] counts) {
-        // Bedrock's player window (id 0) numbers slots 0-8 hotbar / 9-35 main — the same order as the
-        // core model, so it maps 1:1. ContainerSetContent replaces the whole window.
+        // Bedrock's player window (id 0) numbers slots 0-8 hotbar / 9-35 main — the same order as the core
+        // model's storage slots, so those map 1:1. The core's armor / off-hand slots (36-40) live in
+        // separate PE windows (not modelled here yet), so send only the first 36. ContainerSetContent
+        // replaces the whole window.
         sendGameBatch(b -> {
             ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_CONTENT);
             ByteBufUtils.writeVarInt(b, WINDOW_ID_PLAYER);
             ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);
-            ByteBufUtils.writeVarInt(b, states.length);
-            for (int i = 0; i < states.length; i++) {
+            ByteBufUtils.writeVarInt(b, PE_PLAYER_SLOTS);
+            for (int i = 0; i < PE_PLAYER_SLOTS; i++) {
                 McpeCodec.writeSlot(b, states[i], counts[i]);
             }
             ByteBufUtils.writeVarInt(b, 0); // hotbar-link count

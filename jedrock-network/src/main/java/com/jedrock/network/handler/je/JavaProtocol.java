@@ -59,6 +59,15 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Update one inventory slot (core index 0-8 hotbar / 9-35 main) for a live survival pickup / consume. */
     void setInventorySlot(JedrockConnection c, int slot, int state, int count);
 
+    /** Set the item shown on this client's own cursor while a window is open ({@code state} 0 = clear). */
+    void setCursorItem(JedrockConnection c, int state, int count);
+
+    /** Open a container window (chest) with {@code slots} container slots. */
+    void openContainer(JedrockConnection c, int windowId, String title, int slots);
+
+    /** Replace an open window's contents (already in that window's slot order). */
+    void setWindowItems(JedrockConnection c, int windowId, int[] states, int[] counts);
+
     /** Play another player's arm-swing animation. */
     void swingArm(JedrockConnection c, long entityId);
 

@@ -5,6 +5,8 @@ import com.jedrock.api.player.Player;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
+import com.jedrock.core.inventory.Container;
+import com.jedrock.core.inventory.Cursor;
 import com.jedrock.core.world.CoreWorld;
 import com.jedrock.utils.text.ChatText;
 
@@ -64,70 +66,85 @@ public final class CorePlayer implements Player {
     // client has the creative menu). Each slot is a canonical (id<<4)|meta state + a count. Only ever
     // touched from the owning player's own network thread (their edits), so it needs no locking.
 
-    private static final int INV_SLOTS = 36;
-    private static final int MAX_STACK = 64;
-    private final int[] invStates = new int[INV_SLOTS];
-    private final int[] invCounts = new int[INV_SLOTS];
+    /**
+     * Player inventory layout (core slots): 0-8 hotbar, 9-35 main, 36-39 armor (helmet/chest/legs/boots),
+     * 40 off-hand. Mining and pickups only ever fill the 36 <em>storage</em> slots (0-35); armor and the
+     * off-hand are set only by an inventory move (a window click).
+     */
+    public static final int STORAGE_SLOTS = 36;
+    public static final int INV_SLOTS = 41;
+    private final Container inventory = new Container(INV_SLOTS);
 
-    /** Canonical state per inventory slot (index 0-8 hotbar, 9-35 main); 0 = empty. Read-only. */
-    public int[] inventoryStates() {
-        return invStates;
+    /** The full 41-slot player inventory (hotbar / main / armor / off-hand). */
+    public Container getInventory() {
+        return inventory;
     }
 
-    /** Item count per inventory slot, parallel to {@link #inventoryStates()}. Read-only. */
+    /** The item this player is carrying on the cursor while a window is open (empty when none). */
+    private final Cursor cursor = new Cursor();
+
+    public Cursor getCursor() {
+        return cursor;
+    }
+
+    // ===== Open container (a chest) =====
+
+    private int openWindowId = 0;      // 0 = only the player's own inventory is open
+    private Container openContainer;   // the chest container being viewed (null when none)
+
+    public int getOpenWindowId() {
+        return openWindowId;
+    }
+
+    public Container getOpenContainer() {
+        return openContainer;
+    }
+
+    public boolean hasContainerOpen() {
+        return openContainer != null;
+    }
+
+    public void openContainer(int windowId, Container container) {
+        this.openWindowId = windowId;
+        this.openContainer = container;
+    }
+
+    public void closeContainer() {
+        this.openWindowId = 0;
+        this.openContainer = null;
+    }
+
+    /** Canonical state per inventory slot (0-8 hotbar, 9-35 main, 36-39 armor, 40 off-hand); 0 = empty. */
+    public int[] inventoryStates() {
+        return inventory.states();
+    }
+
+    /** Item count per inventory slot, parallel to {@link #inventoryStates()}. */
     public int[] inventoryCounts() {
-        return invCounts;
+        return inventory.counts();
     }
 
     /**
-     * Add one {@code state} to the inventory, stacking onto a matching slot (up to {@link #MAX_STACK})
-     * or filling the first empty one. @return the affected slot index, or -1 if it didn't fit (so the
-     * caller can push just that slot).
+     * Add one {@code state} to a storage slot (0-35), stacking onto a match or filling the first empty.
+     * @return the affected slot index, or -1 if it didn't fit (so the caller can push just that slot).
      */
     public int giveItem(int state) {
-        if (state == 0) {
-            return -1;
-        }
-        for (int i = 0; i < INV_SLOTS; i++) {
-            if (invStates[i] == state && invCounts[i] < MAX_STACK) {
-                invCounts[i]++;
-                return i;
-            }
-        }
-        for (int i = 0; i < INV_SLOTS; i++) {
-            if (invStates[i] == 0) {
-                invStates[i] = state;
-                invCounts[i] = 1;
-                return i;
-            }
-        }
-        return -1; // inventory full — drop it (no item entities in the illusion)
+        return inventory.give(state, 0, STORAGE_SLOTS);
     }
 
-    /** Remove one {@code state} from the inventory (a survival placement). @return the affected slot, or -1. */
+    /** Remove one {@code state} from a storage slot (a survival placement). @return the affected slot, or -1. */
     public int takeItem(int state) {
-        if (state == 0) {
-            return -1;
-        }
-        for (int i = 0; i < INV_SLOTS; i++) {
-            if (invStates[i] == state && invCounts[i] > 0) {
-                if (--invCounts[i] == 0) {
-                    invStates[i] = 0;
-                }
-                return i;
-            }
-        }
-        return -1;
+        return inventory.take(state, 0, STORAGE_SLOTS);
     }
 
     /** Push one inventory slot to the client (a live pickup / consume — refreshes the hotbar HUD). */
     public void syncSlot(int slot) {
-        connection.setInventorySlot(slot, invStates[slot], invCounts[slot]);
+        connection.setInventorySlot(slot, inventory.stateAt(slot), inventory.countAt(slot));
     }
 
     /** Push the whole inventory to the client (a reset — join, respawn, game-mode switch). */
     public void syncInventory() {
-        connection.setInventory(invStates, invCounts);
+        connection.setInventory(inventory.states(), inventory.counts());
     }
 
     // ===== Health (server-authoritative; the client only reports damage events) =====

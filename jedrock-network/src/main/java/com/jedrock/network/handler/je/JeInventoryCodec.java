@@ -30,11 +30,32 @@ final class JeInventoryCodec {
         buf.writeShort(totalSlots);
         for (int w = 0; w < totalSlots; w++) {
             int model = modelIndex(w);
-            if (model < 0) {
-                writeSlot(buf, 0, 0);  // crafting / armor / off-hand — empty
+            if (model < 0 || model >= states.length) {
+                writeSlot(buf, 0, 0);  // crafting output/grid, or a slot the model doesn't back — empty
             } else {
                 writeSlot(buf, states[model], counts[model]);
             }
+        }
+    }
+
+    /**
+     * Encode a Window Items body for an arbitrary window whose slots are <em>already</em> in wire order
+     * (the core assembles a chest window as its 27 container slots + the player's 27 main + 9 hotbar).
+     * Unlike {@link #encode}, this applies no core→window remapping — it writes the array as given.
+     */
+    static byte[] encodeRaw(int windowId, int[] states, int[] counts) {
+        ByteBuf buf = Unpooled.buffer();
+        try {
+            buf.writeByte(windowId);
+            buf.writeShort(states.length);
+            for (int i = 0; i < states.length; i++) {
+                writeSlot(buf, states[i], counts[i]);
+            }
+            byte[] out = new byte[buf.readableBytes()];
+            buf.readBytes(out);
+            return out;
+        } finally {
+            buf.release();
         }
     }
 
@@ -51,20 +72,39 @@ final class JeInventoryCodec {
         }
     }
 
-    /** Core inventory index (0-35) for a Java window-0 slot, or -1 if that window slot isn't backed. */
-    private static int modelIndex(int windowSlot) {
+    /**
+     * Core inventory index for a Java window-0 slot, or -1 if that window slot isn't backed. Window-0
+     * layout: 0 crafting output, 1-4 crafting grid (both unbacked), 5-8 armor, 9-35 main, 36-44 hotbar,
+     * 45 off-hand. Core layout: 0-8 hotbar, 9-35 main, 36-39 armor, 40 off-hand.
+     */
+    static int modelIndex(int windowSlot) {
         if (windowSlot >= 36 && windowSlot <= 44) {
             return windowSlot - 36;    // hotbar → core 0-8
         }
         if (windowSlot >= 9 && windowSlot <= 35) {
             return windowSlot;         // main inventory → core 9-35 (same index)
         }
-        return -1;
+        if (windowSlot >= 5 && windowSlot <= 8) {
+            return 36 + (windowSlot - 5); // armor → core 36-39
+        }
+        if (windowSlot == 45) {
+            return 40;                 // off-hand → core 40 (1.12.2 only)
+        }
+        return -1;                     // crafting output / grid — unbacked
     }
 
-    /** Java window-0 slot index for a core inventory slot (0-8 hotbar → 36-44; 9-35 main → 9-35). */
+    /** Java window-0 slot index for a core inventory slot (inverse of {@link #modelIndex}). */
     static int windowSlot(int coreSlot) {
-        return coreSlot < 9 ? coreSlot + 36 : coreSlot;
+        if (coreSlot < 9) {
+            return coreSlot + 36;      // hotbar → 36-44
+        }
+        if (coreSlot < 36) {
+            return coreSlot;           // main → 9-35
+        }
+        if (coreSlot < 40) {
+            return 5 + (coreSlot - 36); // armor → 5-8
+        }
+        return 45;                     // off-hand → 45
     }
 
     /** One JE Slot: {@code short id} (-1 = empty), else {@code byte count, short damage, byte 0} (no NBT). */

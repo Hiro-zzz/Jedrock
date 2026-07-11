@@ -1,5 +1,7 @@
 package com.jedrock.core.world;
 
+import com.jedrock.core.inventory.Container;
+
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -9,7 +11,9 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.Inflater;
@@ -42,6 +46,11 @@ import java.util.zip.InflaterInputStream;
  *   repeat biomeChunkCount:
  *     int   chunkX, chunkZ
  *     byte[256] biome ids (indexed (z&lt;&lt;4)|x)
+ *   int    containerCount           (v3+: chest contents)
+ *   repeat containerCount:
+ *     long  position (packed x,y,z)
+ *     byte  slotCount
+ *     repeat slotCount: short state (id&lt;&lt;4|meta), byte count
  * </pre>
  *
  * <p>Only non-null sections are stored, so an all-air world costs one {@code sectionCount = 0}. DEFLATE
@@ -51,8 +60,9 @@ import java.util.zip.InflaterInputStream;
  */
 public final class LevelIO {
 
-    /** Current on-disk format version; bump on any incompatible layout change. (v2 added the biome map.) */
-    public static final int FORMAT_VERSION = 2;
+    /** Current on-disk format version; bump on any incompatible layout change. (v2 added the biome map,
+     *  v3 the chest container contents.) */
+    public static final int FORMAT_VERSION = 3;
 
     private static final byte[] MAGIC = {'J', 'D', 'W', 'L'};
     private static final int SECTION_SHORTS = 4096;
@@ -66,8 +76,8 @@ public final class LevelIO {
      * Creates the parent directory if needed. A concurrent edit during the save is a benign torn read
      * of that one section (same tolerance as {@link BlockStorage#getId}).
      */
-    public static void save(Path file, LevelData meta, BlockStorage storage, BiomeStorage biomes)
-            throws IOException {
+    public static void save(Path file, LevelData meta, BlockStorage storage, BiomeStorage biomes,
+                            Map<Long, Container> containers) throws IOException {
         Path parent = file.getParent();
         if (parent != null) {
             Files.createDirectories(parent);
@@ -116,6 +126,24 @@ public final class LevelIO {
                     body.writeInt(e.chunkZ());
                     body.write(e.data(), 0, BIOME_BYTES);
                 }
+
+                // Containers (chests): only non-empty ones — an empty chest is recreated on open.
+                List<Map.Entry<Long, Container>> chests = new ArrayList<>();
+                for (Map.Entry<Long, Container> e : containers.entrySet()) {
+                    if (!e.getValue().isAllEmpty()) {
+                        chests.add(e);
+                    }
+                }
+                body.writeInt(chests.size());
+                for (Map.Entry<Long, Container> e : chests) {
+                    Container c = e.getValue();
+                    body.writeLong(e.getKey());
+                    body.writeByte(c.size());
+                    for (int i = 0; i < c.size(); i++) {
+                        body.writeShort(c.stateAt(i));
+                        body.writeByte(c.countAt(i));
+                    }
+                }
             } finally {
                 deflater.end();
             }
@@ -131,7 +159,8 @@ public final class LevelIO {
      * @throws IOException if the file is missing, truncated, or not a Jedrock level ({@link #FORMAT_VERSION}
      *                     mismatch included).
      */
-    public static LevelData load(Path file, BlockStorage storage, BiomeStorage biomes) throws IOException {
+    public static LevelData load(Path file, BlockStorage storage, BiomeStorage biomes,
+                                 Map<Long, Container> containers) throws IOException {
         try (InputStream raw = Files.newInputStream(file)) {
             // Header: read straight off the raw stream (DataInputStream does no read-ahead, so the
             // body's DEFLATE stream that follows is left intact for the inflater below).
@@ -142,9 +171,11 @@ public final class LevelIO {
                 throw new IOException("Not a Jedrock level file (bad magic)");
             }
             int version = header.readInt();
-            if (version != FORMAT_VERSION) {
+            // Load v2 (no chests) as well as the current v3, so an existing world upgrades in place — it
+            // loads fine, then the next save rewrites it as v3. Save always writes {@link #FORMAT_VERSION}.
+            if (version != 2 && version != FORMAT_VERSION) {
                 throw new IOException("Unsupported level format version " + version
-                        + " (expected " + FORMAT_VERSION + ")");
+                        + " (expected 2 or " + FORMAT_VERSION + ")");
             }
             LevelData meta = new LevelData(
                     version,
@@ -185,6 +216,25 @@ public final class LevelIO {
                     byte[] data = new byte[BIOME_BYTES];
                     body.readFully(data);
                     biomes.putChunk(chunkX, chunkZ, data);
+                }
+
+                if (version < 3) {
+                    return meta; // v2 has no container section — nothing more to read
+                }
+                int containerCount = body.readInt();
+                if (containerCount < 0) {
+                    throw new IOException("Corrupt level: negative container count " + containerCount);
+                }
+                for (int c = 0; c < containerCount; c++) {
+                    long pos = body.readLong();
+                    int slots = body.readUnsignedByte();
+                    Container container = new Container(slots);
+                    for (int i = 0; i < slots; i++) {
+                        int state = body.readUnsignedShort();
+                        int count = body.readUnsignedByte();
+                        container.set(i, state, count);
+                    }
+                    containers.put(pos, container);
                 }
             } finally {
                 inflater.end();

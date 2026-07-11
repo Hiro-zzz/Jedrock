@@ -11,6 +11,7 @@ import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
+import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.Dimension;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
@@ -20,6 +21,9 @@ import com.jedrock.core.command.HelpCommand;
 import com.jedrock.core.command.SpawnCommand;
 import com.jedrock.core.command.TeleportCommand;
 import com.jedrock.core.config.JedrockConfig;
+import com.jedrock.core.inventory.Container;
+import com.jedrock.core.inventory.Cursor;
+import com.jedrock.core.inventory.InventoryClick;
 import com.jedrock.core.player.CorePlayer;
 import com.jedrock.core.player.PlayerRegistry;
 import com.jedrock.core.world.CoreWorld;
@@ -562,6 +566,10 @@ public class JedrockServer implements Server, ConnectionListener {
         // the server stays authoritative). {@code state} is the canonical (id << 4 | meta) value;
         // each connection serializes it in its own protocol.
         defaultWorld.setBlockId(x, y, z, state);
+        // A broken chest drops its container (contents lost — no item entities in the illusion).
+        if (state == Blocks.AIR && Blocks.idOf(previous) == Blocks.CHEST) {
+            defaultWorld.removeChestContainer(x, y, z);
+        }
         for (Player p : playerRegistry.all()) {
             p.getConnection().sendBlockChange(x, y, z, state);
         }
@@ -684,6 +692,147 @@ public class JedrockServer implements Server, ConnectionListener {
             if (other != player) {
                 other.getConnection().swingArm(entityId);
             }
+        }
+    }
+
+    @Override
+    public void onWindowClick(PlayerConnection connection, int coreSlot, int button, boolean shift) {
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player == null || player.getGameMode() != GameMode.SURVIVAL) {
+            return; // creative manages its own inventory client-side — don't apply or resync over it
+        }
+        Container inv = player.getInventory();
+        Cursor cur = player.getCursor();
+        // coreSlot < 0 = an unbacked slot (crafting grid) or a click mode we don't model — resync only.
+        if (coreSlot >= 0 && coreSlot < inv.size()) {
+            if (shift) {
+                // Quick-move to the "other" region: hotbar↔main, and armor/off-hand back into storage.
+                int from, to;
+                if (coreSlot < 9) { from = 9; to = 36; }        // hotbar → main
+                else if (coreSlot < 36) { from = 0; to = 9; }   // main → hotbar
+                else { from = 0; to = 36; }                     // armor / off-hand → storage
+                InventoryClick.shift(inv, coreSlot, from, to);
+            } else {
+                InventoryClick.normal(inv, cur, coreSlot, button == 1);
+            }
+        }
+        // Server is authoritative: resync the whole window + cursor, overriding any client misprediction.
+        player.syncInventory();
+        connection.setCursorItem(cur.state(), cur.count());
+    }
+
+    @Override
+    public void onWindowClose(PlayerConnection connection) {
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player == null) {
+            return;
+        }
+        // In creative, only intervene when closing a chest — closing the creative menu must not disturb it.
+        if (player.getGameMode() != GameMode.SURVIVAL && !player.hasContainerOpen()) {
+            return;
+        }
+        player.closeContainer(); // a chest, if any, is no longer open
+        Cursor cur = player.getCursor();
+        // Return any carried item to storage; whatever doesn't fit is lost (no item entities to drop).
+        while (!cur.isEmpty() && player.giveItem(cur.state()) >= 0) {
+            cur.set(cur.state(), cur.count() - 1);
+        }
+        cur.clear();
+        player.syncInventory();
+        connection.setCursorItem(0, 0);
+    }
+
+    /** Window id used for a player's open chest (a player has at most one container open at a time). */
+    private static final int CHEST_WINDOW_ID = 1;
+
+    @Override
+    public boolean onUseBlock(PlayerConnection connection, int x, int y, int z) {
+        if (Blocks.idOf(defaultWorld.getBlockId(x, y, z)) != Blocks.CHEST) {
+            return false; // not interactable — let the caller place the held block
+        }
+        // A chest: consume the right-click (so no block is placed on it) and open it. Works in creative
+        // too — the creative inventory is mirrored server-side via onCreativeSetSlot, so the chest's
+        // player-inventory half is tracked.
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player != null) {
+            Container chest = defaultWorld.getChestContainer(x, y, z);
+            player.openContainer(CHEST_WINDOW_ID, chest);
+            connection.openContainer(CHEST_WINDOW_ID, "Chest", 27);
+            resyncChest(player, connection);
+        }
+        return true;
+    }
+
+    @Override
+    public void onChestClick(PlayerConnection connection, int windowSlot, int button, boolean shift) {
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player == null || !player.hasContainerOpen()) {
+            return; // works in creative too — the chest window is server-authoritative in both modes
+        }
+        Container chest = player.getOpenContainer();
+        Container inv = player.getInventory();
+        // Chest-window layout: 0-26 the chest, 27-53 the player's main (core 9-35), 54-62 the hotbar (0-8).
+        boolean inChest = windowSlot >= 0 && windowSlot < 27;
+        Container target;
+        int index;
+        if (inChest) {
+            target = chest; index = windowSlot;
+        } else if (windowSlot >= 27 && windowSlot < 54) {
+            target = inv; index = 9 + (windowSlot - 27);
+        } else if (windowSlot >= 54 && windowSlot < 63) {
+            target = inv; index = windowSlot - 54;
+        } else {
+            target = null; index = -1; // outside / unmodelled — resync only
+        }
+        if (target != null) {
+            if (shift) {
+                // Quick-move across the two containers: chest → player storage, or player → chest.
+                if (inChest) {
+                    InventoryClick.shiftTo(chest, index, inv, 0, 36);
+                } else {
+                    InventoryClick.shiftTo(inv, index, chest, 0, 27);
+                }
+            } else {
+                InventoryClick.normal(target, player.getCursor(), index, button == 1);
+            }
+            defaultWorld.markDirty(); // a chest edit must be persisted by autosave / shutdown
+        }
+        resyncChest(player, connection);
+    }
+
+    /** Push the whole open chest window (chest slots + the player's main + hotbar) and the cursor. */
+    private void resyncChest(CorePlayer player, PlayerConnection connection) {
+        Container chest = player.getOpenContainer();
+        int[] ps = player.inventoryStates();
+        int[] pc = player.inventoryCounts();
+        int total = 27 + 36;
+        int[] states = new int[total];
+        int[] counts = new int[total];
+        for (int i = 0; i < 27; i++) {                 // chest
+            states[i] = chest.stateAt(i);
+            counts[i] = chest.countAt(i);
+        }
+        for (int i = 0; i < 27; i++) {                 // player main (core 9-35)
+            states[27 + i] = ps[9 + i];
+            counts[27 + i] = pc[9 + i];
+        }
+        for (int i = 0; i < 9; i++) {                  // player hotbar (core 0-8)
+            states[54 + i] = ps[i];
+            counts[54 + i] = pc[i];
+        }
+        connection.setWindowItems(player.getOpenWindowId(), states, counts);
+        connection.setCursorItem(player.getCursor().state(), player.getCursor().count());
+    }
+
+    @Override
+    public void onCreativeSetSlot(PlayerConnection connection, int coreSlot, int state, int count) {
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player == null || player.getGameMode() != GameMode.CREATIVE) {
+            return; // only a creative client sets slots this way — ignore an unexpected survival sender
+        }
+        Container inv = player.getInventory();
+        if (coreSlot >= 0 && coreSlot < inv.size()) {
+            inv.set(coreSlot, state, count); // mirror only; the creative client already shows it
         }
     }
 

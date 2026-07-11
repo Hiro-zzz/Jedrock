@@ -1,17 +1,21 @@
 package com.jedrock.core.world;
 
+import com.jedrock.api.world.Blocks;
+import com.jedrock.core.inventory.Container;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Pins the compact level-file format: metadata + {@link BlockStorage} sections + biomes round-trip. */
+/** Pins the compact level-file format: metadata + {@link BlockStorage} sections + biomes + chests round-trip. */
 class LevelIOTest {
 
     private static LevelData meta(long seed, boolean generated) {
@@ -19,24 +23,29 @@ class LevelIOTest {
                 0.5, 63.0, 0.5, 90.0f, 0.0f);
     }
 
+    /** A fresh, empty chest map — most tests don't exercise containers. */
+    private static Map<Long, Container> chests() {
+        return new HashMap<>();
+    }
+
     @Test
     void metadataRoundTrips(@TempDir Path dir) throws IOException {
         Path file = dir.resolve("level.jdw");
         LevelData in = meta(0xABCDEF12L, true);
-        LevelIO.save(file, in, new BlockStorage(), new BiomeStorage());
+        LevelIO.save(file, in, new BlockStorage(), new BiomeStorage(), chests());
 
-        LevelData out = LevelIO.load(file, new BlockStorage(), new BiomeStorage());
+        LevelData out = LevelIO.load(file, new BlockStorage(), new BiomeStorage(), chests());
         assertEquals(in, out);
     }
 
     @Test
     void emptyWorldRoundTrips(@TempDir Path dir) throws IOException {
         Path file = dir.resolve("level.jdw");
-        LevelIO.save(file, meta(1L, false), new BlockStorage(), new BiomeStorage());
+        LevelIO.save(file, meta(1L, false), new BlockStorage(), new BiomeStorage(), chests());
 
         BlockStorage loaded = new BlockStorage();
         BiomeStorage biomes = new BiomeStorage();
-        LevelIO.load(file, loaded, biomes);
+        LevelIO.load(file, loaded, biomes, chests());
         assertEquals(0, loaded.loadedSections());
         assertEquals(0, biomes.loadedChunks());
     }
@@ -53,10 +62,10 @@ class LevelIOTest {
         int sectionsBefore = src.loadedSections();
 
         Path file = dir.resolve("level.jdw");
-        LevelIO.save(file, meta(7L, false), src, new BiomeStorage());
+        LevelIO.save(file, meta(7L, false), src, new BiomeStorage(), chests());
 
         BlockStorage dst = new BlockStorage();
-        LevelIO.load(file, dst, new BiomeStorage());
+        LevelIO.load(file, dst, new BiomeStorage(), chests());
 
         assertEquals(sectionsBefore, dst.loadedSections(), "section count preserved");
         assertEquals(1, dst.getId(0, 0, 0));
@@ -76,10 +85,10 @@ class LevelIOTest {
         src.putChunk(2, -3, chunkA);
 
         Path file = dir.resolve("level.jdw");
-        LevelIO.save(file, meta(7L, true), new BlockStorage(), src);
+        LevelIO.save(file, meta(7L, true), new BlockStorage(), src, chests());
 
         BiomeStorage dst = new BiomeStorage();
-        LevelIO.load(file, new BlockStorage(), dst);
+        LevelIO.load(file, new BlockStorage(), dst, chests());
 
         assertEquals(1, dst.loadedChunks());
         // Column (x=2*16+0, z=-3*16+0) → biome 4; the flagged column → 35; an absent chunk → default.
@@ -89,21 +98,46 @@ class LevelIOTest {
     }
 
     @Test
+    void chestContentsRoundTrip(@TempDir Path dir) throws IOException {
+        Map<Long, Container> src = chests();
+        Container chest = new Container(27);
+        chest.set(0, Blocks.state(Blocks.STONE, 0), 64);
+        chest.set(5, Blocks.state(Blocks.WOOL, 14), 3);
+        long pos = 0x1234ABCDL;
+        src.put(pos, chest);
+        src.put(999L, new Container(27)); // an empty container must NOT be persisted
+
+        Path file = dir.resolve("level.jdw");
+        LevelIO.save(file, meta(1L, true), new BlockStorage(), new BiomeStorage(), src);
+
+        Map<Long, Container> dst = chests();
+        LevelIO.load(file, new BlockStorage(), new BiomeStorage(), dst);
+
+        assertEquals(1, dst.size(), "only the non-empty chest is stored");
+        Container out = dst.get(pos);
+        assertEquals(Blocks.state(Blocks.STONE, 0), out.stateAt(0));
+        assertEquals(64, out.countAt(0));
+        assertEquals(Blocks.state(Blocks.WOOL, 14), out.stateAt(5));
+        assertEquals(3, out.countAt(5));
+        assertTrue(out.isEmpty(1), "untouched slot stays empty");
+    }
+
+    @Test
     void saveIsAtomicAndOverwrites(@TempDir Path dir) throws IOException {
         Path file = dir.resolve("level.jdw");
         BlockStorage first = new BlockStorage();
         first.setId(0, 0, 0, 5);
-        LevelIO.save(file, meta(1L, false), first, new BiomeStorage());
+        LevelIO.save(file, meta(1L, false), first, new BiomeStorage(), chests());
         assertTrue(Files.isRegularFile(file));
 
         // Overwrite with a different world; no leftover .tmp, new content wins.
         BlockStorage second = new BlockStorage();
         second.setId(0, 0, 0, 9);
-        LevelIO.save(file, meta(2L, true), second, new BiomeStorage());
+        LevelIO.save(file, meta(2L, true), second, new BiomeStorage(), chests());
         assertTrue(Files.notExists(file.resolveSibling("level.jdw.tmp")), "temp file cleaned up");
 
         BlockStorage loaded = new BlockStorage();
-        LevelData m = LevelIO.load(file, loaded, new BiomeStorage());
+        LevelData m = LevelIO.load(file, loaded, new BiomeStorage(), chests());
         assertEquals(2L, m.seed());
         assertEquals(9, loaded.getId(0, 0, 0));
     }
@@ -112,6 +146,7 @@ class LevelIOTest {
     void rejectsNonLevelFile(@TempDir Path dir) throws IOException {
         Path file = dir.resolve("garbage.jdw");
         Files.write(file, new byte[]{1, 2, 3, 4, 5, 6, 7, 8});
-        assertThrows(IOException.class, () -> LevelIO.load(file, new BlockStorage(), new BiomeStorage()));
+        assertThrows(IOException.class,
+                () -> LevelIO.load(file, new BlockStorage(), new BiomeStorage(), chests()));
     }
 }

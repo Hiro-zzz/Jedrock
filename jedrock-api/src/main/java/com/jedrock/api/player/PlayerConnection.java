@@ -97,6 +97,28 @@ public interface PlayerConnection {
     void swingArm(long entityId);
 
     /**
+     * Set the item shown on this client's own cursor (the stack "carried" on the mouse while a window is
+     * open); {@code state == 0} clears it. Kept in sync as the server applies window clicks. A connection
+     * with no cursor concept may ignore it.
+     */
+    default void setCursorItem(int state, int count) {}
+
+    /**
+     * Open a container window (a chest) on this client: {@code windowId} identifies it for later slot
+     * updates and clicks, {@code title} is the shown name, {@code slots} the container's slot count (27
+     * for a chest). Follow with {@link #setWindowItems} to fill it. A connection with no window concept
+     * may ignore it.
+     */
+    default void openContainer(int windowId, String title, int slots) {}
+
+    /**
+     * Replace the contents of an open window ({@code windowId}) with {@code states} / {@code counts},
+     * already ordered in that window's slot order (for a chest: the 27 container slots, then the player's
+     * 27 main + 9 hotbar slots). Each entry is a canonical {@code (id << 4) | meta} state (0 = empty).
+     */
+    default void setWindowItems(int windowId, int[] states, int[] counts) {}
+
+    /**
      * Play the "hurt" animation on another player's avatar (the red damage flash + hurt sound) so a hit
      * is visible to everyone watching. Sent for any damage source (PvP, fall, void). The victim's own
      * client shows the hit from its dropping health bar, so this only needs relaying to other clients. A

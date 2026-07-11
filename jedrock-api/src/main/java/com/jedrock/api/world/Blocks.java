@@ -24,6 +24,7 @@ public final class Blocks {
     public static final int LOG = 17;
     public static final int LEAVES = 18;
     public static final int GLASS = 20;
+    public static final int CHEST = 54;  // a container block — right-click opens its 27-slot inventory
 
     /** Maximum numeric ID that safely fits into a single byte for the legacy protocol chunk matrix. */
     public static final int MAX_LEGACY_ID = 255;

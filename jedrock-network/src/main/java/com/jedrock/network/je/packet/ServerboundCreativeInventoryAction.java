@@ -17,6 +17,8 @@ public final class ServerboundCreativeInventoryAction implements ServerboundPack
     public int itemId;
     /** Item damage = block metadata (variant), 0 when absent. */
     public int damage;
+    /** Stack size the creative player set (1 for an empty / count-less slot). */
+    public int count = 1;
 
     public static ServerboundCreativeInventoryAction fromBuffer(ByteBuf buf) {
         ServerboundCreativeInventoryAction p = new ServerboundCreativeInventoryAction();
@@ -24,7 +26,7 @@ public final class ServerboundCreativeInventoryAction implements ServerboundPack
         p.itemId = buf.readShort(); // first field of the Slot; -1 = empty
         // A present item is followed by count (byte) + damage (short) + NBT; damage is the meta.
         if (p.itemId != -1 && buf.readableBytes() >= 3) {
-            buf.readByte();                     // item count — unused
+            p.count = buf.readUnsignedByte();    // item count
             p.damage = buf.readShort() & 0xFFFF; // damage = block metadata
         }
         return p;

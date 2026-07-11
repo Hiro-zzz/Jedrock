@@ -146,9 +146,17 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   flash — to onlookers on all four editions. Death is a **silent instant respawn** at spawn (no death
   screen) on Java and 0.14; the 1.1.5 client insists on its own death screen for a client-side death, so
   its Respawn button is answered with a proper respawn handshake.
+- ✅ **Interactive inventories and chests (Java).** The player inventory is a real, server-authoritative
+  container — open it and drag / stack / split / shift-click items (left, right and shift clicks), with
+  armor and off-hand slots. **Chests** are a placeable block (right-click to open) backed by a 27-slot
+  container: move items in and out, shift to quick-transfer, in survival <em>and</em> creative (the
+  creative inventory is mirrored server-side so the chest's player half is tracked). Chest contents
+  **persist** in the level file (format v3, back-compatible with v2 worlds). Wired for JE 1.12.2 and 1.8;
+  the Bedrock port is next. True to the model, the server only <em>stores and moves</em> items — no
+  crafting or smelting simulation, no item entities (a dropped / overflow item simply vanishes).
 
-Not yet: cross-edition skin fidelity (a signed-texture limit, see above), knockback (deliberately — the
-server simulates no physics), scripting. See [Roadmap](#roadmap).
+Not yet: chests/inventory interaction on Bedrock, cross-edition skin fidelity (a signed-texture limit,
+see above), knockback (deliberately — the server simulates no physics), scripting. See [Roadmap](#roadmap).
 
 ---
 
@@ -368,20 +376,49 @@ and MCPE compression — no client required.
 
 ## Roadmap
 
+Jedrock isn't chasing a faithful simulator — it's a cross-edition **illusionist** and a **platform to
+script illusions**. So the roadmap grows three things: the *content* the server can show cheaply, the
+*tools* to author it, and the *scripting layer* that drives it. Anything that smells like world
+simulation stays out (see non-goals).
+
 - **Finite "bake once" world — landed.** A bounded (48×48-chunk) world generated once on first run
   then frozen (all generation disabled, served as static decoration): persistence, the terrain bake,
   biomes, tree/lake/cave decoration and the edge wall are all in. Optional follow-ups: per-biome ground
   blocks (e.g. desert sand), configurable bounds, and disk-paged chunks if the world ever grows past a
   comfortable in-RAM size (48×48 is tens of MB, so this isn't pressing).
-- **Held-item / equipment relay** — show what each player holds in-hand on their avatar; this also
-  makes the item-use pose render as the specific eat / drink / block animation, and unblocks a
-  Bedrock-initiated item-use signal.
-- **More animations** — sneak, sprint, arm swing, item-use and the hurt flash relay today; a death
-  animation is intentionally skipped (a silent instant respawn is the model), and elytra gliding needs a
-  clean cross-edition stop signal.
-- **Sharper judge** — the blind judge lands today (reach + move-delta); per-axis limits, a knockback
-  allowance and interaction ray-casts would tighten it without turning into a physics engine.
-- **Scripting** — embedded JS (GraalJS) plugins with hot reload.
+- **Content breadth — blocks, items, tools.** The world is just ids, so growing the block palette is
+  nearly free. The near-term piece is **held-item / equipment relay** — show what a player holds and
+  wears on their avatar, which also renders the specific item-use animation (eat / drink / draw bow) and
+  unblocks a Bedrock-initiated item-use. "Tools" here is *content plus behaviour*, not simulated mining:
+  the client already times the break, so a script decides what an item actually does.
+- **Commands — a real framework.** The built-ins (`/help`, `/gamemode`, `/tp`, `/spawn`) prove the
+  cross-edition path (Java sends `/…` as chat, Bedrock gets an `AvailableCommands` manifest); next is a
+  proper framework — typed arguments, tab-completion, permissions and a clean registration API — authored
+  once and rendered to each edition.
+- **The platform API — the centrepiece.** Turn `api` from a thin contract into a real extension surface:
+  a broader, cancellable **event model** (join / quit / chat / move / block-edit / attack / …) and an
+  embedded **script plugin loader** (GraalJS) with hot reload, so custom gameplay lives in fast,
+  reloadable scripts rather than the compiled core. This is the "scriptable API" pillar going from
+  *planned* to *real* — the whole point of the platform.
+- **Puppet entities — mobs, NPCs, holograms.** The illusionist take on mobs: a mob is a
+  **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays its
+  metadata cross-edition, and that's all. Out of the box it's a *dummy*: it stands where placed, a
+  decoration like the world, costing nothing. Its life comes from the **API** — a script drives its
+  movement, reacts to events (a player nears / hits / interacts with it) and decides its "health" and
+  drops, so a mob *appears* alive without the server ever running AI or pathfinding. The same primitive is
+  an NPC (named, interactable) or a hologram (a floating name, no body). It reuses the avatar machinery
+  that already spawns and moves players cross-edition; the real work is a **canonical entity-type registry**
+  mapped to each edition's ids — the block palette's counterpart, the two-headed monster's entity tax.
+- **The illusion toolkit.** Pure server→client render instructions, zero simulation — the most on-brand
+  work there is: titles / action bars, scoreboards, boss bars, particles and sounds, and Bedrock forms /
+  UI. Each is just "tell the client to show X," cross-edition — exactly what a plugin author reaches for,
+  and it never costs a tick of simulation.
+- **Sharper judge.** The blind judge lands today (reach + move-delta); per-axis limits and interaction
+  ray-casts would tighten it without turning into a physics engine.
+- **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
+  runtime world simulation or physics, no 1.13+ flattening. Knockback is deliberately excluded for the
+  same reason — the server simulates no physics. Custom logic that wants any of these lives in a script
+  as an *illusion*, not in the core.
 
 ---
 

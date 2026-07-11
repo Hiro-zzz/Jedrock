@@ -29,6 +29,7 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     // inbound), used to know which block a placement should place.
     private int heldSlot = 0;
     private final int[] hotbarState = new int[9]; // canonical states (id<<4|meta); 0 = empty
+    private int openWindowId = 0;                  // a container (chest) window this client has open; 0 = none
 
     // ===== Inbound state machine (LOGIN + PLAY) =====
 
@@ -123,15 +124,27 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
             if (h.slot >= 0 && h.slot < 9) heldSlot = h.slot;
         } else if (id == ServerboundCreativeInventoryAction.PACKET_ID) {
             ServerboundCreativeInventoryAction c = lazy.materialize(ServerboundCreativeInventoryAction::fromBuffer);
+            int state = c.itemId <= 0 ? 0 : Blocks.state(c.itemId, c.damage);
             if (c.slot >= 36 && c.slot <= 44) {
-                hotbarState[c.slot - 36] = c.itemId <= 0 ? 0 : Blocks.state(c.itemId, c.damage);
+                hotbarState[c.slot - 36] = state;         // held-item view, for placement
+            }
+            // Mirror the creative slot into the core inventory too, so an open chest's player half is right.
+            int coreSlot = JeInventoryCodec.modelIndex(c.slot);
+            if (coreSlot >= 0 && connection.getListener() != null) {
+                connection.getListener().onCreativeSetSlot(connection, coreSlot, state, c.count);
             }
         } else if (id == ServerboundPlayerBlockPlacement.PACKET_ID) {
             ServerboundPlayerBlockPlacement place = lazy.materialize(ServerboundPlayerBlockPlacement::fromBuffer);
-            int state = hotbarState[heldSlot];
-            if (Blocks.isKnown(Blocks.idOf(state)) && state != Blocks.AIR && connection.getListener() != null) {
-                connection.getListener().onBlockChange(connection,
-                        place.placeX(), place.placeY(), place.placeZ(), state);
+            var listener = connection.getListener();
+            if (listener != null) {
+                // Right-click a block: if it's interactable (a chest), the core uses it (opens the window)
+                // and we suppress the placement the same packet would otherwise be.
+                if (!listener.onUseBlock(connection, place.x, place.y, place.z)) {
+                    int state = hotbarState[heldSlot];
+                    if (Blocks.isKnown(Blocks.idOf(state)) && state != Blocks.AIR) {
+                        listener.onBlockChange(connection, place.placeX(), place.placeY(), place.placeZ(), state);
+                    }
+                }
             }
         } else if (id == ServerboundEntityAction.PACKET_ID) {
             ServerboundEntityAction a = lazy.materialize(ServerboundEntityAction::fromBuffer);
@@ -153,6 +166,30 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
             ServerboundUseEntity use = lazy.materialize(ServerboundUseEntity::fromBuffer);
             if (use.type == ServerboundUseEntity.TYPE_ATTACK && connection.getListener() != null) {
                 connection.getListener().onAttack(connection, use.target);
+            }
+        } else if (id == ServerboundClickWindow.PACKET_ID) {
+            ServerboundClickWindow click = lazy.materialize(ServerboundClickWindow::fromBuffer);
+            var listener = connection.getListener();
+            if (listener != null) {
+                // Confirm first (accepted) — the resync is the real correction, so we skip the client's
+                // reject/apologise round-trip. We handle normal (0) and shift (1) clicks; other modes pass
+                // as a plain resync (slot -1).
+                connection.send(new ClientboundConfirmTransaction(click.windowId, click.actionNumber, true));
+                boolean modeOk = click.mode == 0 || click.mode == 1;
+                if (click.windowId == 0) {
+                    // The player's own inventory: translate the window slot to a core slot.
+                    int coreSlot = modeOk ? JeInventoryCodec.modelIndex(click.slot) : -1;
+                    listener.onWindowClick(connection, coreSlot, click.button, modeOk && click.mode == 1);
+                } else if (click.windowId == openWindowId && openWindowId != 0) {
+                    // The open chest window: the core translates the raw window slot (0-26 chest, 27-62 self).
+                    listener.onChestClick(connection, modeOk ? click.slot : -1, click.button,
+                            modeOk && click.mode == 1);
+                }
+            }
+        } else if (id == 0x08) { // Close Window — return any carried item to the inventory
+            openWindowId = 0;
+            if (connection.getListener() != null) {
+                connection.getListener().onWindowClose(connection);
             }
         } else if (id == 0x00) {
             // Teleport Confirm (sent after PlayerPositionAndLook)
@@ -270,6 +307,22 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
         if (slot >= 0 && slot < 9) {
             hotbarState[slot] = count > 0 ? state : 0;
         }
+    }
+
+    @Override
+    public void setCursorItem(JedrockConnection c, int state, int count) {
+        c.send(new ClientboundSetSlot(-1, -1, state, count)); // window -1 / slot -1 = the cursor
+    }
+
+    @Override
+    public void openContainer(JedrockConnection c, int windowId, String title, int slots) {
+        openWindowId = windowId;
+        c.send(new ClientboundOpenWindow(windowId, "minecraft:chest", title, slots));
+    }
+
+    @Override
+    public void setWindowItems(JedrockConnection c, int windowId, int[] states, int[] counts) {
+        c.send(new ClientboundWindowItems(JeInventoryCodec.encodeRaw(windowId, states, counts)));
     }
 
     @Override

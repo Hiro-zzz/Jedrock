@@ -59,6 +59,47 @@ public interface ConnectionListener {
     default void onSwingArm(PlayerConnection connection) {}
 
     /**
+     * A player clicked a slot in an open window. {@code coreSlot} is already translated to the core
+     * inventory index (0-40; -1 for an unbacked slot like the crafting grid). {@code button} is 0 (left)
+     * or 1 (right); {@code shift} is a quick-move (shift-click). The core applies it server-authoritatively
+     * to the player's inventory + cursor and resyncs the client; the network layer confirms the
+     * transaction. Modes we don't model (drag, number keys) arrive as a plain resync (no apply).
+     */
+    default void onWindowClick(PlayerConnection connection, int coreSlot, int button, boolean shift) {}
+
+    /**
+     * A player closed a window. The core returns any item left on the cursor to the inventory and clears
+     * it (there are no item entities to drop in the illusion), then resyncs. Survival only.
+     */
+    default void onWindowClose(PlayerConnection connection) {}
+
+    /**
+     * A player right-clicked the block at {@code (x, y, z)}. If it's an interactable block (a chest) the
+     * core "uses" it — opening its container window — and returns {@code true} so the caller suppresses
+     * the block placement the same packet would otherwise be. Returns {@code false} for a plain block, so
+     * the caller proceeds to place the held item. Default: not interactable.
+     */
+    default boolean onUseBlock(PlayerConnection connection, int x, int y, int z) {
+        return false;
+    }
+
+    /**
+     * A player clicked {@code windowSlot} of their open chest window (slots 0-26 the chest, 27-62 their
+     * own inventory). The core translates the slot, applies the click server-authoritatively to the chest
+     * or the player inventory + cursor, and resyncs the window. {@code button} 0 left / 1 right; {@code
+     * shift} quick-moves between the chest and the player. Survival only.
+     */
+    default void onChestClick(PlayerConnection connection, int windowSlot, int button, boolean shift) {}
+
+    /**
+     * A creative player set an inventory slot from the creative menu ({@code coreSlot} already translated;
+     * {@code state} 0 = cleared). The core mirrors it into the player inventory server-side — creative is
+     * otherwise client-managed — so an open chest's player-inventory half (and a later switch to survival)
+     * reflects what the creative player actually holds. No client resync (the client already shows it).
+     */
+    default void onCreativeSetSlot(PlayerConnection connection, int coreSlot, int state, int count) {}
+
+    /**
      * A player left-clicked (attacked) another entity. {@code targetEntityId} is the server-assigned id
      * of the victim's avatar ({@code Entity#getEntityId}); the core resolves it to a player and applies
      * melee damage. The client sends its own arm-swing separately ({@link #onSwingArm}). Fires on an I/O

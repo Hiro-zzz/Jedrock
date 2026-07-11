@@ -178,6 +178,21 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void setCursorItem(int state, int count) {
+        protocolHandler.setCursorItem(this, state, count);
+    }
+
+    @Override
+    public void openContainer(int windowId, String title, int slots) {
+        protocolHandler.openContainer(this, windowId, title, slots);
+    }
+
+    @Override
+    public void setWindowItems(int windowId, int[] states, int[] counts) {
+        protocolHandler.setWindowItems(this, windowId, states, counts);
+    }
+
+    @Override
     public void setPose(long entityId, boolean sneaking, boolean sprinting, boolean usingItem) {
         protocolHandler.setPose(this, entityId, sneaking, sprinting, usingItem);
     }
