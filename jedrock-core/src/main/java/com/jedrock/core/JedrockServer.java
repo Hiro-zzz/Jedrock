@@ -154,6 +154,7 @@ public class JedrockServer implements Server, ConnectionListener {
      */
     public void teleport(CorePlayer player, Location to) {
         player.setLocation(to);
+        player.resetFall(); // a teleport is not a fall — don't bill the next move for the jump (or a void drop)
         player.getConnection().teleport(to.x(), to.y(), to.z(), to.yaw(), to.pitch());
         long entityId = player.getEntityId();
         for (CorePlayer other : playerRegistry.online()) {
@@ -163,6 +164,11 @@ public class JedrockServer implements Server, ConnectionListener {
         }
     }
 
+    /** Interval (ticks) between environmental-damage sweeps — vanilla applies void damage every 10 ticks. */
+    private static final int ENVIRONMENT_TICK_INTERVAL = 10;
+    /** Void damage per sweep, in half-hearts (vanilla is 4 = two hearts). */
+    private static final int VOID_DAMAGE = 4;
+
     private void serverTick(long currentTick) {
         // Core server-wide per-tick work goes here.
         // Keep this extremely lean.
@@ -170,6 +176,27 @@ public class JedrockServer implements Server, ConnectionListener {
 
         // Tick network (keep-alives, etc.)
         networkServer.tick(currentTick);
+
+        // Environmental damage runs on the loop (not per move) so it fires even for a player who has
+        // stopped sending position updates. Gated to a coarse interval — no need to check every tick.
+        if (currentTick % ENVIRONMENT_TICK_INTERVAL == 0) {
+            environmentTick();
+        }
+    }
+
+    /**
+     * Periodic environmental damage. Today: the void — a survival player who has dropped past the finite
+     * world's floor takes damage until they die (silent respawn at spawn). Runs on the game-loop thread;
+     * {@link #hurt} and its packet sends are thread-safe. Other sources (lava, suffocation) would slot in
+     * here.
+     */
+    private void environmentTick() {
+        for (CorePlayer player : playerRegistry.online()) {
+            if (player.getGameMode() == GameMode.SURVIVAL && defaultWorld.isInVoid(player.getLocation().y())) {
+                hurt(player, VOID_DAMAGE,
+                        "{gray}" + ChatText.escape(player.getName()) + " fell out of the world");
+            }
+        }
     }
 
     @Override
@@ -488,12 +515,14 @@ public class JedrockServer implements Server, ConnectionListener {
         }
         player.setLocation(new Location(player.getWorld(), x, y, z, yaw, pitch));
 
-        // Fall damage for Java, which has no client fall-report packet: watch the descent server-side and
-        // apply damage on landing. Bedrock 1.1.5 is skipped here — it reports falls itself via EntityFall.
-        if (connection.getProtocolVersion().isJava()) {
+        // Fall damage for editions with no client fall-report packet: watch the descent server-side and
+        // apply damage on landing. This is Java (no such packet at all) and Bedrock 0.14 (its client never
+        // reports one). Bedrock 1.1.5 is skipped here — it reports falls itself via EntityFall (onFall).
+        ProtocolVersion version = connection.getProtocolVersion();
+        if (version.isJava() || version == ProtocolVersion.PE_0_14) {
             double fell = player.trackFall(from.y(), y);
             if (fell > 0) {
-                applyFallDamage(player, connection, fell);
+                applyFallDamage(player, fell);
             }
         }
 
@@ -553,29 +582,44 @@ public class JedrockServer implements Server, ConnectionListener {
         // Bedrock 1.1.5 reports its own falls (EntityFall) — apply the damage from the client's report.
         CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
         if (player != null) {
-            applyFallDamage(player, connection, fallDistance);
+            applyFallDamage(player, fallDistance);
         }
     }
 
     /**
-     * Turn a fall distance into vanilla fall damage (one point per block past the first three), survival
-     * only. A lethal fall skips the death-screen handshake and just respawns the player at spawn with
-     * full health. Shared by the Bedrock client's {@code EntityFall} report and Java's server-side fall
-     * tracking (Java has no fall-report packet).
+     * Turn a fall distance into vanilla fall damage (one point per block past the first three) and apply
+     * it via {@link #hurt}. Shared by the Bedrock client's {@code EntityFall} report and the server-side
+     * fall tracking used by editions with no fall-report packet (Java, PE 0.14).
      */
-    private void applyFallDamage(CorePlayer player, PlayerConnection connection, double fallDistance) {
-        if (player.getGameMode() != GameMode.SURVIVAL) {
-            return;
-        }
+    private void applyFallDamage(CorePlayer player, double fallDistance) {
         int damage = (int) Math.floor(fallDistance) - 3;
-        if (damage <= 0) {
+        hurt(player, damage, "{gray}" + ChatText.escape(player.getName()) + " fell to their death");
+    }
+
+    /**
+     * Apply {@code amount} half-hearts of damage to a survival player from any source (fall, void, and
+     * later PvP), push the new health to their HUD, and handle death. Death is deliberately primitive —
+     * a silent respawn at spawn with full health, no death-screen handshake (a kept feature) — and
+     * broadcasts {@code deathMessage}. A no-op outside survival or for a non-positive {@code amount}.
+     */
+    private void hurt(CorePlayer player, int amount, String deathMessage) {
+        if (player.getGameMode() != GameMode.SURVIVAL || amount <= 0) {
             return;
         }
-        if (player.damage(damage) <= 0) {
+        // Show the hit to everyone else: the victim's avatar flashes red (its own client shows the hit
+        // from its dropping health bar, so it doesn't need this). Covers every source — PvP, fall, void.
+        long entityId = player.getEntityId();
+        for (CorePlayer other : playerRegistry.online()) {
+            if (other != player) {
+                other.getConnection().playHurtAnimation(entityId);
+            }
+        }
+        PlayerConnection connection = player.getConnection();
+        if (player.damage(amount) <= 0) {
             player.setHealth(CorePlayer.MAX_HEALTH);
-            teleport(player, defaultWorld.getSpawnLocation());
+            teleport(player, defaultWorld.getSpawnLocation()); // resets fall tracking too
             connection.setHealth(CorePlayer.MAX_HEALTH);
-            broadcast("{gray}" + ChatText.escape(player.getName()) + " fell to their death", null);
+            broadcast(deathMessage, null);
         } else {
             connection.setHealth(player.getHealth());
         }
@@ -641,6 +685,36 @@ public class JedrockServer implements Server, ConnectionListener {
                 other.getConnection().swingArm(entityId);
             }
         }
+    }
+
+    /** Bare-hand melee damage, in half-hearts (vanilla is 2 = one heart). */
+    private static final int ATTACK_DAMAGE = 2;
+
+    @Override
+    public void onAttack(PlayerConnection connection, long targetEntityId) {
+        CorePlayer attacker = playerRegistry.getByConnectionOrNull(connection);
+        if (attacker == null) {
+            return;
+        }
+        CorePlayer victim = playerRegistry.getByEntityIdOrNull(targetEntityId);
+        if (victim == null || victim == attacker) {
+            return; // unknown target, or a self-hit — nothing to do
+        }
+        // Reach check (the blind judge): reject a hit from implausibly far — a reach hack — measured to
+        // the victim's cell. The attacker's own arm swing is relayed separately via onSwingArm.
+        Location a = attacker.getLocation();
+        Location v = victim.getLocation();
+        if (!judge.allowsInteraction(a.x(), a.y(), a.z(),
+                (int) Math.floor(v.x()), (int) Math.floor(v.y()), (int) Math.floor(v.z()))) {
+            return;
+        }
+        // Invulnerability frames: drop a hit landing inside the victim's half-second window, so a
+        // click-spamming attacker can't deal damage faster than vanilla.
+        if (victim.isOnHurtCooldown()) {
+            return;
+        }
+        hurt(victim, ATTACK_DAMAGE, "{gray}" + ChatText.escape(victim.getName())
+                + " was slain by " + ChatText.escape(attacker.getName()));
     }
 
     @Override

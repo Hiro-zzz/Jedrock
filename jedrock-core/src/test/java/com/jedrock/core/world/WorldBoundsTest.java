@@ -39,4 +39,12 @@ class WorldBoundsTest {
         assertFalse(world.isInsideBounds(10_000, 0));
         assertFalse(world.isInsideBounds(0, -10_000));
     }
+
+    @Test
+    void voidStartsBelowTheFloorWithGrace() {
+        assertFalse(world.isInVoid(0), "standing on the world floor is not the void");
+        assertFalse(world.isInVoid(-4), "a few blocks of grace below y=0");
+        assertTrue(world.isInVoid(CoreWorld.VOID_LEVEL), "exactly at the void level counts");
+        assertTrue(world.isInVoid(-50), "deep below the world is the void");
+    }
 }

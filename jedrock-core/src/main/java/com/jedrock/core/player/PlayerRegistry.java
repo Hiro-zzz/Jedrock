@@ -52,6 +52,20 @@ public final class PlayerRegistry {
     }
 
     /**
+     * Find an online player by their avatar entity id, or {@code null}. A linear scan over the roster —
+     * player counts are tiny and attacks are infrequent, so no dedicated index is kept. Used to resolve
+     * a PvP attack's target-entity id back to the player being hit.
+     */
+    public CorePlayer getByEntityIdOrNull(long entityId) {
+        for (CorePlayer p : byId.values()) {
+            if (p.getEntityId() == entityId) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Live view of the online players for internal hot-path iteration. Unlike {@link #all()} it
      * returns the map's cached values view directly, so calling it per packet allocates no
      * unmodifiable wrapper. Read-only by convention — do not mutate.

@@ -97,6 +97,14 @@ public interface PlayerConnection {
     void swingArm(long entityId);
 
     /**
+     * Play the "hurt" animation on another player's avatar (the red damage flash + hurt sound) so a hit
+     * is visible to everyone watching. Sent for any damage source (PvP, fall, void). The victim's own
+     * client shows the hit from its dropping health bar, so this only needs relaying to other clients. A
+     * connection that can't render it may ignore it.
+     */
+    default void playHurtAnimation(long entityId) {}
+
+    /**
      * Set another player's pose on this client — crouch, sprint and item-use (eat / drink / block /
      * draw bow). These share a flags field on the wire (all in one PE {@code DATA_FLAGS} long; crouch
      * and sprint in the one JE flags byte), so they are always sent together to avoid one clearing

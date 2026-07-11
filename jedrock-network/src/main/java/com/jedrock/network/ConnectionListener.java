@@ -59,6 +59,14 @@ public interface ConnectionListener {
     default void onSwingArm(PlayerConnection connection) {}
 
     /**
+     * A player left-clicked (attacked) another entity. {@code targetEntityId} is the server-assigned id
+     * of the victim's avatar ({@code Entity#getEntityId}); the core resolves it to a player and applies
+     * melee damage. The client sends its own arm-swing separately ({@link #onSwingArm}). Fires on an I/O
+     * thread. A widened id (long) so it fits both JE's int target and PE's varlong runtime id.
+     */
+    default void onAttack(PlayerConnection connection, long targetEntityId) {}
+
+    /**
      * The game mode a client should join in: its last {@code /gamemode} choice this run if it has one,
      * otherwise the configured default. Queried by the join sequence (JE Join Game / PE StartGame) so a
      * returning player keeps their mode — the only way MCPE 0.14, which can't switch mode live, ever

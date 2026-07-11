@@ -173,6 +173,11 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void playHurtAnimation(long entityId) {
+        protocolHandler.playHurtAnimation(this, entityId);
+    }
+
+    @Override
     public void setPose(long entityId, boolean sneaking, boolean sprinting, boolean usingItem) {
         protocolHandler.setPose(this, entityId, sneaking, sprinting, usingItem);
     }

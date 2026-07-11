@@ -62,6 +62,9 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Play another player's arm-swing animation. */
     void swingArm(JedrockConnection c, long entityId);
 
+    /** Play another player's hurt animation (damage flash + sound). */
+    void playHurtAnimation(JedrockConnection c, long entityId);
+
     /** Set another player's pose (crouch / sprint / item-use), sent together as one flags update. */
     void setPose(JedrockConnection c, long entityId, boolean sneaking, boolean sprinting, boolean usingItem);
 

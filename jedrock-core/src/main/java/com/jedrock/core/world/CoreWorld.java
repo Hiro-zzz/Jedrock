@@ -286,6 +286,18 @@ public final class CoreWorld implements World {
         return x >= minBound() && x < maxBound() && z >= minBound() && z < maxBound();
     }
 
+    /**
+     * Feet-Y at or below which a player is falling in the void and takes void damage. Terrain lives in
+     * {@code y ∈ [0, 255]}; below the {@code y = 0} floor is open air, with a few blocks of grace so a
+     * player standing on the lowest floor block never triggers it — only an actual drop past the world.
+     */
+    public static final int VOID_LEVEL = -5;
+
+    /** Whether {@code y} (feet position) is low enough that the player is taking void damage. */
+    public boolean isInVoid(double y) {
+        return y <= VOID_LEVEL;
+    }
+
     /** True once this world has been baked (or a baked world was loaded). */
     public boolean isGenerated() {
         return generated;

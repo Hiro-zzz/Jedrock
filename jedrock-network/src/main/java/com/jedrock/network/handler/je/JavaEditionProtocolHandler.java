@@ -149,6 +149,11 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
             if (connection.getListener() != null) {
                 connection.getListener().onSwingArm(connection);
             }
+        } else if (id == ServerboundUseEntity.PACKET_ID) {
+            ServerboundUseEntity use = lazy.materialize(ServerboundUseEntity::fromBuffer);
+            if (use.type == ServerboundUseEntity.TYPE_ATTACK && connection.getListener() != null) {
+                connection.getListener().onAttack(connection, use.target);
+            }
         } else if (id == 0x00) {
             // Teleport Confirm (sent after PlayerPositionAndLook)
             LOGGER.debug("Received Teleport Confirm (ignored for now)");
@@ -244,6 +249,12 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     @Override
     public void setInventory(JedrockConnection c, int[] states, int[] counts) {
         c.send(new ClientboundWindowItems(JeInventoryCodec.encode(states, counts, JeInventoryCodec.WINDOW_SLOTS_1_12)));
+        // Mirror the hotbar (slots 0-8) into our held-item view: 1.12.2's Block Placement carries NO item,
+        // so a survival placement's block comes from hotbarState[heldSlot]. Without this it stayed on the
+        // creative-menu value (or air), so survival players placed the wrong block / nothing.
+        for (int i = 0; i < 9; i++) {
+            hotbarState[i] = counts[i] > 0 ? states[i] : 0;
+        }
     }
 
     @Override
@@ -255,11 +266,20 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     public void setInventorySlot(JedrockConnection c, int slot, int state, int count) {
         // Set Slot (0x16): byte windowId=0, short slot, Slot data.
         c.send(new ClientboundSetSlot(JeInventoryCodec.windowSlot(slot), state, count));
+        // Keep the held-item mirror in step with a live survival pickup / consume (see setInventory).
+        if (slot >= 0 && slot < 9) {
+            hotbarState[slot] = count > 0 ? state : 0;
+        }
     }
 
     @Override
     public void swingArm(JedrockConnection c, long entityId) {
         c.send(new ClientboundAnimation((int) entityId, ClientboundAnimation.SWING_MAIN_ARM));
+    }
+
+    @Override
+    public void playHurtAnimation(JedrockConnection c, long entityId) {
+        c.send(new ClientboundEntityStatus((int) entityId, ClientboundEntityStatus.STATUS_HURT));
     }
 
     @Override

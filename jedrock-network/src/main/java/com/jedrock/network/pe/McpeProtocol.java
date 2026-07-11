@@ -24,12 +24,14 @@ final class McpeProtocol {
     static final int ID_REMOVE_ENTITY = 0x0E;
     static final int ID_MOVE_PLAYER = 0x13;
     static final int ID_UPDATE_BLOCK = 0x16;
-    static final int ID_UPDATE_ATTRIBUTES = 0x1D; // movement-speed fix
+    static final int ID_UPDATE_ATTRIBUTES = 0x1E; // outbound: movement-speed fix (PMMP 113: 0x1e — was 0x1D)
     static final int ID_ENTITY_FALL = 0x25;       // inbound: the client reports a fall (its distance)
     static final int ID_SET_HEALTH = 0x2A;        // outbound: set the player's health (0..20)
-    static final int ID_INVENTORY_TRANSACTION = 0x1E;
+    static final int ID_RESPAWN = 0x2D;           // outbound: place the player after a death-screen respawn
+    static final int ID_INTERACT = 0x21;          // inbound: attack / interact with an entity
     static final int ID_USE_ITEM = 0x23;          // Win10 1.1.5 carries block placement here
     static final int ID_PLAYER_ACTION = 0x24;
+    static final int ID_ENTITY_EVENT = 0x1C;      // outbound: one-shot entity event (hurt animation etc.)
     static final int ID_SET_ENTITY_DATA = 0x27;   // entity metadata (sneak pose etc.)
     static final int ID_ANIMATE = 0x2C;           // arm swing
     // MCPE 1.1 (protocol 113) uses ContainerSetContent (0x34) for inventory/creative content — NOT
@@ -71,6 +73,13 @@ final class McpeProtocol {
 
     // --- PlayerAction action ids ---
     // In creative the client reports a break with CONTINUE_BREAK carrying the block position.
+    /** InteractPacket action: a left-click = a melee attack (ACTION_RIGHT_CLICK = 1 is ignored). */
+    static final int INTERACT_LEFT_CLICK = 2;
+
+    /** EntityEvent event: a living entity is hurt (the damage flash + sound). */
+    static final int ENTITY_EVENT_HURT = 2;
+
+    static final int ACTION_RESPAWN = 7;       // the client clicked "Respawn" on the death screen
     static final int ACTION_START_BREAK = 0;
     static final int ACTION_ABORT_BREAK = 1;   // mining cancelled before completion
     static final int ACTION_STOP_BREAK = 2;    // mining finished (the survival break completion)

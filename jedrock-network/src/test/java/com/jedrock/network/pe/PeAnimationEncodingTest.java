@@ -6,6 +6,7 @@ import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
 
 import static com.jedrock.network.pe.McpeProtocol.ID_ANIMATE;
+import static com.jedrock.network.pe.McpeProtocol.ID_ENTITY_EVENT;
 import static com.jedrock.network.pe.McpeProtocol.ID_SET_ENTITY_DATA;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -85,6 +86,19 @@ class PeAnimationEncodingTest {
         ByteBufUtils.readVarInt(b);   // type
         assertEquals(McpeProtocol.BASE_ENTITY_FLAGS, readSignedVarLong(b),
                 "only the nametag-visibility flags when idle");
+        b.release();
+    }
+
+    @Test
+    void entityEventHurtBodyMatchesProtocol113() {
+        ByteBuf b = Unpooled.buffer();
+        PeSession.writeEntityEvent(b, 1000L, McpeProtocol.ENTITY_EVENT_HURT, 0);
+
+        assertEquals(ID_ENTITY_EVENT, ByteBufUtils.readVarInt(b), "packet id");
+        assertEquals(1000L, ByteBufUtils.readVarLong(b), "entity runtime id");
+        assertEquals(McpeProtocol.ENTITY_EVENT_HURT, b.readUnsignedByte(), "event = hurt (2)");
+        assertEquals(0, ByteBufUtils.readSignedVarInt(b), "data field (putVarInt)");
+        assertFalse(b.isReadable(), "no trailing bytes");
         b.release();
     }
 

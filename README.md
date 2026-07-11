@@ -130,9 +130,25 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   malicious client can't crash the server — a zlib "zip bomb" batch is rejected once it inflates past a
   cap, and batch / inventory-action / string-list counts are capped so a huge wire-driven count can't
   spin a parse loop or exhaust memory. (Java's frame + array reads were already length-capped.)
+- ✅ **Survival mode, in-game commands and a minimal inventory.** A player can run in survival; the mode is
+  remembered per player, so a reconnect keeps it (the only way MCPE 0.14, which can't switch mode live,
+  ever changes). In-game commands work cross-edition (`/help`, `/gamemode`, `/tp`, `/spawn`) — Java sends
+  `/…` straight through as chat, and Bedrock is handed an `AvailableCommands` manifest so its client parses
+  the line and sends it back. A deliberately minimal **survival inventory** (36 slots) tracks only what a
+  survival player mines and places: mining a block drops it into the hotbar, placing consumes it, and the
+  changed slot is pushed live so the HUD refreshes.
+- ✅ **Damage — fall, void and PvP, cross-edition.** Survival players take damage, all funnelled through one
+  server-authoritative path. **Fall damage** works on every edition: Java and PE 0.14 have no client
+  fall-report packet, so the server tracks the descent and applies it on landing; PE 1.1.5 reports its own
+  fall (`EntityFall`). The finite world's **void** hurts a player who drops past its floor. **PvP melee**
+  lets a player attack another on any edition (JE Use Entity, PE `Interact`), gated by a reach check and
+  vanilla-style half-second invulnerability frames. Every hit relays a **hurt animation** — the red damage
+  flash — to onlookers on all four editions. Death is a **silent instant respawn** at spawn (no death
+  screen) on Java and 0.14; the 1.1.5 client insists on its own death screen for a client-side death, so
+  its Respawn button is answered with a proper respawn handshake.
 
-Not yet: cross-edition skin fidelity (a signed-texture limit, see above), movement validation, scripting.
-See [Roadmap](#roadmap).
+Not yet: cross-edition skin fidelity (a signed-texture limit, see above), knockback (deliberately — the
+server simulates no physics), scripting. See [Roadmap](#roadmap).
 
 ---
 
@@ -360,8 +376,9 @@ and MCPE compression — no client required.
 - **Held-item / equipment relay** — show what each player holds in-hand on their avatar; this also
   makes the item-use pose render as the specific eat / drink / block animation, and unblocks a
   Bedrock-initiated item-use signal.
-- **More animations** — sneak, sprint, arm swing and item-use relay today; hurt / death animations
-  need a damage model, and elytra gliding needs a clean cross-edition stop signal.
+- **More animations** — sneak, sprint, arm swing, item-use and the hurt flash relay today; a death
+  animation is intentionally skipped (a silent instant respawn is the model), and elytra gliding needs a
+  clean cross-edition stop signal.
 - **Sharper judge** — the blind judge lands today (reach + move-delta); per-axis limits, a knockback
   allowance and interaction ray-casts would tighten it without turning into a physics engine.
 - **Scripting** — embedded JS (GraalJS) plugins with hot reload.

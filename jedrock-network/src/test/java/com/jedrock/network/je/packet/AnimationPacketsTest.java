@@ -67,6 +67,17 @@ class AnimationPacketsTest {
     }
 
     @Test
+    void entityStatusWritesPlainIntIdAndHurtStatus() {
+        ByteBuf buf = Unpooled.buffer();
+        new ClientboundEntityStatus(1000, ClientboundEntityStatus.STATUS_HURT).write(buf);
+
+        assertEquals(1000, buf.readInt(), "entity id (plain int32, not a VarInt)");
+        assertEquals(2, buf.readUnsignedByte(), "status 2 = living entity hurt");
+        assertFalse(buf.isReadable(), "no trailing bytes");
+        buf.release();
+    }
+
+    @Test
     void entityActionParsesSneakToggle() {
         ByteBuf buf = Unpooled.buffer();
         ByteBufUtils.writeVarInt(buf, 42);  // entity id

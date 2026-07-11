@@ -30,6 +30,7 @@ public final class Java1_8Protocol {
     public static final int CB_ENTITY_DESTROY = 0x13;
     public static final int CB_ENTITY_TELEPORT = 0x18;   // fixed-point coords
     public static final int CB_ENTITY_HEAD_ROTATION = 0x19;
+    public static final int CB_ENTITY_STATUS = 0x1A;     // int entityId + byte status (2 = hurt)
     public static final int CB_ENTITY_METADATA = 0x1C;
     public static final int CB_WINDOW_ITEMS = 0x30; // replace a window's contents (player inventory)
     public static final int CB_SET_SLOT = 0x2F;      // update one window slot
@@ -42,6 +43,7 @@ public final class Java1_8Protocol {
     // ===== PLAY (serverbound) =====
     public static final int SB_KEEP_ALIVE = 0x00;
     public static final int SB_CHAT = 0x01;
+    public static final int SB_USE_ENTITY = 0x02;   // attack / interact with another entity
     public static final int SB_POSITION = 0x04;
     public static final int SB_LOOK = 0x05;
     public static final int SB_POSITION_LOOK = 0x06;

@@ -8,6 +8,33 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Survival mode, in-game commands, and a minimal survival inventory.** A player can play in survival;
+  the mode is persisted per player, so a reconnect keeps it (the only way MCPE 0.14, which has no live
+  game-mode packet, ever switches). **In-game commands** work cross-edition — `/help`, `/gamemode`, `/tp`,
+  `/spawn` — through one `CommandManager`: Java sends `/…` straight through as chat, and Bedrock is handed
+  an `AvailableCommands` manifest at spawn (protocol-113 `versions`-wrapped JSON), so its client parses the
+  line and returns a `CommandStep` the server turns back into a `/…` line. A deliberately minimal **survival
+  inventory** (36 slots, 0-8 hotbar / 9-35 main) tracks only a survival player's mined and placed blocks —
+  mining drops the block into the hotbar, placing consumes it — with the changed slot pushed live
+  (`SetSlot` / `ContainerSetSlot`) so the HUD refreshes. Break timing is per game mode on every edition
+  (creative mines instantly; survival removes the block only on completion).
+
+- **Combat and an expanded, cross-edition damage model.** All damage — fall, void and PvP — funnels through
+  one server-authoritative `JedrockServer.hurt(...)` path (survival-only: clamps, pushes health, primitive
+  death). **Fall damage now works on every edition**: Java and PE 0.14 have no client fall-report packet, so
+  the server tracks the descent and applies it on landing (`SetHealth` wired for 0.14, previously a no-op);
+  PE 1.1.5 reports its own `EntityFall`. The finite world's **void** hurts a survival player who drops past
+  its floor (a game-loop damage tick, not per-move). **PvP melee** lets a player left-click another on any
+  edition — decoded from JE Use Entity (0x0A on 1.12.2 / 0x02 on 1.8) and PE `Interact` (0x21 on 1.1.5 /
+  0xa9 on 0.14), all verified against PocketMine — resolved to the victim by avatar entity id, gated by the
+  blind judge's reach sphere and vanilla-style half-second invulnerability frames. Every hit relays a **hurt
+  animation** (the red damage flash) to onlookers on all four editions (JE Entity Status, PE `EntityEvent`
+  0x1c / 0xa4). Death is a **silent instant respawn** at spawn (no death screen) on Java and 0.14; the 1.1.5
+  client shows its own death screen for a client-side death, so its Respawn button is answered with a
+  `Respawn` handshake. Unit-tested (`ServerboundUseEntityTest`, `AnimationPacketsTest`,
+  `PeAnimationEncodingTest`, `Mcpe014EntityEventTest`, `PeRespawnEncodingTest`, plus core `hurt` / void /
+  i-frame / fall-reset coverage).
+
 - **Richer Bedrock creative menu, and a creative menu on 0.14.** The creative palette now carries
   per-meta **variants** — all 16 wool / terracotta / carpet colours, every wood and leaf type, and the
   stone / stone-brick / sandstone / quartz / dirt / sand variants — instead of one item per block id
@@ -261,6 +288,24 @@ unstable — anything may change between entries.
 
 ### Fixed
 
+- **Bedrock 1.1.5 players ran too fast (runaway acceleration).** The movement-speed attribute
+  (`minecraft:movement` = 0.1) was byte-correct but sent under the wrong packet id — `UpdateAttributes`
+  is **0x1E** at protocol 113, not the 0x1D we used — so the client never recognized it and stayed on its
+  buggy accelerating default. (0x1E had been mislabeled `ID_INVENTORY_TRANSACTION`; that inbound case was
+  dead — no InventoryTransaction packet exists at 113, block edits arrive via UseItem / PlayerAction — and
+  was removed. The attribute is now also sent after the spawn `PlayStatus`, matching PocketMine.)
+- **1.12.2 survival players couldn't place their mined blocks.** The 1.12.2 Block Placement packet carries
+  no held item, so the server reads the placed block from its hotbar mirror — which was only populated by
+  creative inventory actions, leaving it empty/stale in survival, so placements used the wrong block or
+  none (and the item was never consumed, so it appeared to "stack" and the ghost block couldn't be broken).
+  The mirror is now kept in step with the survival inventory on every slot / inventory sync. (PE 1.1.5 and
+  JE 1.8 were unaffected — their placement packets carry the item.)
+- **Bedrock 1.1.5 death left the player stuck on an endless death screen.** A client-side death (e.g. a
+  fatal fall the 1.1.5 client reports and applies itself) shows a death screen the silent core respawn
+  can't dismiss, and the Respawn button did nothing because the server never answered it. The client's
+  `PlayerAction RESPAWN` is now answered with a `Respawn` packet (0x2d) + full health, closing the menu;
+  the respawn Y is eye-level (sending feet spawned the player embedded in the ground). Java and 0.14 are
+  unaffected — their health is server-driven, so they never show a death screen.
 - **PE server-list ping advertised the wrong port.** `onQuery` used the querying client's port for
   the advertised IPv4/IPv6 port fields instead of the server's own bind port.
 - **Usernames leaked into chat markup.** A username was embedded into the `{color}` markup of the

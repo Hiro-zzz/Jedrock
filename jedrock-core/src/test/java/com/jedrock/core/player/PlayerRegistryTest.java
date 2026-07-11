@@ -67,6 +67,20 @@ class PlayerRegistryTest {
         assertNull(registry.removeByConnection(new FakeConnection()));
     }
 
+    @Test
+    void lookupByEntityIdResolvesTheAttackTarget() {
+        PlayerRegistry registry = new PlayerRegistry();
+        CorePlayer alice = newPlayer("Alice", new FakeConnection());
+        CorePlayer bob = newPlayer("Bob", new FakeConnection());
+        registry.add(alice);
+        registry.add(bob);
+
+        // A PvP attack arrives as the victim's avatar entity id — it must resolve back to that player.
+        assertSame(bob, registry.getByEntityIdOrNull(bob.getEntityId()));
+        assertSame(alice, registry.getByEntityIdOrNull(alice.getEntityId()));
+        assertNull(registry.getByEntityIdOrNull(42), "an unknown entity id resolves to nobody");
+    }
+
     /** Minimal stand-in connection: only identity matters for the registry. */
     private static final class FakeConnection implements PlayerConnection {
         @Override public ProtocolVersion getProtocolVersion() { return ProtocolVersion.JE_1_12_2; }

@@ -151,6 +151,30 @@ public final class CorePlayer implements Player {
         health = Math.max(0, Math.min(MAX_HEALTH, value));
     }
 
+    /** Vanilla-style post-hit invulnerability window (half a second) for melee, in nanoseconds. */
+    private static final long HURT_COOLDOWN_NANOS = 500_000_000L;
+    /** Sentinel: never hit yet. Kept distinct so the first hit isn't compared against an overflowing delta. */
+    private static final long NEVER_HURT = Long.MIN_VALUE;
+    private volatile long lastHurtNanos = NEVER_HURT;
+
+    /**
+     * Melee invulnerability frames: {@code true} if this player was hit within the last half second (so
+     * a rapid click-spam attacker can't stack hits faster than vanilla). Consumes the window — a
+     * {@code false} result starts a fresh one. Used only for PvP; environmental damage is already
+     * rate-limited by its own tick.
+     */
+    public boolean isOnHurtCooldown() {
+        long now = System.nanoTime();
+        // Guard the first hit explicitly: `now - Long.MIN_VALUE` overflows to a negative delta that would
+        // read as "still on cooldown", so a fresh player could never be hurt. Once hit, both operands are
+        // real nanoTimes and their difference can't overflow.
+        if (lastHurtNanos != NEVER_HURT && now - lastHurtNanos < HURT_COOLDOWN_NANOS) {
+            return true;
+        }
+        lastHurtNanos = now;
+        return false;
+    }
+
     /** Highest point of the current descent (server-side fall tracking for JE); NaN = not falling. */
     private double fallPeakY = Double.NaN;
 
@@ -173,6 +197,16 @@ public final class CorePlayer implements Player {
             return Math.max(0, distance);
         }
         return 0;
+    }
+
+    /**
+     * Discard any in-progress fall tracking, so the next descent starts fresh. Called after a server
+     * teleport / respawn: a discontinuous jump isn't a fall, and a fall into the void never "lands" (so
+     * {@link #trackFall} never clears its peak) — without this the first move after respawn could bill
+     * the player for a phantom drop from the old peak height.
+     */
+    public void resetFall() {
+        fallPeakY = Double.NaN;
     }
 
     /** Whether the player is currently crouching — used to sync pose to players who join later. */

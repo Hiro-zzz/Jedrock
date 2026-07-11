@@ -91,6 +91,10 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
             if (listener != null && !message.isEmpty()) listener.onChat(connection, message);
         } else if (id == SB_ARM_ANIMATION) {
             if (listener != null) listener.onSwingArm(connection);
+        } else if (id == SB_USE_ENTITY) {
+            int target = ByteBufUtils.readVarInt(in);
+            int type = ByteBufUtils.readVarInt(in);          // 0 interact, 1 attack, 2 interact-at
+            if (type == 1 && listener != null) listener.onAttack(connection, target);
         } else if (id == SB_BLOCK_DIG) {
             int status = in.readByte();
             long pos = in.readLong();
@@ -301,6 +305,12 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     @Override
     public void swingArm(JedrockConnection c, long entityId) {
         send(c, CB_ANIMATION, b -> { ByteBufUtils.writeVarInt(b, (int) entityId); b.writeByte(ANIMATION_SWING); });
+    }
+
+    @Override
+    public void playHurtAnimation(JedrockConnection c, long entityId) {
+        // Entity Status (0x1A): plain int32 entity id + byte status (2 = living entity hurt).
+        send(c, CB_ENTITY_STATUS, b -> { b.writeInt((int) entityId); b.writeByte(2); });
     }
 
     @Override

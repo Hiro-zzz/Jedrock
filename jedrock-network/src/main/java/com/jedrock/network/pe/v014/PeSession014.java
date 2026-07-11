@@ -124,8 +124,21 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     }
 
     @Override
+    public void setHealth(int health) {
+        // The 0.14 client only ever shows the health it's told — it reports no fall packet, so server-side
+        // fall tracking (JedrockServer) is the sole damage source and this pushes the result to the HUD.
+        // SetHealth (0xb0) is a raw big-endian int on protocol 45 (no zigzag varint — that's 1.1.5).
+        sendWrapped(b -> Mcpe014Packets.setHealth(b, health));
+    }
+
+    @Override
     public void swingArm(long entityId) {
         sendWrapped(b -> Mcpe014Packets.animate(b, ANIMATE_SWING, entityId));
+    }
+
+    @Override
+    public void playHurtAnimation(long entityId) {
+        sendWrapped(b -> Mcpe014Packets.entityEvent(b, entityId, ENTITY_EVENT_HURT));
     }
 
     @Override
@@ -195,6 +208,7 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
             case ID_REMOVE_BLOCK -> handleRemoveBlock(in);
             case ID_USE_ITEM -> handleUseItem(in);
             case ID_PLAYER_ACTION -> handlePlayerAction(in);
+            case ID_INTERACT -> handleInteract(in);
             case ID_ANIMATE -> handleAnimate(in);
             default -> { /* other gameplay packet — nothing to answer yet */ }
         }
@@ -286,6 +300,19 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         int action = in.readUnsignedByte();
         if (action == ANIMATE_SWING && loggedIn && listener != null) {
             listener.onSwingArm(this);
+        }
+    }
+
+    /**
+     * InteractPacket (0.14): {@code byte action} then a big-endian {@code long} target eid (= the
+     * avatar's server entity id). A left-click is a melee attack — hand the target to the core to
+     * resolve the victim and apply damage.
+     */
+    private void handleInteract(ByteBuf in) {
+        int action = in.readUnsignedByte();
+        long target = in.readLong();            // big-endian eid (protocol 45 is fixed-width BE)
+        if (action == INTERACT_LEFT_CLICK && loggedIn && listener != null) {
+            listener.onAttack(this, target);
         }
     }
 

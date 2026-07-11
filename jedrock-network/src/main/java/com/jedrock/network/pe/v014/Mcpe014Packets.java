@@ -30,6 +30,8 @@ public final class Mcpe014Packets {
     public static final int ID_MOVE_PLAYER = 0x9d;
     public static final int ID_REMOVE_BLOCK = 0x9e;
     public static final int ID_UPDATE_BLOCK = 0x9f;
+    public static final int ID_ENTITY_EVENT = 0xa4; // outbound: one-shot entity event (hurt animation etc.)
+    public static final int ID_INTERACT = 0xa9;    // inbound: attack / interact with an entity
     public static final int ID_USE_ITEM = 0xaa;
     public static final int ID_PLAYER_ACTION = 0xab;
     public static final int ID_SET_ENTITY_DATA = 0xad;
@@ -61,6 +63,10 @@ public final class Mcpe014Packets {
     // MovePlayer modes.
     public static final int MOVE_MODE_NORMAL = 0;
     public static final int MOVE_MODE_RESET = 1;
+    // InteractPacket action: a left-click = a melee attack.
+    public static final int INTERACT_LEFT_CLICK = 2;
+    // EntityEvent event: a living entity is hurt (damage flash + sound).
+    public static final int ENTITY_EVENT_HURT = 2;
     // PlayerAction actions.
     public static final int ACTION_START_SPRINT = 9;
     public static final int ACTION_STOP_SPRINT = 10;
@@ -143,6 +149,13 @@ public final class Mcpe014Packets {
     public static void chunkRadiusUpdate(ByteBuf b, int radius) {
         b.writeByte(ID_CHUNK_RADIUS_UPDATE);
         b.writeInt(radius);
+    }
+
+    /** EntityEvent (0.14): {@code long eid} (BE) + {@code byte event}. No trailing data at protocol 45. */
+    public static void entityEvent(ByteBuf b, long eid, int event) {
+        b.writeByte(ID_ENTITY_EVENT);
+        b.writeLong(eid);
+        b.writeByte(event);
     }
 
     /** FullChunkData header; append the {@code data} blob after this. */

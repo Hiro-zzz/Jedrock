@@ -242,6 +242,22 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     }
 
     @Override
+    public void playHurtAnimation(long entityId) {
+        sendGameBatch(b -> writeEntityEvent(b, entityId, ENTITY_EVENT_HURT, 0));
+    }
+
+    /**
+     * Encode an EntityEvent body (protocol 113): entity runtime id, byte event, then a {@code putVarInt}
+     * data field (signed). {@code event} 2 = hurt (the damage flash + sound); {@code data} is unused for it.
+     */
+    static void writeEntityEvent(ByteBuf b, long entityRuntimeId, int event, int data) {
+        ByteBufUtils.writeVarInt(b, ID_ENTITY_EVENT);
+        ByteBufUtils.writeVarLong(b, entityRuntimeId); // entity runtime id
+        b.writeByte(event);
+        ByteBufUtils.writeSignedVarInt(b, data);       // data (putVarInt, signed)
+    }
+
+    @Override
     public void setPose(long entityId, boolean sneaking, boolean sprinting, boolean usingItem) {
         sendGameBatch(b -> writeSetEntityDataFlags(b, entityId, sneaking, sprinting, usingItem));
     }
@@ -376,9 +392,12 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             case ID_TEXT -> handleInboundText(pk);
             case ID_COMMAND_STEP -> handleCommandStep(pk);
             case ID_MOVE_PLAYER -> handleInboundMove(pk);
-            case ID_INVENTORY_TRANSACTION -> applyEdit(PeBlockEditDecoder.decodeInventoryTransaction(pk));
+            // NB: id 0x1E is UpdateAttributes (server→client), not an inbound InventoryTransaction — that
+            // packet doesn't exist at protocol 113. The Win10 1.1.5 client reports edits via UseItem
+            // (place) and PlayerAction (break), handled below; there was never a real 0x1E edit to decode.
             case ID_USE_ITEM -> applyEdit(PeBlockEditDecoder.decodeUseItem(pk));
             case ID_PLAYER_ACTION -> handlePlayerAction(pk);
+            case ID_INTERACT -> handleInteract(pk);
             case ID_ENTITY_FALL -> handleEntityFall(pk);
             case ID_ANIMATE -> handleInboundAnimate(pk);
             default -> { /* other gameplay packet — nothing to answer yet */ }
@@ -457,8 +476,33 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             case ACTION_STOP_SNEAK -> listener.onSneak(this, false);
             case ACTION_START_SPRINT -> listener.onSprint(this, true);
             case ACTION_STOP_SPRINT -> listener.onSprint(this, false);
+            case ACTION_RESPAWN -> handleRespawn();
             default -> { /* other actions (jump, glide…) not relayed yet */ }
         }
+    }
+
+    /**
+     * The client clicked "Respawn" on its death screen. Unlike JE / 0.14 (whose health is server-driven,
+     * so they never show a death screen for our silent respawn), the 1.1.5 client reports its own fatal
+     * falls and shows a death screen locally — which SetHealth alone can't dismiss. Answer the button:
+     * place the player back at spawn with a Respawn packet and refill the health bar, so the menu closes.
+     * The core already healed and moved the player on death, so this just resyncs the client.
+     */
+    private void handleRespawn() {
+        Location spawn = world.getSpawnLocation();
+        // Respawn Y is eye-level (like MovePlayer / 0.14's Respawn), not feet like StartGame — sending
+        // the feet Y spawned the player 1.62 blocks embedded in the ground.
+        float eyeY = (float) spawn.y() + EYE_HEIGHT;
+        sendGameBatch(b -> writeRespawn(b, (float) spawn.x(), eyeY, (float) spawn.z()));
+        setHealth(20); // MAX_HEALTH — refill the bar the death screen emptied
+    }
+
+    /** Encode a Respawn body (protocol 113): the spawn position as three little-endian floats. */
+    static void writeRespawn(ByteBuf b, float x, float y, float z) {
+        ByteBufUtils.writeVarInt(b, ID_RESPAWN);
+        b.writeFloatLE(x);
+        b.writeFloatLE(y);
+        b.writeFloatLE(z);
     }
 
     // Pack a block position into one long so a survival mine can remember its target across packets.
@@ -483,6 +527,24 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             }
         } catch (RuntimeException e) {
             LOGGER.debug(() -> "[PE] could not parse EntityFall: " + e);
+        }
+    }
+
+    /**
+     * The client attacked or interacted with another entity (InteractPacket): {@code byte action} then
+     * the target's runtime id (= the avatar's server entity id). A left-click is a melee attack — hand
+     * the target to the core, which resolves the victim and applies damage. Wrapped so a malformed
+     * packet can't take the session down.
+     */
+    private void handleInteract(ByteBuf pk) {
+        try {
+            int action = pk.readUnsignedByte();
+            long target = ByteBufUtils.readVarLong(pk);   // entity runtime id
+            if (action == INTERACT_LEFT_CLICK && loggedIn && listener != null) {
+                listener.onAttack(this, target);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debug(() -> "[PE] could not parse Interact: " + e);
         }
     }
 
@@ -636,8 +698,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         // Flight is only allowed outside survival (creative / spectator).
         sendAdventureSettings(joinGameMode().allowsFlight());
 
-        // Movement-speed attribute + starter hotbar before streaming chunks.
-        sendAttributes();
+        // Starter (empty) hotbar before streaming chunks.
         sendInventory();
 
         // Stream the initial window around spawn
@@ -650,6 +711,11 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             ByteBufUtils.writeVarInt(b, ID_PLAY_STATUS);
             ByteBufUtils.writeIntBE(b, PLAY_STATUS_PLAYER_SPAWN);
         });
+
+        // Movement-speed attribute — sent *after* PLAYER_SPAWN. A 1.1.5 client only applies attributes to
+        // an already-spawned local player (PocketMine syncs them post-spawn); sent before the spawn status
+        // it was silently dropped, leaving the client on its buggy default that accelerates without bound.
+        sendAttributes();
 
         // Creative palette, once, right after the spawn status — the point PocketMine sends it, when
         // the client's inventory UI is up and will accept it.

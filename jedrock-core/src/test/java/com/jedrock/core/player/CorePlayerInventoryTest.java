@@ -129,6 +129,25 @@ class CorePlayerInventoryTest {
         assertTrue(landed < 3, "a jump lands under the fall-damage threshold, got " + landed);
     }
 
+    @Test
+    void firstHitIsNotOnCooldownThenTheWindowBlocks() {
+        CorePlayer p = player(new NoopConnection());
+        // Regression: a fresh player's first hit must land (the initial sentinel must not read as an
+        // active i-frame window — the overflow bug made every PvP hit no-op).
+        assertFalse(p.isOnHurtCooldown(), "first hit lands");
+        assertTrue(p.isOnHurtCooldown(), "an immediate second hit is inside the i-frame window");
+    }
+
+    @Test
+    void resetFallDiscardsAnInProgressFall() {
+        CorePlayer p = player(new NoopConnection());
+        // A fall into the void never "lands", so its peak lingers until reset (as a teleport/respawn does).
+        p.trackFall(120, 100);        // descending from a high peak (120), still falling
+        p.resetFall();                // respawn: forget the fall
+        // The next move (near spawn) must not bill the phantom 120 -> spawn drop.
+        assertEquals(0.0, p.trackFall(65, 65), 1e-6, "reset fall is not billed on the next move");
+    }
+
     private static class NoopConnection implements PlayerConnection {
         @Override public ProtocolVersion getProtocolVersion() { return ProtocolVersion.PE_1_1_5; }
         @Override public String getAddress() { return "test"; }
