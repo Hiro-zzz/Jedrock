@@ -39,6 +39,9 @@ public final class Mcpe014Packets {
     public static final int ID_SET_SPAWN_POSITION = 0xb1;
     public static final int ID_ANIMATE = 0xb2;
     public static final int ID_RESPAWN = 0xb3;
+    public static final int ID_CONTAINER_OPEN = 0xb5;      // open a container GUI (chest)
+    public static final int ID_CONTAINER_CLOSE = 0xb6;     // close a container (both directions)
+    public static final int ID_CONTAINER_SET_SLOT = 0xb7;  // inbound: a client-driven slot move
     public static final int ID_CONTAINER_SET_CONTENT = 0xb9;
     public static final int ID_FULL_CHUNK_DATA = 0xbf;
     public static final int ID_SET_DIFFICULTY = 0xc0;
@@ -149,6 +152,17 @@ public final class Mcpe014Packets {
     public static void chunkRadiusUpdate(ByteBuf b, int radius) {
         b.writeByte(ID_CHUNK_RADIUS_UPDATE);
         b.writeInt(radius);
+    }
+
+    /** ContainerOpen (0.14): {@code byte windowid, byte type, short slots, int x, int y, int z} (all BE). */
+    public static void containerOpen(ByteBuf b, int windowId, int type, int slots, int x, int y, int z) {
+        b.writeByte(ID_CONTAINER_OPEN);
+        b.writeByte(windowId);
+        b.writeByte(type);
+        b.writeShort(slots);
+        b.writeInt(x);
+        b.writeInt(y);
+        b.writeInt(z);
     }
 
     /** EntityEvent (0.14): {@code long eid} (BE) + {@code byte event}. No trailing data at protocol 45. */

@@ -183,8 +183,8 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
-    public void openContainer(int windowId, String title, int slots) {
-        protocolHandler.openContainer(this, windowId, title, slots);
+    public void openContainer(int windowId, String title, int slots, int x, int y, int z) {
+        protocolHandler.openContainer(this, windowId, title, slots, x, y, z);
     }
 
     @Override

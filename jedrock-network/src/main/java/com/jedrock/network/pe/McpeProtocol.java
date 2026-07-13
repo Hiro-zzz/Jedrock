@@ -37,7 +37,10 @@ final class McpeProtocol {
     // MCPE 1.1 (protocol 113) uses ContainerSetContent (0x34) for inventory/creative content — NOT
     // the InventoryContent (0x31) of 1.2+. Its layout is: windowId, targetEid (entity id), slot count,
     // slots, then a hotbar-link count. Verified against PocketMine-MP at CURRENT_PROTOCOL = 113.
-    static final int ID_CONTAINER_SET_SLOT = 0x32;    // update one inventory slot (live hotbar refresh)
+    static final int ID_BLOCK_ENTITY_DATA = 0x38;     // a block-entity's NBT (a chest tile), carried in the chunk tail
+    static final int ID_CONTAINER_OPEN = 0x30;        // open a container GUI (chest)
+    static final int ID_CONTAINER_CLOSE = 0x31;       // close a container (both directions)
+    static final int ID_CONTAINER_SET_SLOT = 0x32;    // update one inventory slot (live hotbar refresh); inbound = a client move
     static final int ID_CONTAINER_SET_CONTENT = 0x34;
     static final int ID_ADVENTURE_SETTINGS = 0x37;
     static final int ID_SET_COMMANDS_ENABLED = 0x3B;  // toggle client-side "/" command parsing

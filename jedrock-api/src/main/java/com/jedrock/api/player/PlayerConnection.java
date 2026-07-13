@@ -106,10 +106,11 @@ public interface PlayerConnection {
     /**
      * Open a container window (a chest) on this client: {@code windowId} identifies it for later slot
      * updates and clicks, {@code title} is the shown name, {@code slots} the container's slot count (27
-     * for a chest). Follow with {@link #setWindowItems} to fill it. A connection with no window concept
+     * for a chest), and {@code (x, y, z)} is the block position (Bedrock's ContainerOpen needs it; Java
+     * ignores it). Follow with {@link #setWindowItems} to fill it. A connection with no window concept
      * may ignore it.
      */
-    default void openContainer(int windowId, String title, int slots) {}
+    default void openContainer(int windowId, String title, int slots, int x, int y, int z) {}
 
     /**
      * Replace the contents of an open window ({@code windowId}) with {@code states} / {@code counts},

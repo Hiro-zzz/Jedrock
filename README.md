@@ -13,8 +13,14 @@ Target versions:
 |---------|---------|----------|-----------|
 | Java Edition | **1.12.2** | 340 | Netty TCP |
 | Java Edition | **1.8** | 47 | Netty TCP |
-| Bedrock / Pocket Edition | **1.1.5** | 113 | RakNet over UDP |
+| Bedrock / Pocket Edition | **1.1.5** ⚠️ | 113 | RakNet over UDP |
 | Bedrock / Pocket Edition | **0.14** | 45 | RakNet over UDP |
+
+> ⚠️ **1.1.5 is experimental / known-buggy.** Join, movement, chat, block edits and cross-play work, but
+> the retail 1.1.5 client (confirmed on **both PC and mobile**) double-fires place/break (mitigated
+> server-side, not eliminated) and chests can't be opened on it (see [Known limits](#roadmap)). **0.14**
+> and **Java** are the clean Bedrock/PC targets. The problems are specific to the protocol-113 client
+> across platforms — not the input method, and not the core.
 
 Java Edition is **multi-version on one port**: the client's handshake protocol selects the encoder,
 so 1.8 and 1.12.2 share the listener (see [Multiversion](#multiversion)). Bedrock spans two eras that

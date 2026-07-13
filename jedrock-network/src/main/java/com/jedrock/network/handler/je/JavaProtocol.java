@@ -62,8 +62,8 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Set the item shown on this client's own cursor while a window is open ({@code state} 0 = clear). */
     void setCursorItem(JedrockConnection c, int state, int count);
 
-    /** Open a container window (chest) with {@code slots} container slots. */
-    void openContainer(JedrockConnection c, int windowId, String title, int slots);
+    /** Open a container window (chest) with {@code slots} container slots (block position for Bedrock). */
+    void openContainer(JedrockConnection c, int windowId, String title, int slots, int x, int y, int z);
 
     /** Replace an open window's contents (already in that window's slot order). */
     void setWindowItems(JedrockConnection c, int windowId, int[] states, int[] counts);

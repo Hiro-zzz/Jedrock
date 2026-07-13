@@ -348,8 +348,8 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     }
 
     @Override
-    public void openContainer(JedrockConnection c, int windowId, String title, int slots) {
-        openWindowId = windowId;
+    public void openContainer(JedrockConnection c, int windowId, String title, int slots, int x, int y, int z) {
+        openWindowId = windowId; // Java's Open Window needs no block position (x/y/z ignored)
         // Open Window (0x2D): windowId, window type string, chat title, slot count.
         send(c, CB_OPEN_WINDOW, b -> {
             b.writeByte(windowId);

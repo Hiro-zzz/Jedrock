@@ -60,8 +60,9 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     /** Compression mode observed on inbound batches; reused for outbound (chat etc.). */
     private volatile boolean rawDeflate = false;
 
-    /** Chunk streaming state; created once the client's requested radius is known. */
-    private ChunkView chunkView;
+    /** Chunk streaming state; created once the client's requested radius is known. Volatile: a chest
+     *  placed by another player reads it from that editor's thread to push a targeted chunk refresh. */
+    private volatile ChunkView chunkView;
     private final ChunkView.Sink chunkSink = new ChunkView.Sink() {
         @Override public void load(int cx, int cz) { sendChunk(cx, cz); }
         @Override public void unload(int cx, int cz) { /* PE 1.1.5 client culls by distance */ }
@@ -199,6 +200,16 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             ByteBufUtils.writeVarInt(b, (state >> 4) & 0xFF);                            // legacy block id
             ByteBufUtils.writeVarInt(b, (UPDATE_BLOCK_FLAG_ALL << 4) | (state & 0xF));   // (flags << 4) | meta
         });
+        // A chest is a block-entity, and the retail 1.1.5 client materializes it ONLY from chunk data —
+        // a standalone BlockEntityData won't do (verified: it still crashes on open). A freshly placed
+        // chest isn't in the already-sent chunk, so re-send that whole column now that the world holds the
+        // chest; the serializer writes the tile into the chunk tail, giving the client something to bind
+        // the GUI to. Only when this session actually holds the chunk — sendBlockChange runs on the
+        // editor's thread, so isLoaded (thread-safe) gates a foreign edit from pushing an off-view chunk.
+        if (Blocks.idOf(state) == Blocks.CHEST && chunkView != null
+                && chunkView.isLoaded(x >> 4, z >> 4)) {
+            sendChunk(x >> 4, z >> 4);
+        }
     }
 
     @Override
@@ -395,7 +406,9 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             // NB: id 0x1E is UpdateAttributes (server→client), not an inbound InventoryTransaction — that
             // packet doesn't exist at protocol 113. The Win10 1.1.5 client reports edits via UseItem
             // (place) and PlayerAction (break), handled below; there was never a real 0x1E edit to decode.
-            case ID_USE_ITEM -> applyEdit(PeBlockEditDecoder.decodeUseItem(pk));
+            case ID_USE_ITEM -> handleUseItem(pk);
+            case ID_CONTAINER_SET_SLOT -> handleInboundContainerSetSlot(pk);
+            case ID_CONTAINER_CLOSE -> handleInboundContainerClose(pk);
             case ID_PLAYER_ACTION -> handlePlayerAction(pk);
             case ID_INTERACT -> handleInteract(pk);
             case ID_ENTITY_FALL -> handleEntityFall(pk);
@@ -431,6 +444,75 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         if (edit != null && loggedIn && listener != null) {
             listener.onBlockChange(this, edit.x(), edit.y(), edit.z(), edit.state());
         }
+    }
+
+    // Placement debounce: a single click on the Win10 1.1.5 client emits SEVERAL UseItem placements (at
+    // different cells — 0.14 sends one, so this is purely the 1.1.5 client). Collapse a burst to its first
+    // block by resetting the timer on EVERY attempt: as long as the shots keep arriving within the window,
+    // they're all treated as one click. A genuinely new click (after a gap) places again. Tunable.
+    private long lastPlaceAttemptNanos;
+    private static final long PLACE_DEBOUNCE_NANOS =
+            Long.getLong("jedrock.pe.placeDebounceMs", 300L) * 1_000_000L;
+
+    /**
+     * A right-click with an item (UseItem 0x23). If the clicked block is interactable (a chest), the core
+     * uses it (opens the window) and we suppress the placement the same packet would otherwise be.
+     */
+    private void handleUseItem(ByteBuf pk) {
+        PeBlockEditDecoder.UseItem use = PeBlockEditDecoder.decodeUseItemInteraction(pk);
+        if (use == null || !loggedIn || listener == null) {
+            return;
+        }
+        if (listener.onUseBlock(this, use.x(), use.y(), use.z())) {
+            return; // a chest (or other interactable) — handled, no placement
+        }
+        PeBlockEditDecoder.BlockEdit placement = use.placement();
+        if (placement != null) {
+            long now = System.nanoTime();
+            long sinceMs = (now - lastPlaceAttemptNanos) / 1_000_000L;
+            boolean withinBurst = now - lastPlaceAttemptNanos < PLACE_DEBOUNCE_NANOS;
+            lastPlaceAttemptNanos = now; // reset on every attempt, so a whole burst collapses to its first
+            if (withinBurst) {
+                LOGGER.debug(() -> "[PE] placement debounced (+" + sinceMs + "ms) @ "
+                        + placement.x() + "," + placement.y() + "," + placement.z());
+                return; // still inside the click's burst — only the first shot places
+            }
+            LOGGER.debug(() -> "[PE] placement (+" + sinceMs + "ms) @ "
+                    + placement.x() + "," + placement.y() + "," + placement.z());
+        }
+        applyEdit(placement);
+    }
+
+    /**
+     * The client moved an item in a container and reports the new slot value (ContainerSetSlot 0x32,
+     * inbound — Bedrock is client-authoritative here). windowId 0 = its own inventory; the chest's id =
+     * the open chest. Hand it to the core to apply.
+     */
+    private void handleInboundContainerSetSlot(ByteBuf pk) {
+        try {
+            int windowId = pk.readUnsignedByte();
+            int slot = ByteBufUtils.readSignedVarInt(pk);
+            ByteBufUtils.readSignedVarInt(pk);           // hotbar slot — unused
+            McpeCodec.Item item = McpeCodec.readItem(pk);
+            // trailing selectSlot byte ignored
+            if (loggedIn && listener != null && slot >= 0) {
+                listener.onContainerSetSlot(this, windowId, slot, item.state(), item.count());
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debug(() -> "[PE] could not parse ContainerSetSlot: " + e);
+        }
+    }
+
+    /** The client closed a container (ContainerClose 0x31). Clear its state and echo the close back. */
+    private void handleInboundContainerClose(ByteBuf pk) {
+        int windowId = pk.readUnsignedByte();
+        if (loggedIn && listener != null) {
+            listener.onWindowClose(this);
+        }
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_CONTAINER_CLOSE);
+            b.writeByte(windowId);
+        });
     }
 
     /** The block a survival player is currently mining (from START_BREAK), broken on STOP_BREAK. */
@@ -827,6 +909,20 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             }
             ByteBufUtils.writeVarInt(b, 0); // hotbar-link count
         });
+    }
+
+    @Override
+    public void openContainer(int windowId, String title, int slots, int x, int y, int z) {
+        // Chests are not openable on the retail 1.1.5 client yet. Two dead ends, both client-verified:
+        // a block-bound ContainerOpen crashes it (it won't build a chest block-entity from our packets),
+        // and an entity-bound (minecart-chest) container doesn't crash but raises no GUI. Stubbed to a
+        // note until the wire is cracked; 0.14 and Java chests are unaffected. See the protocol memory.
+        sendMessage("{gray}Сундуки на этой версии (1.1.5) пока недоступны.");
+    }
+
+    @Override
+    public void setWindowItems(int windowId, int[] states, int[] counts) {
+        // No-op: 1.1.5 chest opening is stubbed (see openContainer), so there is no window to fill.
     }
 
     /** Send the standard movement-speed attribute (0.1) to stop the PE client's runaway acceleration. */

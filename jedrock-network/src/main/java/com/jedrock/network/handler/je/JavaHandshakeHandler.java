@@ -122,7 +122,7 @@ public final class JavaHandshakeHandler implements JavaProtocol {
     @Override public void swingArm(JedrockConnection c, long entityId) { throw noPlayer(); }
     @Override public void playHurtAnimation(JedrockConnection c, long entityId) { throw noPlayer(); }
     @Override public void setCursorItem(JedrockConnection c, int state, int count) { throw noPlayer(); }
-    @Override public void openContainer(JedrockConnection c, int windowId, String title, int slots) { throw noPlayer(); }
+    @Override public void openContainer(JedrockConnection c, int windowId, String title, int slots, int x, int y, int z) { throw noPlayer(); }
     @Override public void setWindowItems(JedrockConnection c, int windowId, int[] states, int[] counts) { throw noPlayer(); }
     @Override public void setPose(JedrockConnection c, long entityId, boolean sneaking, boolean sprinting, boolean usingItem) { throw noPlayer(); }
     @Override public void sendBlockChange(JedrockConnection c, int x, int y, int z, int state) { throw noPlayer(); }

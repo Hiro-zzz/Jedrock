@@ -37,7 +37,15 @@ final class PeBlockEditDecoder {
      * (svarint), player + click Vector3f (6 floats) and one flag byte, then the held Item. The new
      * block goes at the clicked block offset by the face. A paired (0,0,0) packet is a sync echo.
      */
-    static BlockEdit decodeUseItem(ByteBuf pk) {
+    /** A right-click on a block: the clicked block cell plus the placement it implies (may be null). */
+    record UseItem(int x, int y, int z, BlockEdit placement) {}
+
+    /**
+     * Decode the Win10 1.1.5 UseItem (0x23) into the clicked block cell and the placement it implies.
+     * The caller checks the clicked cell first (a chest opens instead of placing), then applies the
+     * placement. A paired (0,0,0) packet is a sync echo → null.
+     */
+    static UseItem decodeUseItemInteraction(ByteBuf pk) {
         try {
             int bx = ByteBufUtils.readSignedVarInt(pk);
             int by = ByteBufUtils.readVarInt(pk);   // block y is unsigned
@@ -50,11 +58,17 @@ final class PeBlockEditDecoder {
             if (bx == 0 && by == 0 && bz == 0) {
                 return null;                        // sync echo
             }
-            return place(bx, by, bz, face, itemState);
+            return new UseItem(bx, by, bz, place(bx, by, bz, face, itemState));
         } catch (RuntimeException e) {
             LOGGER.debug(() -> "[PE] could not parse UseItem place: " + e);
             return null;
         }
+    }
+
+    /** Just the placement from a UseItem — the clicked cell is discarded. */
+    static BlockEdit decodeUseItem(ByteBuf pk) {
+        UseItem use = decodeUseItemInteraction(pk);
+        return use == null ? null : use.placement();
     }
 
     /** A decoded PlayerAction: the action id and the block it targets (0,0,0 for non-block actions). */

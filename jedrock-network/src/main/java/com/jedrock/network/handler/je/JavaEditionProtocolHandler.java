@@ -315,8 +315,8 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     }
 
     @Override
-    public void openContainer(JedrockConnection c, int windowId, String title, int slots) {
-        openWindowId = windowId;
+    public void openContainer(JedrockConnection c, int windowId, String title, int slots, int x, int y, int z) {
+        openWindowId = windowId; // Java's Open Window needs no block position (x/y/z ignored)
         c.send(new ClientboundOpenWindow(windowId, "minecraft:chest", title, slots));
     }
 

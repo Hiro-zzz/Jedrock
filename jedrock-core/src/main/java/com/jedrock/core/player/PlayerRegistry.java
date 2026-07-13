@@ -32,6 +32,11 @@ public final class PlayerRegistry {
         return Optional.ofNullable(byId.get(uuid));
     }
 
+    /** The registered player for {@code uuid}, or {@code null} — no Optional. Used to spot a stale session. */
+    public CorePlayer getByIdOrNull(UUID uuid) {
+        return byId.get(uuid);
+    }
+
     public Optional<Player> getByName(String name) {
         UUID uuid = byName.get(nameKey(name));
         return uuid == null ? Optional.empty() : Optional.ofNullable(byId.get(uuid));
@@ -85,10 +90,16 @@ public final class PlayerRegistry {
         if (uuid == null) {
             return null;
         }
-        CorePlayer player = byId.remove(uuid);
-        if (player != null) {
-            byName.remove(nameKey(player.getName()), uuid);
+        CorePlayer player = byId.get(uuid);
+        // Only evict the uuid-indexed player if THIS connection still owns it. A crashed client leaves a
+        // stale session that RakNet times out only later — by then the same account may have rejoined on a
+        // new connection (byId now points to the new player). Removing on the stale connection must not
+        // evict the live player, or it becomes a phantom (avatar shown, but absent from the registry).
+        if (player == null || player.getConnection() != connection) {
+            return null; // stale connection whose player was already replaced — nothing more to clean up
         }
+        byId.remove(uuid);
+        byName.remove(nameKey(player.getName()), uuid);
         return player;
     }
 

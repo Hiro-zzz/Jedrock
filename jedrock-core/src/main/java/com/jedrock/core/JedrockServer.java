@@ -272,6 +272,11 @@ public class JedrockServer implements Server, ConnectionListener {
     private void bindBedrock(String label, int port, ProtocolVersion version) {
         try {
             networkServer.bind(new InetSocketAddress(config.bindHost(), port), version);
+            if (version == ProtocolVersion.PE_1_1_5) {
+                LOGGER.warn("Bedrock 1.1.5 is EXPERIMENTAL / known-buggy: the retail client (PC AND mobile) "
+                        + "double-fires place/break (mitigated, not eliminated) and chests can't be opened. "
+                        + "Join/move/chat/blocks/cross-play work. Prefer 0.14 or Java for a clean experience.");
+            }
         } catch (Exception e) {
             LOGGER.warn("Could not bind Bedrock " + label + " on " + config.bindHost() + ":" + port
                     + " (" + rootCauseMessage(e) + "); " + label + " disabled for this run. "
@@ -421,6 +426,17 @@ public class JedrockServer implements Server, ConnectionListener {
         // entry below. Markup sites still escape() it — stripCodes keeps a legitimate '_' intact.
         username = ChatText.stripCodes(username);
 
+        // Evict any stale session for the same account before the new one registers. A crashed client is
+        // only timed out by RakNet later, so the same player can rejoin while their old session (avatar,
+        // registry + world entry) still lingers; left in place it shows a ghost avatar to everyone and its
+        // eventual timeout would race the live session. Remove it cleanly first.
+        CorePlayer ghost = playerRegistry.getByIdOrNull(uuid);
+        if (ghost != null && ghost.getConnection() != connection) {
+            evictPlayer(ghost);
+            ghost.getConnection().close("Logged in from another location");
+            LOGGER.info("Evicted stale session for " + username + " on re-login");
+        }
+
         Location spawn = defaultWorld.getSpawnLocation();
         // Match the mode the client actually joined in (the same value the join packets used): the
         // remembered choice from earlier this run, or the config default for a first join.
@@ -474,19 +490,26 @@ public class JedrockServer implements Server, ConnectionListener {
     public void onDisconnect(PlayerConnection connection) {
         CorePlayer player = playerRegistry.removeByConnection(connection);
         if (player == null) {
-            return; // never fully logged in
+            return; // never fully logged in, or a stale connection already replaced by a re-login
         }
-        defaultWorld.removePlayer(player);
+        evictPlayer(player);
         eventBus.post(new PlayerQuitEvent(player));
         broadcast("{yellow}" + ChatText.escape(player.getName()) + " left the game", null);
+        LOGGER.info(player.getName() + " disconnected (" + playerRegistry.size() + " online)");
+    }
 
-        // Drop the leaver from everyone else's tab and world.
+    /**
+     * Tear down a player's presence: drop it from the registry, the world, and every other player's tab
+     * and view (hiding its avatar). Shared by a normal disconnect and the re-login eviction of a stale
+     * session, so a lingering avatar never outlives its player. Safe to call for an already-removed player.
+     */
+    private void evictPlayer(CorePlayer player) {
+        playerRegistry.removeByConnection(player.getConnection());
+        defaultWorld.removePlayer(player);
         for (Player other : playerRegistry.all()) {
             other.getConnection().removeFromTab(player.getUniqueId());
             other.getConnection().hidePlayer(player.getUniqueId(), player.getEntityId());
         }
-
-        LOGGER.info(player.getName() + " disconnected (" + playerRegistry.size() + " online)");
     }
 
     @Override
@@ -546,6 +569,7 @@ public class JedrockServer implements Server, ConnectionListener {
         // Edge wall: an edit outside the finite world is refused and the client corrected with the
         // real (void = air) block, so the world can't grow past its bounds.
         if (!defaultWorld.isInsideBounds(x, z)) {
+            LOGGER.debug(() -> "[edit] REFUSED (out of bounds) " + x + "," + y + "," + z);
             connection.sendBlockChange(x, y, z, defaultWorld.getBlockId(x, y, z));
             return;
         }
@@ -555,10 +579,14 @@ public class JedrockServer implements Server, ConnectionListener {
         if (editor != null) {
             Location loc = editor.getLocation();
             if (!judge.allowsInteraction(loc.x(), loc.y(), loc.z(), x, y, z)) {
+                LOGGER.debug(() -> "[edit] REFUSED (reach) " + x + "," + y + "," + z + " from "
+                        + String.format("%.1f,%.1f,%.1f", loc.x(), loc.y(), loc.z()));
                 connection.sendBlockChange(x, y, z, defaultWorld.getBlockId(x, y, z));
                 return;
             }
         }
+        LOGGER.debug(() -> "[edit] APPLIED " + x + "," + y + "," + z + " state=" + state
+                + " → " + playerRegistry.size() + " clients");
         // The block that was here, captured before the edit — a survival miner picks it up.
         int previous = defaultWorld.getBlockId(x, y, z);
 
@@ -742,8 +770,13 @@ public class JedrockServer implements Server, ConnectionListener {
         connection.setCursorItem(0, 0);
     }
 
-    /** Window id used for a player's open chest (a player has at most one container open at a time). */
-    private static final int CHEST_WINDOW_ID = 1;
+    /**
+     * Window id for a player's open chest (a player has at most one container open). Must be ≥ 2: MCPE
+     * reserves 0/1 (PMMP assigns custom windows from {@code max(2, …)}) and a 1.1.5 client crashes on a
+     * ContainerOpen with id 1; 119-122 are the off-hand / armor / creative / hotbar windows. 10 is safe
+     * on every edition (Java accepts any container window id).
+     */
+    private static final int CHEST_WINDOW_ID = 10;
 
     @Override
     public boolean onUseBlock(PlayerConnection connection, int x, int y, int z) {
@@ -757,8 +790,8 @@ public class JedrockServer implements Server, ConnectionListener {
         if (player != null) {
             Container chest = defaultWorld.getChestContainer(x, y, z);
             player.openContainer(CHEST_WINDOW_ID, chest);
-            connection.openContainer(CHEST_WINDOW_ID, "Chest", 27);
-            resyncChest(player, connection);
+            connection.openContainer(CHEST_WINDOW_ID, "Chest", 27, x, y, z);
+            sendChestContents(player, connection);
         }
         return true;
     }
@@ -797,17 +830,26 @@ public class JedrockServer implements Server, ConnectionListener {
             }
             defaultWorld.markDirty(); // a chest edit must be persisted by autosave / shutdown
         }
-        resyncChest(player, connection);
+        sendChestContents(player, connection);
     }
 
-    /** Push the whole open chest window (chest slots + the player's main + hotbar) and the cursor. */
-    private void resyncChest(CorePlayer player, PlayerConnection connection) {
+    /**
+     * Push the open chest window's contents. The two editions frame it differently: <b>Java</b> puts the
+     * player inventory <em>inside</em> the chest window (27 chest + 27 main + 9 hotbar = 63 slots), and is
+     * server-authoritative (also resyncs the cursor); <b>Bedrock</b>'s chest window is just the 27 chest
+     * slots — the player inventory is the separate window 0 the client already owns.
+     */
+    private void sendChestContents(CorePlayer player, PlayerConnection connection) {
         Container chest = player.getOpenContainer();
+        int windowId = player.getOpenWindowId();
+        if (connection.getProtocolVersion().isBedrock()) {
+            connection.setWindowItems(windowId, chest.states(), chest.counts());
+            return;
+        }
         int[] ps = player.inventoryStates();
         int[] pc = player.inventoryCounts();
-        int total = 27 + 36;
-        int[] states = new int[total];
-        int[] counts = new int[total];
+        int[] states = new int[63];
+        int[] counts = new int[63];
         for (int i = 0; i < 27; i++) {                 // chest
             states[i] = chest.stateAt(i);
             counts[i] = chest.countAt(i);
@@ -820,8 +862,30 @@ public class JedrockServer implements Server, ConnectionListener {
             states[54 + i] = ps[i];
             counts[54 + i] = pc[i];
         }
-        connection.setWindowItems(player.getOpenWindowId(), states, counts);
+        connection.setWindowItems(windowId, states, counts);
         connection.setCursorItem(player.getCursor().state(), player.getCursor().count());
+    }
+
+    @Override
+    public void onContainerSetSlot(PlayerConnection connection, int windowId, int slot, int state, int count) {
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player == null || slot < 0) {
+            return;
+        }
+        // Bedrock is client-authoritative: it already moved the item and just tells us the new slot value.
+        if (player.hasContainerOpen() && windowId == player.getOpenWindowId()) {
+            Container chest = player.getOpenContainer();
+            if (slot < chest.size()) {
+                chest.set(slot, state, count);
+                defaultWorld.markDirty();
+            }
+        } else if (windowId == 0) {
+            // The player's own inventory (PE window 0: 0-8 hotbar, 9-35 main — same as the core storage).
+            Container inv = player.getInventory();
+            if (slot < 36) {
+                inv.set(slot, state, count);
+            }
+        }
     }
 
     @Override

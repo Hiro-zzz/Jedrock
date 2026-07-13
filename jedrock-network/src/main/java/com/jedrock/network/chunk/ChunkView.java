@@ -1,15 +1,16 @@
 package com.jedrock.network.chunk;
 
-import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Tracks which chunks a single connection has been sent and streams the difference as the player
  * moves. Recentering loads the chunks newly in range (nearest ring first, for gentler pop-in) and
  * unloads those that fell out of range — so a client only ever holds a square window around itself.
  *
- * <p>Not thread-safe by design: a connection's inbound movement is processed on a single thread,
- * so its view is only ever touched from there.
+ * <p>Recentering (load/unload) only ever runs on the connection's own inbound-movement thread. The
+ * loaded set is concurrent so a foreign thread — a block edit relayed from another player — can safely
+ * ask {@link #isLoaded} whether to push a targeted chunk refresh (e.g. a placed chest's block-entity).
  */
 public final class ChunkView {
 
@@ -20,7 +21,7 @@ public final class ChunkView {
     }
 
     private final int radius;
-    private final Set<Long> loaded = new HashSet<>();
+    private final Set<Long> loaded = ConcurrentHashMap.newKeySet();
     private int centerX;
     private int centerZ;
     private boolean initialized;
@@ -65,6 +66,11 @@ public final class ChunkView {
                 }
             }
         }
+    }
+
+    /** Whether the chunk {@code (chunkX, chunkZ)} is currently held by this view. Thread-safe. */
+    public boolean isLoaded(int chunkX, int chunkZ) {
+        return loaded.contains(key(chunkX, chunkZ));
     }
 
     private static long key(int x, int z) {

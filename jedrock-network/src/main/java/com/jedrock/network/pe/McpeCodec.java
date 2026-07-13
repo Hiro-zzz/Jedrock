@@ -39,16 +39,17 @@ final class McpeCodec {
         ByteBufUtils.writeVarInt(b, 0);                  // can destroy: none
     }
 
+    /** A decoded network Item: canonical {@code (id << 4) | meta} state (0 = air) and its stack count. */
+    record Item(int state, int count) {}
+
     /**
-     * Read one network Item (protocol 113) and return its canonical state {@code (id << 4) | meta}
-     * (0 = air). The Bedrock aux field packs {@code meta << 8 | count}, so the block variant is the
-     * high byte. Consumes the whole item so the read position stays aligned: id, aux, optional NBT,
-     * and the can-place-on / can-destroy string lists.
+     * Read one network Item (protocol 113): id, aux ({@code meta << 8 | count}), optional NBT, and the
+     * can-place-on / can-destroy string lists. Consumes the whole item so the read stays aligned.
      */
-    static int readItemState(ByteBuf pk) {
+    static Item readItem(ByteBuf pk) {
         int id = ByteBufUtils.readSignedVarInt(pk);
         if (id == 0) {
-            return Blocks.AIR; // air — no further fields
+            return new Item(Blocks.AIR, 0); // air — no further fields
         }
         int aux = ByteBufUtils.readSignedVarInt(pk); // meta << 8 | count
         int nbtLen = pk.readShortLE() & 0xFFFF;      // NBT length (little-endian)
@@ -65,11 +66,45 @@ final class McpeCodec {
             throw new IllegalArgumentException("canDestroy count out of bounds: " + canDestroy);
         }
         for (int i = 0; i < canDestroy; i++) ByteBufUtils.readString(pk);
-        return Blocks.state(id, aux >> 8);
+        return new Item(Blocks.state(id, aux >> 8), aux & 0xFF);
+    }
+
+    /** As {@link #readItem} but returning only the canonical state (0 = air). */
+    static int readItemState(ByteBuf pk) {
+        return readItem(pk).state();
     }
 
     /** As {@link #readItemState} but discarding the metadata — for items we only need to skip. */
     static int readItemId(ByteBuf pk) {
         return Blocks.idOf(readItemState(pk));
+    }
+
+    /**
+     * Write a chest block-entity compound as protocol-113 <em>network</em> NBT (unsigned-varint string
+     * lengths, zigzag-varint ints): the minimal {@code {id:"Chest", x, y, z}} a 1.1.5 client needs to
+     * bind a chest GUI to the block. Without the tile the client CRASHES on opening the chest.
+     */
+    static void writeChestTile(ByteBuf b, int x, int y, int z) {
+        b.writeByte(0x0A);                 // TAG_Compound (root)
+        writeNbtString(b, "");             // root name (empty)
+        b.writeByte(0x08);                 // TAG_String
+        writeNbtString(b, "id");
+        writeNbtString(b, "Chest");
+        writeNbtInt(b, "x", x);
+        writeNbtInt(b, "y", y);
+        writeNbtInt(b, "z", z);
+        b.writeByte(0x00);                 // TAG_End (closes the root compound)
+    }
+
+    private static void writeNbtString(ByteBuf b, String s) {
+        byte[] bytes = s.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        ByteBufUtils.writeVarInt(b, bytes.length); // network NBT: unsigned-varint length
+        b.writeBytes(bytes);
+    }
+
+    private static void writeNbtInt(ByteBuf b, String name, int value) {
+        b.writeByte(0x03);                 // TAG_Int
+        writeNbtString(b, name);
+        ByteBufUtils.writeSignedVarInt(b, value);  // network NBT: zigzag varint
     }
 }

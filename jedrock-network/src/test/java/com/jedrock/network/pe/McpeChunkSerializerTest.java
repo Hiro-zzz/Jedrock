@@ -51,6 +51,30 @@ class McpeChunkSerializerTest {
         assertEquals(0, meta[0] & 0xF, "no metadata where there is no block");
     }
 
+    @Test
+    void appendsAChestTileToTheChunkTail() {
+        // A chest at chunk-(0,0) section-local (3,5,7) has absolute world coords (3,5,7).
+        World world = new OneBlockWorld(Blocks.state(Blocks.CHEST, 0));
+        byte[] data = McpeChunkSerializer.serialize(world, 0, 0);
+
+        // The tail is a run of network-NBT tile compounds with no count prefix; the only tile here is our
+        // chest, so the payload must END with exactly the bytes McpeCodec.writeChestTile produces for it.
+        ByteBuf expected = Unpooled.buffer();
+        McpeCodec.writeChestTile(expected, 3, 5, 7);
+        byte[] tile = new byte[expected.readableBytes()];
+        expected.readBytes(tile);
+        expected.release();
+
+        assertEquals(tile.length > 0, true, "chest tile is non-empty");
+        byte[] tail = new byte[tile.length];
+        System.arraycopy(data, data.length - tile.length, tail, 0, tile.length);
+        org.junit.jupiter.api.Assertions.assertArrayEquals(tile, tail, "chunk ends with the chest's tile NBT");
+
+        // A chest-free column has no tail: the same world with wool is shorter by exactly the tile length.
+        byte[] woolData = McpeChunkSerializer.serialize(new OneBlockWorld(Blocks.state(Blocks.WOOL, 0)), 0, 0);
+        assertEquals(woolData.length + tile.length, data.length, "the chest adds exactly its tile to the tail");
+    }
+
     /** World with exactly one non-air block (a given state) at {@link #BX},{@link #BY},{@link #BZ}. */
     private record OneBlockWorld(int state) implements World {
         @Override

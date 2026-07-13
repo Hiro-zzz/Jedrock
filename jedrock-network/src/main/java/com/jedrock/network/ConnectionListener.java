@@ -100,6 +100,14 @@ public interface ConnectionListener {
     default void onCreativeSetSlot(PlayerConnection connection, int coreSlot, int state, int count) {}
 
     /**
+     * A Bedrock client reported a container slot change (it drives its own inventory and sends a
+     * ContainerSetSlot per changed slot — client-authoritative, unlike Java's server-authoritative click).
+     * {@code windowId} 0 = the player's own inventory; the open chest's id = the chest container. The core
+     * applies the reported {@code state}/{@code count} to that slot.
+     */
+    default void onContainerSetSlot(PlayerConnection connection, int windowId, int slot, int state, int count) {}
+
+    /**
      * A player left-clicked (attacked) another entity. {@code targetEntityId} is the server-assigned id
      * of the victim's avatar ({@code Entity#getEntityId}); the core resolves it to a player and applies
      * melee damage. The client sends its own arm-swing separately ({@link #onSwingArm}). Fires on an I/O

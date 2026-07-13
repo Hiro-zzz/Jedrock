@@ -207,6 +207,8 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
             case ID_TEXT -> handleText(in);
             case ID_REMOVE_BLOCK -> handleRemoveBlock(in);
             case ID_USE_ITEM -> handleUseItem(in);
+            case ID_CONTAINER_SET_SLOT -> handleContainerSetSlot(in);
+            case ID_CONTAINER_CLOSE -> handleContainerClose(in);
             case ID_PLAYER_ACTION -> handlePlayerAction(in);
             case ID_INTERACT -> handleInteract(in);
             case ID_ANIMATE -> handleAnimate(in);
@@ -266,21 +268,80 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         int face = in.readUnsignedByte();
         in.skipBytes(6 * 4);                    // fx,fy,fz, posX,posY,posZ
         int state = readSlotState(in);
-        if (face < 6 && state != Blocks.AIR && Blocks.isKnown(Blocks.idOf(state))
-                && loggedIn && listener != null) {
+        if (!loggedIn || listener == null) {
+            return;
+        }
+        // Right-click a block: if it's a chest, open it (suppress the placement this packet would be).
+        if (listener.onUseBlock(this, x, y, z)) {
+            return;
+        }
+        if (face < 6 && state != Blocks.AIR && Blocks.isKnown(Blocks.idOf(state))) {
             listener.onBlockChange(this,
                     x + FACE_DX[face], y + FACE_DY[face], z + FACE_DZ[face], state);
         }
     }
 
     /** Read a 0.14 Slot far enough for its canonical state; id<=0 means air. */
-    private static int readSlotState(ByteBuf in) {
-        if (in.readableBytes() < 2) return Blocks.AIR;
-        int id = in.readShort();
-        if (id <= 0) return Blocks.AIR;
-        in.readByte();                          // count
+    /** A decoded 0.14 item slot: canonical state (0 = air) and stack count. */
+    private record Slot(int state, int count) {}
+
+    private static Slot readSlot(ByteBuf in) {
+        if (in.readableBytes() < 2) return new Slot(Blocks.AIR, 0);
+        int id = in.readShort();                // signed short; <= 0 = air
+        if (id <= 0) return new Slot(Blocks.AIR, 0);
+        int count = in.readUnsignedByte();
         int damage = in.readableBytes() >= 2 ? in.readShort() : 0;
-        return Blocks.state(id, damage & 0x0F);
+        // trailing LE nbtLen + nbt (the item is the last field of these packets) is left unread
+        return new Slot(Blocks.state(id, damage & 0x0F), count);
+    }
+
+    private static int readSlotState(ByteBuf in) {
+        return readSlot(in).state();
+    }
+
+    @Override
+    public void openContainer(int windowId, String title, int slots, int x, int y, int z) {
+        // ContainerOpen (0xb5), type 0 = CHEST/CONTAINER; 0.14 carries the slot count and int coords.
+        sendWrapped(b -> Mcpe014Packets.containerOpen(b, windowId, 0, slots, x, y, z));
+    }
+
+    @Override
+    public void setWindowItems(int windowId, int[] states, int[] counts) {
+        // ContainerSetContent (0xb9) for the chest window (just its own slots; the player inventory is
+        // window 0). 0.14 crashes on an id it can't render, so anything outside the safe set becomes air.
+        sendWrapped(b -> {
+            b.writeByte(ID_CONTAINER_SET_CONTENT);
+            b.writeByte(windowId);
+            b.writeShort(states.length);
+            for (int i = 0; i < states.length; i++) {
+                int state = Pe014Blocks.supports(Blocks.idOf(states[i])) ? states[i] : Blocks.AIR;
+                Mcpe014Packets.writeSlot(b, state, counts[i]);
+            }
+            b.writeShort(0); // hotbar-link count
+        });
+    }
+
+    /** The client moved an item in a container (inbound ContainerSetSlot 0xb7 — client-authoritative). */
+    private void handleContainerSetSlot(ByteBuf in) {
+        int windowId = in.readUnsignedByte();
+        int slot = in.readShort();
+        in.readShort();                         // hotbarSlot — unused
+        Slot item = readSlot(in);
+        if (loggedIn && listener != null && slot >= 0) {
+            listener.onContainerSetSlot(this, windowId, slot, item.state(), item.count());
+        }
+    }
+
+    /** The client closed a container (inbound ContainerClose 0xb6). Clear state and echo the close back. */
+    private void handleContainerClose(ByteBuf in) {
+        int windowId = in.readUnsignedByte();
+        if (loggedIn && listener != null) {
+            listener.onWindowClose(this);
+        }
+        sendWrapped(b -> {
+            b.writeByte(ID_CONTAINER_CLOSE);
+            b.writeByte(windowId);
+        });
     }
 
     private void handlePlayerAction(ByteBuf in) {
