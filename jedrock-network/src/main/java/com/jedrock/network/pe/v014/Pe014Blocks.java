@@ -70,6 +70,9 @@ public final class Pe014Blocks {
         metas(s, 161, 0, 1);                               // leaves2
         metas(s, 162, 0, 1);                               // log2
         plain(s, 172, 173, 174);                           // hardened clay, coal block, packed ice
+        // Conservative additions — classic blocks present by 0.14, ids shared with Java. Grow this line
+        // only against a real 0.14 client; an id 0.14 can't render crashes the menu.
+        plain(s, 60, 110, 78, 30, 25);                     // farmland, mycelium, snow layer, cobweb, note block
 
         int[] out = new int[s.size()];
         for (int i = 0; i < out.length; i++) {

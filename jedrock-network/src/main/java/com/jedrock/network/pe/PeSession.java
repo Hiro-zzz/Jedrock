@@ -406,6 +406,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             // NB: id 0x1E is UpdateAttributes (server→client), not an inbound InventoryTransaction — that
             // packet doesn't exist at protocol 113. The Win10 1.1.5 client reports edits via UseItem
             // (place) and PlayerAction (break), handled below; there was never a real 0x1E edit to decode.
+            case ID_MOB_EQUIPMENT -> handleMobEquipment(pk);
             case ID_USE_ITEM -> handleUseItem(pk);
             case ID_CONTAINER_SET_SLOT -> handleInboundContainerSetSlot(pk);
             case ID_CONTAINER_CLOSE -> handleInboundContainerClose(pk);
@@ -454,6 +455,10 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     private static final long PLACE_DEBOUNCE_NANOS =
             Long.getLong("jedrock.pe.placeDebounceMs", 300L) * 1_000_000L;
 
+    /** The player's currently selected hotbar slot (0-8), tracked from MobEquipment — the "held" item for
+     *  the 1.1.5 click-transfer chest deposit. */
+    private int heldSlot;
+
     /**
      * A right-click with an item (UseItem 0x23). If the clicked block is interactable (a chest), the core
      * uses it (opens the window) and we suppress the placement the same packet would otherwise be.
@@ -463,8 +468,10 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         if (use == null || !loggedIn || listener == null) {
             return;
         }
-        if (listener.onUseBlock(this, use.x(), use.y(), use.z())) {
-            return; // a chest (or other interactable) — handled, no placement
+        // 1.1.5 can't open a real chest window, so a chest right-click is click-transfer, not a window.
+        // The core withdraws (plain) or deposits the held hotbar slot (sneaking); either way it's handled.
+        if (listener.onChestInteract(this, use.x(), use.y(), use.z(), heldSlot)) {
+            return; // a chest — click-transfer handled, no placement
         }
         PeBlockEditDecoder.BlockEdit placement = use.placement();
         if (placement != null) {
@@ -481,6 +488,35 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
                     + placement.x() + "," + placement.y() + "," + placement.z());
         }
         applyEdit(placement);
+    }
+
+    /**
+     * MobEquipment (0x1f): the client changed its selected hotbar item. Track the hotbar slot (0-8) so the
+     * click-transfer chest deposit knows which inventory slot the player is holding. Layout: entity runtime
+     * id, the equipped item, inventorySlot (byte), hotbarSlot (byte), windowId (byte).
+     *
+     * <p>In <b>creative</b> the client owns its inventory (it never sends the server a survival-style slot
+     * update), so we mirror the equipped item into the core inventory here — that's what lets a creative
+     * chest deposit know what the player holds. Survival is server-authoritative, so we do NOT let the
+     * client overwrite its slot there (the server already knows the contents from mining).
+     */
+    private void handleMobEquipment(ByteBuf pk) {
+        try {
+            ByteBufUtils.readVarLong(pk);          // entity runtime id
+            McpeCodec.Item item = McpeCodec.readItem(pk); // equipped item
+            pk.readUnsignedByte();                 // inventorySlot
+            int hotbarSlot = pk.readUnsignedByte();
+            // trailing windowId byte ignored
+            if (hotbarSlot < 9) {
+                heldSlot = hotbarSlot;
+                LOGGER.debug(() -> "[PE] held hotbar slot = " + hotbarSlot);
+                if (listener != null && listener.gameModeOf(this) == GameMode.CREATIVE) {
+                    listener.onContainerSetSlot(this, WINDOW_ID_PLAYER, hotbarSlot, item.state(), item.count());
+                }
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debug(() -> "[PE] could not parse MobEquipment: " + e);
+        }
     }
 
     /**
@@ -880,35 +916,73 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     public void setInventorySlot(int slot, int state, int count) {
         // ContainerSetSlot (0x32): a single-slot update, which refreshes the hotbar HUD live (a full
         // ContainerSetContent updates the data but the client only shows it after the inventory opens).
+        // Layout matches PMMP's ContainerSetSlotPacket exactly: windowId, slot, hotbarSlot (0), item,
+        // selectSlot (0) — PMMP leaves hotbarSlot/selectSlot at their defaults, so we do too.
         sendGameBatch(b -> {
             ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_SLOT);
             b.writeByte(WINDOW_ID_PLAYER);            // window id (byte, not a varint here)
             ByteBufUtils.writeSignedVarInt(b, slot);  // inventory slot
-            ByteBufUtils.writeSignedVarInt(b, slot < 9 ? slot : 0); // hotbar link (self for a hotbar slot)
+            ByteBufUtils.writeSignedVarInt(b, 0);     // hotbarSlot (PMMP default)
             McpeCodec.writeSlot(b, state, count);
-            b.writeByte(0);                           // selectSlot
+            b.writeByte(0);                           // selectSlot (PMMP default)
         });
     }
 
-    /** Bedrock's player window (id 0) holds only the 36 storage slots (0-8 hotbar / 9-35 main). */
+    /** The core inventory's storage slots (0-8 hotbar / 9-35 main) that map 1:1 onto PE window 0. */
     private static final int PE_PLAYER_SLOTS = 36;
+
+    /**
+     * The slot count PE 1.1.5 expects in the player window: {@code getSize() + getHotbarSize()} = 36 + 9 =
+     * 45. PMMP appends 9 trailing air slots after the 36 storage slots, and the client won't wire up its
+     * hotbar HUD unless the window has exactly this shape.
+     */
+    private static final int PE_PLAYER_WINDOW_SLOTS = 45;
 
     @Override
     public void setInventory(int[] states, int[] counts) {
-        // Bedrock's player window (id 0) numbers slots 0-8 hotbar / 9-35 main — the same order as the core
-        // model's storage slots, so those map 1:1. The core's armor / off-hand slots (36-40) live in
-        // separate PE windows (not modelled here yet), so send only the first 36. ContainerSetContent
-        // replaces the whole window.
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_CONTENT);
-            ByteBufUtils.writeVarInt(b, WINDOW_ID_PLAYER);
-            ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);
-            ByteBufUtils.writeVarInt(b, PE_PLAYER_SLOTS);
-            for (int i = 0; i < PE_PLAYER_SLOTS; i++) {
-                McpeCodec.writeSlot(b, states[i], counts[i]);
+        sendPlayerInventory(slot -> states[slot], slot -> counts[slot]);
+    }
+
+    /**
+     * Send the player's own inventory (window 0) exactly as PMMP does at protocol 113, so the client
+     * renders the hotbar HUD. Two details a plain ContainerSetContent misses — and the reason mined
+     * items showed only with the inventory GUI open:
+     * <ul>
+     *   <li><b>45 slots, not 36.</b> PMMP sends {@code getSize() + getHotbarSize()} — the 36 storage
+     *       slots (core 0-8 hotbar / 9-35 main, 1:1) followed by 9 trailing air slots.</li>
+     *   <li><b>A 9-entry hotbar-link array.</b> Each on-screen hotbar position {@code i} maps to inventory
+     *       slot {@code i}; PMMP writes the link as {@code index + getHotbarSize()} (= {@code i + 9}).
+     *       Without these links the client fills storage but leaves the hotbar empty.</li>
+     * </ul>
+     * The core's armor / off-hand slots (36-40) live in separate PE windows (not modelled here yet).
+     */
+    private void sendPlayerInventory(java.util.function.IntUnaryOperator state,
+                                     java.util.function.IntUnaryOperator count) {
+        sendGameBatch(b -> writePlayerInventory(b, state, count));
+    }
+
+    /**
+     * Encode the ContainerSetContent body for the player window (0), PMMP-exact so the client wires up its
+     * hotbar HUD: window id, targetEid, 45 slots (36 storage then 9 air), then a 9-entry hotbar-link array
+     * ({@code i + 9}). See {@link #sendPlayerInventory} for why the count and links matter.
+     */
+    static void writePlayerInventory(ByteBuf b, java.util.function.IntUnaryOperator state,
+                                     java.util.function.IntUnaryOperator count) {
+        ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_CONTENT);
+        ByteBufUtils.writeVarInt(b, WINDOW_ID_PLAYER);
+        ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);
+        ByteBufUtils.writeVarInt(b, PE_PLAYER_WINDOW_SLOTS);
+        for (int slot = 0; slot < PE_PLAYER_WINDOW_SLOTS; slot++) {
+            if (slot < PE_PLAYER_SLOTS) {
+                McpeCodec.writeSlot(b, state.applyAsInt(slot), count.applyAsInt(slot));
+            } else {
+                McpeCodec.writeSlot(b, Blocks.AIR, 0); // 9 trailing hotbar-area slots are air
             }
-            ByteBufUtils.writeVarInt(b, 0); // hotbar-link count
-        });
+        }
+        ByteBufUtils.writeVarInt(b, 9);                       // hotbar-link count
+        for (int i = 0; i < 9; i++) {
+            ByteBufUtils.writeSignedVarInt(b, i + 9);         // hotbar pos i -> slot i (index + hotbarSize)
+        }
     }
 
     @Override
@@ -942,8 +1016,8 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         });
     }
 
-    /** The creative menu's block palette — variant-rich, shared with 0.14 ({@link PeCreativePalette}). */
-    private static final int[] CREATIVE = PeCreativePalette.states();
+    /** The 1.1.5 creative menu — variant-rich blocks plus items (tools / armor / food / materials). */
+    private static final int[] CREATIVE = PeCreativePalette.forV115();
 
     /**
      * The player's own entity id. StartGame assigns it 1, and the ContainerSetContent packets are
@@ -957,7 +1031,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
      * starter hotbar here was the bug where "creative blocks" leaked into a survival inventory.
      */
     private void sendInventory() {
-        sendContainerContent(WINDOW_ID_PLAYER, 36, slot -> Blocks.AIR, 1);
+        sendPlayerInventory(slot -> Blocks.AIR, slot -> 0);
     }
 
     /**

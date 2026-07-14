@@ -15,11 +15,21 @@ import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.Dimension;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
+import com.jedrock.core.command.ClearCommand;
 import com.jedrock.core.command.CommandManager;
 import com.jedrock.core.command.GameModeCommand;
+import com.jedrock.core.command.HealCommand;
 import com.jedrock.core.command.HelpCommand;
+import com.jedrock.core.command.KillCommand;
+import com.jedrock.core.command.ListCommand;
+import com.jedrock.core.command.MeCommand;
+import com.jedrock.core.command.MsgCommand;
+import com.jedrock.core.command.SayCommand;
 import com.jedrock.core.command.SpawnCommand;
 import com.jedrock.core.command.TeleportCommand;
+import com.jedrock.core.command.TpAllCommand;
+import com.jedrock.core.command.TpHereCommand;
+import com.jedrock.core.command.TpsCommand;
 import com.jedrock.core.config.JedrockConfig;
 import com.jedrock.core.inventory.Container;
 import com.jedrock.core.inventory.Cursor;
@@ -104,9 +114,19 @@ public class JedrockServer implements Server, ConnectionListener {
     /** Wire up the built-in in-game commands. */
     private void registerCommands() {
         commandManager.register(new HelpCommand());
+        commandManager.register(new ListCommand());
+        commandManager.register(new TpsCommand());
+        commandManager.register(new SayCommand());
+        commandManager.register(new MeCommand());
+        commandManager.register(new MsgCommand());
         commandManager.register(new GameModeCommand());
         commandManager.register(new TeleportCommand());
+        commandManager.register(new TpHereCommand());
+        commandManager.register(new TpAllCommand());
         commandManager.register(new SpawnCommand());
+        commandManager.register(new HealCommand());
+        commandManager.register(new KillCommand());
+        commandManager.register(new ClearCommand());
     }
 
     /** The in-game command registry — used by commands (e.g. {@code /help}) to introspect. */
@@ -797,6 +817,107 @@ public class JedrockServer implements Server, ConnectionListener {
     }
 
     @Override
+    public boolean onChestInteract(PlayerConnection connection, int x, int y, int z, int heldSlot) {
+        if (Blocks.idOf(defaultWorld.getBlockId(x, y, z)) != Blocks.CHEST) {
+            return false; // not a chest — let the caller place the held block
+        }
+        // Click-transfer chest (the retail 1.1.5 client crashes on a real chest window): a plain
+        // right-click withdraws the first stack, a sneaking right-click deposits the held hotbar slot.
+        // Works in both modes — creative deposits its (infinite) held item without consuming it, and its
+        // held item is mirrored server-side from the client's MobEquipment (see PeSession). The click is
+        // always consumed so no block is placed on the chest.
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player != null) {
+            Container chest = defaultWorld.getChestContainer(x, y, z);
+            boolean creative = player.getGameMode() == GameMode.CREATIVE;
+            if (player.isSneaking()) {
+                chestDeposit(player, chest, heldSlot, creative);
+            } else {
+                chestWithdraw(player, chest, creative);
+            }
+        }
+        return true; // it's a chest — always suppress the placement
+    }
+
+    /**
+     * Right-click transfer out of the chest, one stack per click. In <b>survival</b> the first non-empty
+     * stack moves into the player's inventory (as much as fits). In <b>creative</b> the player's inventory
+     * is infinite and client-managed, so handing real items over would let a deposit→withdraw cycle mint
+     * items (the reported duplication: deposit never consumes an infinite hand, so withdrawing the copy is
+     * pure gain). Instead a creative click just removes the stack from the chest — an edit of its contents.
+     */
+    private void chestWithdraw(CorePlayer player, Container chest, boolean creative) {
+        for (int i = 0; i < chest.size(); i++) {
+            if (chest.isEmpty(i)) {
+                continue;
+            }
+            int state = chest.stateAt(i);
+            int have = chest.countAt(i);
+            if (creative) {
+                chest.clear(i);                 // no real items to a creative player — just clear the stack
+                defaultWorld.markDirty();
+                player.sendMessage("{gray}Убрано из сундука ×" + have);
+                return;
+            }
+            int prev = -1, moved = 0;
+            for (int c = 0; c < have; c++) {
+                int slot = player.giveItem(state);
+                if (slot < 0) break; // inventory full
+                if (slot != prev) {
+                    if (prev >= 0) player.syncSlot(prev);
+                    prev = slot;
+                }
+                moved++;
+            }
+            if (prev >= 0) player.syncSlot(prev);
+            if (moved > 0) {
+                chest.set(i, have - moved > 0 ? state : 0, have - moved);
+                defaultWorld.markDirty();
+                player.sendMessage("{gray}Взято из сундука ×" + moved
+                        + (moved < have ? " {dark_gray}(инвентарь полон)" : ""));
+            }
+            return; // one stack per click
+        }
+        player.sendMessage("{gray}Сундук пуст");
+    }
+
+    /**
+     * Deposit the player's held hotbar slot ({@code heldSlot}, 0-8) into the chest (as much as fits).
+     * The amount is exactly what the slot holds (in creative that comes from the client's MobEquipment
+     * mirror). In survival the deposited items are consumed from the slot; in {@code creative} the hand is
+     * infinite, so the slot is left untouched — but the count is honest, not a forced stack, so a
+     * deposit→withdraw cycle can't inflate.
+     */
+    private void chestDeposit(CorePlayer player, Container chest, int heldSlot, boolean creative) {
+        if (heldSlot < 0 || heldSlot >= 9) {
+            return;
+        }
+        Container inv = player.getInventory();
+        int state = inv.stateAt(heldSlot);
+        int have = inv.countAt(heldSlot);
+        if (state == 0 || have <= 0) {
+            player.sendMessage("{gray}В руке ничего нет");
+            return;
+        }
+        int moved = 0;
+        for (int c = 0; c < have; c++) {
+            if (chest.give(state, 0, chest.size()) < 0) break; // chest full
+            moved++;
+        }
+        if (moved > 0) {
+            if (!creative) { // survival consumes the deposited items; creative's are infinite
+                inv.set(heldSlot, have - moved > 0 ? state : 0, have - moved);
+                player.syncSlot(heldSlot);
+            }
+            defaultWorld.markDirty();
+            player.sendMessage("{gray}Положено в сундук ×" + moved
+                    + (moved < have ? " {dark_gray}(сундук полон)" : ""));
+        } else {
+            player.sendMessage("{gray}Сундук полон");
+        }
+    }
+
+    @Override
     public void onChestClick(PlayerConnection connection, int windowSlot, int button, boolean shift) {
         CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
         if (player == null || !player.hasContainerOpen()) {
@@ -872,15 +993,21 @@ public class JedrockServer implements Server, ConnectionListener {
         if (player == null || slot < 0) {
             return;
         }
-        // Bedrock is client-authoritative: it already moved the item and just tells us the new slot value.
+        // Bedrock is client-authoritative for an open chest window: it already moved the item and just
+        // tells us the new slot value.
         if (player.hasContainerOpen() && windowId == player.getOpenWindowId()) {
             Container chest = player.getOpenContainer();
             if (slot < chest.size()) {
                 chest.set(slot, state, count);
                 defaultWorld.markDirty();
             }
-        } else if (windowId == 0) {
-            // The player's own inventory (PE window 0: 0-8 hotbar, 9-35 main — same as the core storage).
+        } else if (windowId == 0 && player.getGameMode() == GameMode.CREATIVE) {
+            // The player's own inventory (PE window 0: 0-8 hotbar, 9-35 main). Only trust the client's
+            // report in CREATIVE, where the inventory is client-authoritative and we merely mirror it so a
+            // chest deposit knows the held item. In SURVIVAL the server owns the inventory (mining, placing
+            // and chest transfers all flow through it), so a client echo must be IGNORED — otherwise the
+            // 1.1.5 client's ContainerSetSlot echo right after a chest deposit re-adds the just-moved stack,
+            // duplicating it (the item ends up in the chest AND back in the inventory).
             Container inv = player.getInventory();
             if (slot < 36) {
                 inv.set(slot, state, count);
@@ -960,6 +1087,41 @@ public class JedrockServer implements Server, ConnectionListener {
                 p.sendMessage(message);
             }
         }
+    }
+
+    /** Broadcast a system line to every online player (used by {@code /say} and the console {@code say}). */
+    public void broadcast(String message) {
+        broadcast(message, null);
+    }
+
+    /**
+     * Kill a survival player through the normal damage path — a silent respawn at spawn with a death
+     * message, exactly like a lethal fall. A no-op in creative (which takes no damage); the caller is
+     * expected to tell the player so.
+     *
+     * @return {@code true} if the player was killed (survival), {@code false} if immune (creative)
+     */
+    public boolean kill(CorePlayer player) {
+        if (player.getGameMode() != GameMode.SURVIVAL) {
+            return false;
+        }
+        hurt(player, CorePlayer.MAX_HEALTH, "{gray}" + ChatText.escape(player.getName()) + " died");
+        return true;
+    }
+
+    /**
+     * Restore a survival player to full health and push it to their HUD. A no-op in creative (which has
+     * no health to restore); the caller is expected to say so.
+     *
+     * @return {@code true} if the player was healed (survival), {@code false} if not applicable (creative)
+     */
+    public boolean heal(CorePlayer player) {
+        if (player.getGameMode() != GameMode.SURVIVAL) {
+            return false;
+        }
+        player.setHealth(CorePlayer.MAX_HEALTH);
+        player.getConnection().setHealth(CorePlayer.MAX_HEALTH);
+        return true;
     }
 
     @Override

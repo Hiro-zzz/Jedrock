@@ -90,6 +90,62 @@ public final class PeCreativePalette {
         // Redstone-ish blocks
         plain(s, 29, 33, 123);
 
+        // More building & decorative blocks (ids shared by legacy Java + Bedrock, not already above)
+        plain(s, 7, 99, 100);                     // bedrock, brown / red mushroom block
+        metas(s, 179, 0, 1, 2);                   // red sandstone: normal / chiseled / smooth
+
+        return toArray(s);
+    }
+
+    /** Built once: the 1.1.5 item palette (id ≥ 256). */
+    private static final int[] ITEMS = buildItems();
+
+    /**
+     * Creative-menu <b>item</b> states for 1.1.5 (id ≥ 256 — tools, armor, food, materials). The 1.1.5
+     * client renders these legacy Bedrock item ids; {@link PeBlockEditDecoder}'s placement rejects non-block
+     * ids, so holding one and right-clicking places nothing. 0.14 must NOT receive these (it crashes on ids
+     * it can't render), so its narrower {@link com.jedrock.network.pe.v014.Pe014Blocks} palette is separate.
+     * Ids from PocketMine-MP {@code ItemIds} at protocol 113. Returns a private copy.
+     */
+    public static int[] items() {
+        return ITEMS.clone();
+    }
+
+    /** The full 1.1.5 creative menu: blocks followed by items. (0.14 uses the narrower Pe014Blocks set.) */
+    public static int[] forV115() {
+        int[] out = new int[STATES.length + ITEMS.length];
+        System.arraycopy(STATES, 0, out, 0, STATES.length);
+        System.arraycopy(ITEMS, 0, out, STATES.length, ITEMS.length);
+        return out;
+    }
+
+    private static int[] buildItems() {
+        List<Integer> s = new ArrayList<>(90);
+        // Tools & weapons — wood, stone, iron, gold, diamond
+        plain(s, 268, 272, 267, 283, 276);        // swords
+        plain(s, 270, 274, 257, 285, 278);        // pickaxes
+        plain(s, 271, 275, 258, 286, 279);        // axes
+        plain(s, 269, 273, 256, 284, 277);        // shovels
+        plain(s, 290, 291, 292, 294, 293);        // hoes
+        plain(s, 259, 359, 261, 262, 346);        // flint & steel, shears, bow, arrow, fishing rod
+        // Armor — leather, chainmail, iron, gold, diamond
+        plain(s, 298, 299, 300, 301);
+        plain(s, 302, 303, 304, 305);
+        plain(s, 306, 307, 308, 309);
+        plain(s, 314, 315, 316, 317);
+        plain(s, 310, 311, 312, 313);
+        // Food
+        plain(s, 260, 322, 297, 282, 360);        // apple, golden apple, bread, mushroom stew, melon slice
+        plain(s, 364, 366, 320, 350);             // cooked beef / chicken / porkchop / fish
+        plain(s, 391, 392, 393, 357, 354);        // carrot, potato, baked potato, cookie, cake
+        // Materials
+        metas(s, 263, 0, 1);                      // coal, charcoal
+        plain(s, 264, 265, 266, 388);             // diamond, iron ingot, gold ingot, emerald
+        plain(s, 280, 281, 287, 288, 289);        // stick, bowl, string, feather, gunpowder
+        plain(s, 331, 348, 352, 337, 336);        // redstone, glowstone dust, bone, clay ball, brick
+        plain(s, 339, 340, 341, 318, 368);        // paper, book, slimeball, flint, ender pearl
+        plain(s, 369, 406, 353, 344, 332);        // blaze rod, nether quartz, sugar, egg, snowball
+        plain(s, 296, 338, 334, 325);             // wheat, sugar cane, leather, bucket
         return toArray(s);
     }
 

@@ -138,11 +138,14 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   spin a parse loop or exhaust memory. (Java's frame + array reads were already length-capped.)
 - ✅ **Survival mode, in-game commands and a minimal inventory.** A player can run in survival; the mode is
   remembered per player, so a reconnect keeps it (the only way MCPE 0.14, which can't switch mode live,
-  ever changes). In-game commands work cross-edition (`/help`, `/gamemode`, `/tp`, `/spawn`) — Java sends
-  `/…` straight through as chat, and Bedrock is handed an `AvailableCommands` manifest so its client parses
-  the line and sends it back. A deliberately minimal **survival inventory** (36 slots) tracks only what a
-  survival player mines and places: mining a block drops it into the hotbar, placing consumes it, and the
-  changed slot is pushed live so the HUD refreshes.
+  ever changes). **In-game commands** work cross-edition — Java sends `/…` straight through as chat, and
+  Bedrock is handed an `AvailableCommands` manifest so its client parses the line and sends it back. The
+  built-in set: `/help [cmd]`, `/list`, `/tps`, `/say`, `/me`, `/msg`, `/gamemode`, `/tp`, `/tphere`,
+  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`. A deliberately minimal **survival inventory** (36 slots)
+  tracks only what a survival player mines and places: mining a block drops it into the hotbar, placing
+  consumes it, and the changed slot is pushed live so the HUD refreshes. On PE 1.1.5 the player window is
+  serialized PMMP-exact (45 slots + a 9-entry hotbar-link array), without which mined items filled storage
+  but the on-screen hotbar stayed empty.
 - ✅ **Damage — fall, void and PvP, cross-edition.** Survival players take damage, all funnelled through one
   server-authoritative path. **Fall damage** works on every edition: Java and PE 0.14 have no client
   fall-report packet, so the server tracks the descent and applies it on landing; PE 1.1.5 reports its own
@@ -157,12 +160,19 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   armor and off-hand slots. **Chests** are a placeable block (right-click to open) backed by a 27-slot
   container: move items in and out, shift to quick-transfer, in survival <em>and</em> creative (the
   creative inventory is mirrored server-side so the chest's player half is tracked). Chest contents
-  **persist** in the level file (format v3, back-compatible with v2 worlds). Wired for JE 1.12.2 and 1.8;
-  the Bedrock port is next. True to the model, the server only <em>stores and moves</em> items — no
-  crafting or smelting simulation, no item entities (a dropped / overflow item simply vanishes).
+  **persist** in the level file (format v3, back-compatible with v2 worlds). Wired for JE 1.12.2 and 1.8.
+  True to the model, the server only <em>stores and moves</em> items — no crafting or smelting simulation,
+  no item entities (a dropped / overflow item simply vanishes).
+- ✅ **Chests on Bedrock 1.1.5 — click-transfer.** The retail 1.1.5 client crashes on a real chest window,
+  so chests there use a **click-transfer** instead: a right-click withdraws the first stack, a sneaking
+  right-click deposits the held hotbar slot. Works in survival and creative (creative deposits its held
+  item without consuming and never mints items on withdrawal). The server stays authoritative for the
+  survival inventory — the client's own inventory echo is ignored — so a deposit→withdraw cycle can't
+  duplicate items.
 
-Not yet: chests/inventory interaction on Bedrock, cross-edition skin fidelity (a signed-texture limit,
-see above), knockback (deliberately — the server simulates no physics), scripting. See [Roadmap](#roadmap).
+Not yet: a real chest <em>window</em> on Bedrock 1.1.5 (click-transfer is the interim), cross-edition skin
+fidelity (a signed-texture limit, see above), knockback (deliberately — the server simulates no physics),
+scripting. See [Roadmap](#roadmap).
 
 ---
 
@@ -362,6 +372,9 @@ Once running, the server reads commands on stdin (headless-safe — it runs fine
 |---------|--------|
 | `status` / `tps` | one-line health: TPS, MSPT (+ all-time peak), players, memory, uptime |
 | `players` | list online players and their edition |
+| `say <message>` | broadcast a server message to every online player |
+| `kick <player> [reason]` | disconnect a player by name |
+| `kill <player>` / `heal <player>` | kill or fully heal a survival player |
 | `debug [all\|off\|<tags>]` | toggle extended debug logging; scope by logger-name tags, e.g. `debug pe,chunk` |
 | `gc` | request a GC, then print status |
 | `stop` | graceful shutdown |

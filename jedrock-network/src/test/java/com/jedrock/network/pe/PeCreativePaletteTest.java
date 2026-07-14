@@ -36,6 +36,24 @@ class PeCreativePaletteTest {
     }
 
     @Test
+    void itemsAreItemIdsOnlyAndFullPaletteConcatenates() {
+        int[] items = PeCreativePalette.items();
+        assertTrue(items.length > 30, "a good item set (" + items.length + " entries)");
+
+        Set<Integer> seen = new HashSet<>();
+        for (int state : items) {
+            assertTrue(Blocks.idOf(state) >= 256, "an item id (>= 256): " + Blocks.idOf(state));
+            assertTrue(seen.add(state), "no duplicate item: " + state);
+        }
+        // charcoal is coal (263) with meta 1 — the meta survives packing
+        assertTrue(seen.contains(Blocks.state(263, 1)), "charcoal variant");
+
+        // The full 1.1.5 menu is blocks followed by items.
+        assertEquals(PeCreativePalette.states().length + items.length,
+                PeCreativePalette.forV115().length, "forV115 = blocks + items");
+    }
+
+    @Test
     void slotRoundTripsIdAndMeta() {
         ByteBuf b = Unpooled.buffer();
         int redWool = Blocks.state(35, 14);

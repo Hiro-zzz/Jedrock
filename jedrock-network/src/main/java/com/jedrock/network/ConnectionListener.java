@@ -84,6 +84,18 @@ public interface ConnectionListener {
     }
 
     /**
+     * A PE 1.1.5 player right-clicked the block at {@code (x, y, z)} — the click-transfer chest path, used
+     * because that client crashes on a real chest window. If it's a chest the core moves a stack between
+     * the chest and the player's inventory and returns {@code true} (so the caller suppresses the placement
+     * the packet would otherwise be): a plain right-click <b>withdraws</b> the first stack from the chest;
+     * a sneaking right-click <b>deposits</b> the player's held hotbar slot ({@code heldSlot}, 0-8). Survival
+     * only. Returns {@code false} for a non-chest block. Default: not a chest.
+     */
+    default boolean onChestInteract(PlayerConnection connection, int x, int y, int z, int heldSlot) {
+        return false;
+    }
+
+    /**
      * A player clicked {@code windowSlot} of their open chest window (slots 0-26 the chest, 27-62 their
      * own inventory). The core translates the slot, applies the click server-authoritatively to the chest
      * or the player inventory + cursor, and resyncs the window. {@code button} 0 left / 1 right; {@code

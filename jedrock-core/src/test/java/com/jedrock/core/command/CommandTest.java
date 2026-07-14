@@ -91,6 +91,37 @@ class CommandTest {
         assertNull(conn.lastGameMode);                          // never pushed
     }
 
+    @Test
+    void messageCommandsRejectEmptyInputWithoutTouchingServer() {
+        // Their usage guards fire before any server call, so a null server is safe here (as in
+        // gamemodeRejectsUnknownMode). Each must report a usage hint rather than broadcast nothing.
+        RecordingConnection conn = new RecordingConnection();
+        CorePlayer sender = player(conn);
+
+        new SayCommand().execute(null, sender, new String[0]);
+        new MeCommand().execute(null, sender, new String[0]);
+        new TpHereCommand().execute(null, sender, new String[0]);
+        new MsgCommand().execute(null, sender, new String[]{"onlyName"}); // needs 2+ args
+
+        assertEquals(4, conn.messages.size());
+        for (String m : conn.messages) {
+            assertTrue(m.toLowerCase().contains("usage"), m);
+        }
+    }
+
+    @Test
+    void clearRefusesCreativeWithoutTouchingServer() {
+        // /clear on a creative target returns before any server call (the test player is CREATIVE), so a
+        // null server is safe. It must explain that only a survival inventory can be cleared.
+        RecordingConnection conn = new RecordingConnection();
+        CorePlayer sender = player(conn); // CREATIVE
+
+        new ClearCommand().execute(null, sender, new String[0]);
+
+        assertEquals(1, conn.messages.size());
+        assertTrue(conn.messages.get(0).toLowerCase().contains("survival"), conn.messages.get(0));
+    }
+
     // ===== Test doubles =====
 
     /** A command that records how it was invoked. */

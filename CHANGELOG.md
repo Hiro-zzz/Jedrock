@@ -8,6 +8,18 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **More in-game and console commands.** The in-game set grew from four to fourteen, all authored once and
+  advertised to Bedrock via the `AvailableCommands` manifest: `/help [cmd]` (now details one command),
+  `/list` (online players + edition), `/tps` (server health), `/say`, `/me`, `/msg` (private message),
+  `/tphere`, `/tpall`, `/heal`, `/kill`, `/clear` — alongside the existing `/gamemode`, `/tp`, `/spawn`.
+  The stdin **console** gained `say`, `kick <player> [reason]`, and `kill` / `heal <player>`. New public
+  `JedrockServer` helpers back them (`broadcast`, `kill`, `heal`). Unit-tested (`CommandTest` guards).
+
+- **Chests on Bedrock 1.1.5 (click-transfer).** The retail 1.1.5 client crashes on a real chest window, so
+  chests there now use a click-transfer: a right-click withdraws the first stack, a sneaking right-click
+  deposits the held hotbar slot (tracked from `MobEquipment`). Works in survival and creative (creative
+  deposits the held item without consuming it). New `ConnectionListener.onChestInteract` hook.
+
 - **Interactive inventories and chests (Java Edition).** The player inventory became a real,
   server-authoritative container instead of a display: a `Container` abstraction (shared by players and
   blocks) plus `InventoryClick` — left / right / shift click semantics (pick up, place, merge, split,
@@ -304,6 +316,21 @@ unstable — anything may change between entries.
   for a hand-rolled copy-on-write array iterated by index (same visibility guarantees, no iterator).
 
 ### Fixed
+
+- **PE 1.1.5 survival hotbar stayed empty (mined items showed only with the inventory open).** The player
+  window (`ContainerSetContent` to window 0) was sent as 36 slots with no hotbar links. PMMP sends
+  `getSize() + getHotbarSize()` = **45 slots** (36 storage + 9 trailing air) followed by a **9-entry
+  hotbar-link array** (each value `index + 9`); without the links the client fills storage but never wires
+  up the on-screen hotbar. Now serialized PMMP-exact (`PeSession.writePlayerInventory`, pinned by
+  `PePlayerInventoryEncodingTest`); `ContainerSetSlot` also matches PMMP (`hotbarSlot`/`selectSlot` = 0).
+
+- **Chest item duplication on Bedrock 1.1.5 (both game modes).** In **creative**, deposit never consumed
+  the (infinite) held item but withdrawal handed real items back — so a deposit→withdraw cycle minted
+  items; creative withdrawal now just clears the chest stack (no player give), and deposit uses the honest
+  held count instead of a forced 64. In **survival**, the client is inventory-authoritative and echoes a
+  `ContainerSetSlot` after a deposit, which re-added the just-moved stack (item in the chest *and* back in
+  the inventory); the server now ignores the client's window-0 echo in survival (it owns the inventory
+  there — mining, placing and chest transfers all flow through it), closing the dupe.
 
 - **A wrong Click Window id dropped 1.12.2 connections on creative interaction.** `ServerboundClickWindow`
   was mapped to 0x08 (which is Close Window at 1.12.2 — a 1-byte body); a real Close Window then over-read
