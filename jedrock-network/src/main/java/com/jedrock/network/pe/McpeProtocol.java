@@ -113,14 +113,6 @@ final class McpeProtocol {
     static final long BASE_ENTITY_FLAGS =
             (1L << DATA_FLAG_CAN_SHOW_NAMETAG_BIT) | (1L << DATA_FLAG_ALWAYS_SHOW_NAMETAG_BIT);
 
-    // --- InventoryTransaction: transaction types + UseItem action types + inventory-action sources ---
-    static final int TRANSACTION_USE_ITEM = 2;
-    static final int USE_ITEM_CLICK_BLOCK = 0; // place
-    static final int USE_ITEM_BREAK_BLOCK = 2; // break
-    static final int SOURCE_CONTAINER = 0;
-    static final int SOURCE_WORLD = 2;
-    static final int SOURCE_CREATIVE = 3;
-    static final int SOURCE_TODO = 99999;
 
     /** MovePlayer mode: 0 normal (interpolated), 2 teleport (server reposition — used by the judge). */
     static final int MOVE_MODE_TELEPORT = 2;

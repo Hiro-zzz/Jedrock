@@ -107,13 +107,14 @@ public final class LevelIO {
             try (DataOutputStream body = new DataOutputStream(new DeflaterOutputStream(fileOut, deflater, 8192))) {
                 body.writeInt(sections.size());
                 byte[] buf = new byte[SECTION_BYTES];
-                for (BlockStorage.SectionEntry e : sections) {
+                short[] scratch = new short[SECTION_SHORTS]; // one reused expansion buffer, so a compact
+                for (BlockStorage.SectionEntry e : sections) {  // section is never held expanded en masse
                     body.writeInt(e.chunkX());
                     body.writeInt(e.chunkZ());
                     body.writeByte(e.sectionY());
-                    short[] d = e.data();
+                    e.expandInto(scratch); // materialize the section (compact or full) to 4096 cells
                     for (int i = 0, j = 0; i < SECTION_SHORTS; i++) {
-                        short v = d[i];
+                        short v = scratch[i];
                         buf[j++] = (byte) (v >>> 8);
                         buf[j++] = (byte) v;
                     }

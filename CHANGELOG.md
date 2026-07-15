@@ -277,6 +277,24 @@ unstable — anything may change between entries.
 
 ### Changed
 
+- **World block storage is palette-compressed (large RAM cut).** `BlockStorage` stored every allocated 16³
+  section as a `short[4096]` (8 KB); most baked sections hold only a handful of distinct states. An unedited
+  section is now a `PalettedSection` — a small palette of distinct states plus the 4096 cell indices
+  bit-packed at the smallest width that fits (2 bits ≈ 1 KB, 4 bits ≈ 2 KB), a single-state section being
+  the degenerate size-1 palette. The first differing write promotes the section back to a mutable
+  `short[4096]`, so the rare edited sections still pay full price but the thousands of static ones don't.
+  Reads go through `cellOf` / `readSection`, so the hot path is one extra dispatch per section and MSPT is
+  unchanged (measured: idle MSPT flat, well under the 20 TPS budget). **Measured on a real 48×48 world:
+  retained heap ~13 MB after load (11 547/11 547 sections compressed), down from ~66 MB (uniform-only) and
+  ~95 MB (uncompressed) for the block matrix.** On-disk level format untouched (v3): sections expand on save
+  via one reused scratch buffer, so old worlds load unchanged. Pinned by `BlockStoragePaletteTest`.
+- **Dead-code cleanup.** Removed the unused `PeBlockEditDecoder.decodeInventoryTransaction` /
+  `decodeUseItem` / `skipInventoryAction` (protocol 113 has no InventoryTransaction packet — edits arrive
+  via UseItem / PlayerAction), the constants they used in `McpeProtocol`, and the now-orphaned
+  `McpeCodec.readItemId`. `PacketGuard.saneCount` coverage is retained.
+- **Roadmap trimmed.** Reduced to the platform API (next) and puppet entities, with the remaining polish
+  folded into one "final touch-ups" line, to keep the project's scope legible.
+
 - **Wider JE chunk-section palette.** Each 1.12.2 section now picks the smallest legal bits-per-block
   (4–8) for its palette instead of a fixed 4, packing the indices with the 1.12.2 straddling bit
   layout (entries may cross a long boundary). A section with more than 16 distinct block states no

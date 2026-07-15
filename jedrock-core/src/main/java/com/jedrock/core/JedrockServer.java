@@ -352,7 +352,8 @@ public class JedrockServer implements Server, ConnectionListener {
                             + defaultWorld.getSeed() + " — edits were made against the saved terrain");
                 }
                 LOGGER.info("Loaded world from " + file.toAbsolutePath()
-                        + " (" + defaultWorld.loadedSections() + " sections)");
+                        + " (" + defaultWorld.loadedSections() + " sections, "
+                        + defaultWorld.compressedSections() + " compressed)");
             } catch (IOException e) {
                 LOGGER.error("Failed to load world from " + file.toAbsolutePath()
                         + " — leaving it untouched and generating a fresh world in memory", e);
@@ -367,7 +368,8 @@ public class JedrockServer implements Server, ConnectionListener {
             long t0 = System.nanoTime();
             defaultWorld.bake();
             long ms = (System.nanoTime() - t0) / 1_000_000;
-            LOGGER.info("Baked " + defaultWorld.loadedSections() + " sections in " + ms + " ms");
+            LOGGER.info("Baked " + defaultWorld.loadedSections() + " sections ("
+                    + defaultWorld.compressedSections() + " compressed) in " + ms + " ms");
             saveWorld(); // persist the freshly baked world so the next run just loads it
         }
     }

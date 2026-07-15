@@ -10,7 +10,6 @@ import com.jedrock.api.world.World;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Set;
@@ -172,21 +171,10 @@ public final class CoreWorld implements World {
     @Override
     public boolean fillSection(int chunkX, int sectionY, int chunkZ, short[] out) {
         if (generated) {
-            // Baked world: copy the stored section straight out (or fill all-air if unallocated).
-            short[] sec = storage.section(chunkX, sectionY, chunkZ);
-            if (sec == null) {
-                Arrays.fill(out, (short) 0);
-                return false;
-            }
-            System.arraycopy(sec, 0, out, 0, out.length);
-            for (short v : out) {
-                if (v != 0) {
-                    return true;
-                }
-            }
-            return false;
+            // Baked world: one bulk read straight out of storage (handles uniform / mixed / all-air).
+            return storage.readSection(chunkX, sectionY, chunkZ, out);
         }
-        short[] stored = storage.section(chunkX, sectionY, chunkZ);
+        Object stored = storage.section(chunkX, sectionY, chunkZ);
         int baseX = chunkX << 4;
         int baseY = sectionY << 4;
         int baseZ = chunkZ << 4;
@@ -197,7 +185,7 @@ public final class CoreWorld implements World {
                 int surface = terrain.surfaceHeight(baseX + x, baseZ + z);
                 for (int y = 0; y < 16; y++) {
                     int idx = BlockStorage.index(x, y, z);
-                    int s = stored == null ? Blocks.AIR : (stored[idx] & 0xFFFF);
+                    int s = BlockStorage.cellOf(stored, idx); // compact-/full-/null-aware read
                     int id;
                     if (s == REMOVED) {
                         id = Blocks.AIR;            // a player broke a (possibly natural) block here
@@ -264,9 +252,14 @@ public final class CoreWorld implements World {
         return seed;
     }
 
-    /** Number of allocated storage sections (player edits today) — for logging and tests. */
+    /** Number of allocated storage sections — for logging and tests. */
     public int loadedSections() {
         return storage.loadedSections();
+    }
+
+    /** How many of the {@link #loadedSections} are stored compressed (paletted) — for logging. */
+    public int compressedSections() {
+        return storage.compressedSections();
     }
 
     // ===== Finite bounds (the world edge) =====

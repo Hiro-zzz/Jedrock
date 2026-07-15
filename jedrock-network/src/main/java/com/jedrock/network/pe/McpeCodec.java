@@ -74,11 +74,6 @@ final class McpeCodec {
         return readItem(pk).state();
     }
 
-    /** As {@link #readItemState} but discarding the metadata — for items we only need to skip. */
-    static int readItemId(ByteBuf pk) {
-        return Blocks.idOf(readItemState(pk));
-    }
-
     /**
      * Write a chest block-entity compound as protocol-113 <em>network</em> NBT (unsigned-varint string
      * lengths, zigzag-varint ints): the minimal {@code {id:"Chest", x, y, z}} a 1.1.5 client needs to

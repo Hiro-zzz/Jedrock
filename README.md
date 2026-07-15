@@ -400,25 +400,15 @@ script illusions**. So the roadmap grows three things: the *content* the server 
 *tools* to author it, and the *scripting layer* that drives it. Anything that smells like world
 simulation stays out (see non-goals).
 
-- **Finite "bake once" world — landed.** A bounded (48×48-chunk) world generated once on first run
-  then frozen (all generation disabled, served as static decoration): persistence, the terrain bake,
-  biomes, tree/lake/cave decoration and the edge wall are all in. Optional follow-ups: per-biome ground
-  blocks (e.g. desert sand), configurable bounds, and disk-paged chunks if the world ever grows past a
-  comfortable in-RAM size (48×48 is tens of MB, so this isn't pressing).
-- **Content breadth — blocks, items, tools.** The world is just ids, so growing the block palette is
-  nearly free. The near-term piece is **held-item / equipment relay** — show what a player holds and
-  wears on their avatar, which also renders the specific item-use animation (eat / drink / draw bow) and
-  unblocks a Bedrock-initiated item-use. "Tools" here is *content plus behaviour*, not simulated mining:
-  the client already times the break, so a script decides what an item actually does.
-- **Commands — a real framework.** The built-ins (`/help`, `/gamemode`, `/tp`, `/spawn`) prove the
-  cross-edition path (Java sends `/…` as chat, Bedrock gets an `AvailableCommands` manifest); next is a
-  proper framework — typed arguments, tab-completion, permissions and a clean registration API — authored
-  once and rendered to each edition.
-- **The platform API — the centrepiece.** Turn `api` from a thin contract into a real extension surface:
-  a broader, cancellable **event model** (join / quit / chat / move / block-edit / attack / …) and an
-  embedded **script plugin loader** (GraalJS) with hot reload, so custom gameplay lives in fast,
+- **Finite "bake once" world — landed.** A bounded (48×48-chunk) world generated once on first run then
+  frozen (all generation disabled, served as static decoration): persistence, the terrain bake, biomes,
+  tree/lake/cave decoration and the edge wall are all in, and the block matrix is palette-compressed
+  (per-section palette + bit-packed indices) so the whole world stays cheap in RAM (~13 MB for 48×48).
+- **The platform API — the centrepiece (next).** Turn `api` from a thin contract into a real extension
+  surface: a broader, cancellable **event model** (join / quit / chat / move / block-edit / attack / …)
+  and an embedded **script plugin loader** (GraalJS) with hot reload, so custom gameplay lives in fast,
   reloadable scripts rather than the compiled core. This is the "scriptable API" pillar going from
-  *planned* to *real* — the whole point of the platform.
+  *planned* to *real* — the whole point of the platform, and the gate everything below waits on.
 - **Puppet entities — mobs, NPCs, holograms.** The illusionist take on mobs: a mob is a
   **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays its
   metadata cross-edition, and that's all. Out of the box it's a *dummy*: it stands where placed, a
@@ -428,12 +418,11 @@ simulation stays out (see non-goals).
   an NPC (named, interactable) or a hologram (a floating name, no body). It reuses the avatar machinery
   that already spawns and moves players cross-edition; the real work is a **canonical entity-type registry**
   mapped to each edition's ids — the block palette's counterpart, the two-headed monster's entity tax.
-- **The illusion toolkit.** Pure server→client render instructions, zero simulation — the most on-brand
-  work there is: titles / action bars, scoreboards, boss bars, particles and sounds, and Bedrock forms /
-  UI. Each is just "tell the client to show X," cross-edition — exactly what a plugin author reaches for,
-  and it never costs a tick of simulation.
-- **Sharper judge.** The blind judge lands today (reach + move-delta); per-axis limits and interaction
-  ray-casts would tighten it without turning into a physics engine.
+- **Final touch-ups.** Smaller polish, mostly unlocked by the API: **held-item / equipment relay** (show
+  what a player holds and wears, rendering the specific item-use animation); a fuller **command framework**
+  (typed args, tab-completion, permissions — the 14 built-ins already prove the cross-edition path); the
+  **illusion toolkit** (titles / action bars, scoreboards, boss bars, particles, sounds, Bedrock forms);
+  and a **sharper judge** (per-axis limits, interaction ray-casts).
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
   runtime world simulation or physics, no 1.13+ flattening. Knockback is deliberately excluded for the
   same reason — the server simulates no physics. Custom logic that wants any of these lives in a script
