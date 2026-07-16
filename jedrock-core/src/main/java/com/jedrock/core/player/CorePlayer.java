@@ -5,13 +5,13 @@ import com.jedrock.api.player.Player;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
+import com.jedrock.core.entity.EntityIds;
 import com.jedrock.core.inventory.Container;
 import com.jedrock.core.inventory.Cursor;
 import com.jedrock.core.world.CoreWorld;
 import com.jedrock.utils.text.ChatText;
 
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * In-memory player state. A thin wrapper over the abstract {@link PlayerConnection};
@@ -19,16 +19,11 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class CorePlayer implements Player {
 
-    /**
-     * Avatar entity ids start above the self-ids the protocol handlers hardcode for the
-     * client's own player (JE JoinGame / PE StartGame both use 1), so they never collide.
-     */
-    private static final AtomicLong ENTITY_IDS = new AtomicLong(1000);
-
     private final UUID uniqueId;
     private final String name;
     private final PlayerConnection connection;
-    private final long entityId = ENTITY_IDS.getAndIncrement();
+    /** Shared with puppets via {@link EntityIds}, so an avatar id never collides with a puppet id. */
+    private final long entityId = EntityIds.next();
 
     private volatile CoreWorld world;
     private volatile Location location;

@@ -25,6 +25,7 @@ public final class Mcpe014Packets {
     public static final int ID_START_GAME = 0x95;
     public static final int ID_ADD_PLAYER = 0x96;
     public static final int ID_REMOVE_PLAYER = 0x97;
+    public static final int ID_ADD_ENTITY = 0x98;  // outbound: spawn a non-player entity (a puppet)
     public static final int ID_REMOVE_ENTITY = 0x99;
     public static final int ID_MOVE_ENTITY = 0x9c;
     public static final int ID_MOVE_PLAYER = 0x9d;
@@ -205,6 +206,29 @@ public final class Mcpe014Packets {
         b.writeFloat(yaw);         // head yaw
         b.writeFloat(pitch);
         b.writeShort(0);           // held item: air (empty slot)
+        b.writeByte(0x7f);         // empty entity metadata
+    }
+
+    /**
+     * Spawn a non-player entity (a puppet). {@code y} is FEET. Modeled on {@link #addPlayer} (BE fields).
+     * <b>UNVERIFIED against a live 0.14 client</b> — the protocol-45 AddEntity type-field width and the
+     * trailing metadata/links order are a best reconstruction; if a 0.14 client misbehaves, revert
+     * {@link PeSession014#spawnEntity} to a no-op (JE / 1.1.5 puppets are unaffected) until confirmed.
+     */
+    public static void addEntity(ByteBuf b, long eid, int type,
+                                 float x, float y, float z, float yaw, float pitch) {
+        b.writeByte(ID_ADD_ENTITY);
+        b.writeLong(eid);
+        b.writeInt(type);          // entity type (MCPE id)
+        b.writeFloat(x);
+        b.writeFloat(y);           // feet
+        b.writeFloat(z);
+        b.writeFloat(0f);          // speed x
+        b.writeFloat(0f);          // speed y
+        b.writeFloat(0f);          // speed z
+        b.writeFloat(yaw);
+        b.writeFloat(pitch);
+        b.writeShort(0);           // entity links: none
         b.writeByte(0x7f);         // empty entity metadata
     }
 

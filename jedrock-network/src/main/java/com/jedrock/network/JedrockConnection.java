@@ -143,6 +143,22 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void spawnEntity(long entityId, UUID uuid, com.jedrock.api.entity.EntityType type,
+                            double x, double y, double z, float yaw, float pitch) {
+        protocolHandler.spawnEntity(this, entityId, uuid, type, x, y, z, yaw, pitch);
+    }
+
+    @Override
+    public void moveEntity(long entityId, double x, double y, double z, float yaw, float pitch) {
+        protocolHandler.moveEntity(this, entityId, x, y, z, yaw, pitch);
+    }
+
+    @Override
+    public void removeEntity(long entityId) {
+        protocolHandler.removeEntity(this, entityId);
+    }
+
+    @Override
     public void teleport(double x, double y, double z, float yaw, float pitch) {
         protocolHandler.teleportSelf(this, x, y, z, yaw, pitch);
     }

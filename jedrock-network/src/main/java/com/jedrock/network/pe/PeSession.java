@@ -8,6 +8,7 @@ import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
 import com.jedrock.network.ConnectionListener;
+import com.jedrock.network.EntityTypeIds;
 import com.jedrock.network.chunk.ChunkView;
 import com.jedrock.utils.ByteBufUtils;
 import com.jedrock.utils.JLogger;
@@ -183,6 +184,62 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
                     ByteBufUtils.writeVarInt(b, 1);
                     McpeCodec.writeUuid(b, uuid);
                 });
+    }
+
+    @Override
+    public void spawnEntity(long entityId, UUID uuid, com.jedrock.api.entity.EntityType type,
+                            double x, double y, double z, float yaw, float pitch) {
+        // AddEntity (0x0D): entity ids, the MCPE entity type, feet position, motion, rotation, then empty
+        // attributes / metadata / links — a static visual with no simulated state. (Verify byte layout on
+        // a live 1.1.5 client, like the rest of the PE wire.)
+        int typeId = EntityTypeIds.bedrockId(type);
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_ADD_ENTITY);
+            ByteBufUtils.writeSignedVarLong(b, entityId);      // entity unique id
+            ByteBufUtils.writeVarLong(b, entityId);            // entity runtime id
+            ByteBufUtils.writeVarInt(b, typeId);               // entity type (uvarint, MCPE id)
+            b.writeFloatLE((float) x);
+            b.writeFloatLE((float) y);                         // feet
+            b.writeFloatLE((float) z);
+            b.writeFloatLE(0f);                                // motion x
+            b.writeFloatLE(0f);                                // motion y
+            b.writeFloatLE(0f);                                // motion z
+            b.writeFloatLE(pitch);
+            b.writeFloatLE(yaw);
+            ByteBufUtils.writeVarInt(b, 0);                    // attributes: none
+            ByteBufUtils.writeVarInt(b, 0);                    // metadata: none
+            ByteBufUtils.writeVarInt(b, 0);                    // entity links: none
+        });
+    }
+
+    @Override
+    public void moveEntity(long entityId, double x, double y, double z, float yaw, float pitch) {
+        // MoveEntity (0x12): runtime id, feet position, then byte-angle pitch / yaw / headYaw and a flags
+        // byte. Unlike MovePlayer (0x13, player-only) this addresses any entity runtime id.
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_MOVE_ENTITY);
+            ByteBufUtils.writeVarLong(b, entityId);
+            b.writeFloatLE((float) x);
+            b.writeFloatLE((float) y);                         // feet
+            b.writeFloatLE((float) z);
+            b.writeByte(byteAngle(pitch));
+            b.writeByte(byteAngle(yaw));
+            b.writeByte(byteAngle(yaw));                        // head yaw
+            b.writeByte(0);                                     // flags (on-ground / teleport)
+        });
+    }
+
+    @Override
+    public void removeEntity(long entityId) {
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_REMOVE_ENTITY);
+            ByteBufUtils.writeSignedVarLong(b, entityId);
+        });
+    }
+
+    /** A rotation in degrees packed into a signed byte (256 units = 360°), as MCPE MoveEntity uses. */
+    private static int byteAngle(float degrees) {
+        return (byte) (int) (degrees * 256.0f / 360.0f);
     }
 
     @Override

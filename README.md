@@ -409,15 +409,15 @@ simulation stays out (see non-goals).
   and an embedded **script plugin loader** (GraalJS) with hot reload, so custom gameplay lives in fast,
   reloadable scripts rather than the compiled core. This is the "scriptable API" pillar going from
   *planned* to *real* — the whole point of the platform, and the gate everything below waits on.
-- **Puppet entities — mobs, NPCs, holograms.** The illusionist take on mobs: a mob is a
-  **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays its
-  metadata cross-edition, and that's all. Out of the box it's a *dummy*: it stands where placed, a
-  decoration like the world, costing nothing. Its life comes from the **API** — a script drives its
-  movement, reacts to events (a player nears / hits / interacts with it) and decides its "health" and
-  drops, so a mob *appears* alive without the server ever running AI or pathfinding. The same primitive is
-  an NPC (named, interactable) or a hologram (a floating name, no body). It reuses the avatar machinery
-  that already spawns and moves players cross-edition; the real work is a **canonical entity-type registry**
-  mapped to each edition's ids — the block palette's counterpart, the two-headed monster's entity tax.
+- **Puppet entities — foundation landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
+  **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
+  cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry
+  (`EntityTypeIds` — the block palette's counterpart, the two-headed monster's entity tax), `spawnEntity` /
+  `moveEntity` / `removeEntity` on all four editions, a `CorePuppet` / `PuppetRegistry` with cross-edition
+  spawn/move/despawn relay, and an **interaction hook** (hitting a puppet fires a callback). A temporary
+  `/puppet` command drives it for now. Its life will come from the **API** — a script driving movement and
+  reacting to interaction — so a mob *appears* alive without the server ever running AI or pathfinding; the
+  same primitive becomes an NPC or a hologram. (Cross-edition spawn is pending live-client verification.)
 - **Final touch-ups.** Smaller polish, mostly unlocked by the API: **held-item / equipment relay** (show
   what a player holds and wears, rendering the specific item-use animation); a fuller **command framework**
   (typed args, tab-completion, permissions — the 14 built-ins already prove the cross-edition path); the

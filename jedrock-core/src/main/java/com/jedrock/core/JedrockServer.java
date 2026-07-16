@@ -4,6 +4,8 @@ import com.jedrock.api.Jedrock;
 import com.jedrock.api.Server;
 import com.jedrock.api.ServerStatus;
 import com.jedrock.api.config.ServerProperties;
+import com.jedrock.api.entity.EntityType;
+import com.jedrock.api.entity.PuppetEntity;
 import com.jedrock.api.event.EventBus;
 import com.jedrock.api.event.player.PlayerJoinEvent;
 import com.jedrock.api.event.player.PlayerQuitEvent;
@@ -30,7 +32,10 @@ import com.jedrock.core.command.TeleportCommand;
 import com.jedrock.core.command.TpAllCommand;
 import com.jedrock.core.command.TpHereCommand;
 import com.jedrock.core.command.TpsCommand;
+import com.jedrock.core.command.PuppetCommand;
 import com.jedrock.core.config.JedrockConfig;
+import com.jedrock.core.entity.CorePuppet;
+import com.jedrock.core.entity.PuppetRegistry;
 import com.jedrock.core.inventory.Container;
 import com.jedrock.core.inventory.Cursor;
 import com.jedrock.core.inventory.InventoryClick;
@@ -81,6 +86,7 @@ public class JedrockServer implements Server, ConnectionListener {
 
     // In-memory state layer
     private final PlayerRegistry playerRegistry = new PlayerRegistry();
+    private final PuppetRegistry puppets = new PuppetRegistry();
     private final CoreWorld defaultWorld;
     private final BlindJudge judge;
     private final CommandManager commandManager = new CommandManager(this);
@@ -127,6 +133,7 @@ public class JedrockServer implements Server, ConnectionListener {
         commandManager.register(new HealCommand());
         commandManager.register(new KillCommand());
         commandManager.register(new ClearCommand());
+        commandManager.register(new PuppetCommand());
     }
 
     /** The in-game command registry — used by commands (e.g. {@code /help}) to introspect. */
@@ -435,6 +442,71 @@ public class JedrockServer implements Server, ConnectionListener {
         return defaultWorld.getName().equalsIgnoreCase(name) ? Optional.of(defaultWorld) : Optional.empty();
     }
 
+    // ===== Puppets (server-puppeteered visual entities) =====
+
+    @Override
+    public PuppetEntity spawnPuppet(EntityType type, Location at, String name) {
+        CorePuppet puppet = new CorePuppet(type, name, defaultWorld, at, this);
+        puppets.add(puppet);
+        // Show it to everyone currently online; a later joiner is shown it in onLogin.
+        for (CorePlayer p : playerRegistry.online()) {
+            spawnPuppetTo(p.getConnection(), puppet);
+        }
+        LOGGER.info("Spawned puppet " + type.canonicalName() + " #" + puppet.getEntityId()
+                + " at " + String.format(java.util.Locale.ROOT, "%.1f,%.1f,%.1f", at.x(), at.y(), at.z()));
+        return puppet;
+    }
+
+    /**
+     * Show one puppet to one connection. A {@link EntityType#PLAYER} puppet renders through the player-avatar
+     * path (a tab / player-list entry + spawn-player), reusing exactly what real players use; a mob puppet
+     * uses the spawn-entity path. Shared by the spawn broadcast and the join-time catch-up in onLogin.
+     */
+    private void spawnPuppetTo(PlayerConnection conn, CorePuppet puppet) {
+        Location loc = puppet.getLocation();
+        if (puppet.getEntityType().isPlayer()) {
+            conn.addToTab(puppet.getUniqueId(), puppet.getName()); // JE needs the tab entry before the avatar
+            conn.showPlayer(puppet.getUniqueId(), puppet.getName(), puppet.getEntityId(),
+                    loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
+        } else {
+            conn.spawnEntity(puppet.getEntityId(), puppet.getUniqueId(), puppet.getEntityType(),
+                    loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
+        }
+    }
+
+    /** Relay a puppet's move to every viewer. Called by {@link CorePuppet#teleport}. */
+    public void movePuppet(CorePuppet puppet, Location to) {
+        boolean asPlayer = puppet.getEntityType().isPlayer();
+        for (CorePlayer p : playerRegistry.online()) {
+            if (asPlayer) {
+                p.getConnection().moveAvatar(puppet.getEntityId(), to.x(), to.y(), to.z(), to.yaw(), to.pitch());
+            } else {
+                p.getConnection().moveEntity(puppet.getEntityId(), to.x(), to.y(), to.z(), to.yaw(), to.pitch());
+            }
+        }
+    }
+
+    /** Despawn a puppet from every viewer and drop it from the registry. Called by {@link CorePuppet#remove}. */
+    public void removePuppet(CorePuppet puppet) {
+        if (puppets.remove(puppet.getEntityId()) == null) {
+            return; // already gone
+        }
+        boolean asPlayer = puppet.getEntityType().isPlayer();
+        for (CorePlayer p : playerRegistry.online()) {
+            if (asPlayer) {
+                p.getConnection().hidePlayer(puppet.getUniqueId(), puppet.getEntityId());
+                p.getConnection().removeFromTab(puppet.getUniqueId());
+            } else {
+                p.getConnection().removeEntity(puppet.getEntityId());
+            }
+        }
+    }
+
+    /** The live puppet roster — used by the {@code /puppet} command to list / resolve puppets. */
+    public PuppetRegistry getPuppets() {
+        return puppets;
+    }
+
     // ===== ConnectionListener: network → core state bridge =====
     //
     // The network protocol handler is responsible for sending the protocol-mandatory
@@ -502,6 +574,11 @@ public class JedrockServer implements Server, ConnectionListener {
             }
             other.getConnection().showPlayer(uuid, username, player.getEntityId(),
                     spawn.x(), spawn.y(), spawn.z(), spawn.yaw(), spawn.pitch());
+        }
+
+        // Show every existing puppet to the newcomer (existing players already see them).
+        for (CorePuppet puppet : puppets.all()) {
+            spawnPuppetTo(connection, puppet);
         }
 
         LOGGER.info(username + " joined [" + connection.getProtocolVersion().getVersionName()
@@ -1039,8 +1116,20 @@ public class JedrockServer implements Server, ConnectionListener {
             return;
         }
         CorePlayer victim = playerRegistry.getByEntityIdOrNull(targetEntityId);
-        if (victim == null || victim == attacker) {
-            return; // unknown target, or a self-hit — nothing to do
+        if (victim == null) {
+            // Not a player — maybe a puppet. Fire its interaction hook (the seam the API subscribes to)
+            // and, as a visible demo, flash the puppet red on every client. A puppet has no health/damage.
+            CorePuppet puppet = puppets.get(targetEntityId);
+            if (puppet != null) {
+                puppet.fireInteract(attacker);
+                for (CorePlayer p : playerRegistry.online()) {
+                    p.getConnection().playHurtAnimation(targetEntityId);
+                }
+            }
+            return;
+        }
+        if (victim == attacker) {
+            return; // a self-hit — nothing to do
         }
         // Reach check (the blind judge): reject a hit from implausibly far — a reach hack — measured to
         // the victim's cell. The attacker's own arm swing is relayed separately via onSwingArm.

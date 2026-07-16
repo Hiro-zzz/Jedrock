@@ -44,6 +44,20 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Move an avatar previously shown via {@link #showPlayer} to an absolute position. */
     void moveAvatar(JedrockConnection c, long entityId, double x, double y, double z, float yaw, float pitch);
 
+    /** Spawn a non-player puppet entity of the given canonical type (this version's spawn-mob packet). */
+    void spawnEntity(JedrockConnection c, long entityId, java.util.UUID uuid,
+                     com.jedrock.api.entity.EntityType type,
+                     double x, double y, double z, float yaw, float pitch);
+
+    /** Move a puppet entity previously shown via {@link #spawnEntity} (same wire as {@link #moveAvatar}). */
+    default void moveEntity(JedrockConnection c, long entityId,
+                            double x, double y, double z, float yaw, float pitch) {
+        moveAvatar(c, entityId, x, y, z, yaw, pitch); // an entity teleport works for any entity id
+    }
+
+    /** Despawn a puppet entity previously shown via {@link #spawnEntity}. */
+    void removeEntity(JedrockConnection c, long entityId);
+
     /** Reposition this client's own player (the blind judge snapping an illegal move back). */
     void teleportSelf(JedrockConnection c, double x, double y, double z, float yaw, float pitch);
 

@@ -1,7 +1,10 @@
 package com.jedrock.api;
 
+import com.jedrock.api.entity.EntityType;
+import com.jedrock.api.entity.PuppetEntity;
 import com.jedrock.api.event.EventBus;
 import com.jedrock.api.player.Player;
+import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
 
 import java.util.Collection;
@@ -61,6 +64,23 @@ public interface Server {
     Collection<World> getWorlds();
 
     Optional<World> getWorld(String name);
+
+    /**
+     * Spawn a puppet — a server-controlled visual entity (the base for mobs / NPCs / holograms) — of the
+     * given {@code type} at {@code at}, visible to every player cross-edition. Returns a handle to move,
+     * remove or wire an interaction to it. The server never simulates it; behaviour is driven through the
+     * returned {@link PuppetEntity}. The name defaults to the type name (it matters only for an
+     * {@link EntityType#PLAYER} NPC — see {@link #spawnPuppet(EntityType, Location, String)}).
+     */
+    default PuppetEntity spawnPuppet(EntityType type, Location at) {
+        return spawnPuppet(type, at, type.canonicalName());
+    }
+
+    /**
+     * As {@link #spawnPuppet(EntityType, Location)} but with an explicit {@code name} — the shown name of a
+     * {@link EntityType#PLAYER} NPC (its tab / player-list entry).
+     */
+    PuppetEntity spawnPuppet(EntityType type, Location at, String name);
 
     /**
      * Current server tick (monotonic).

@@ -55,6 +55,22 @@ public interface PlayerConnection {
     /** Despawn a player avatar previously shown via {@link #showPlayer}. */
     void hidePlayer(java.util.UUID uuid, long entityId);
 
+    /**
+     * Spawn a non-player <b>puppet</b> entity of the given canonical {@code type} in this client's world.
+     * Unlike {@link #showPlayer} (which spawns a player avatar via the tab list), this writes the edition's
+     * spawn-mob / add-entity packet, mapping {@code type} to that edition's numeric entity id. {@code uuid}
+     * is the entity's uuid (JE 1.12.2 SpawnMob carries it; other editions ignore it). A connection that
+     * can't render it may ignore the call.
+     */
+    default void spawnEntity(long entityId, java.util.UUID uuid, com.jedrock.api.entity.EntityType type,
+                             double x, double y, double z, float yaw, float pitch) {}
+
+    /** Move a puppet entity previously shown via {@link #spawnEntity} to an absolute position. */
+    default void moveEntity(long entityId, double x, double y, double z, float yaw, float pitch) {}
+
+    /** Despawn a puppet entity previously shown via {@link #spawnEntity}. */
+    default void removeEntity(long entityId) {}
+
     /** Move a player avatar previously shown via {@link #showPlayer} to an absolute position. */
     void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch);
 

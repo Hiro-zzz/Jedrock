@@ -27,6 +27,7 @@ public final class Java1_8Protocol {
     public static final int CB_HELD_ITEM = 0x09;
     public static final int CB_ANIMATION = 0x0B;
     public static final int CB_SPAWN_PLAYER = 0x0C;       // named entity spawn (fixed-point coords)
+    public static final int CB_SPAWN_MOB = 0x0F;          // non-player entity spawn (byte type, fixed-point)
     public static final int CB_ENTITY_DESTROY = 0x13;
     public static final int CB_ENTITY_TELEPORT = 0x18;   // fixed-point coords
     public static final int CB_ENTITY_HEAD_ROTATION = 0x19;

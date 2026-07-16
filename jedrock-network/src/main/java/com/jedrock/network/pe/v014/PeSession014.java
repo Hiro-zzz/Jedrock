@@ -98,6 +98,27 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     }
 
     @Override
+    public void spawnEntity(long entityId, UUID uuid, com.jedrock.api.entity.EntityType type,
+                            double x, double y, double z, float yaw, float pitch) {
+        // AddEntity takes feet y. The type maps to the shared MCPE id table.
+        int typeId = com.jedrock.network.EntityTypeIds.bedrockId(type);
+        sendWrapped(b -> Mcpe014Packets.addEntity(b, entityId, typeId,
+                (float) x, (float) y, (float) z, yaw, pitch));
+    }
+
+    @Override
+    public void moveEntity(long entityId, double x, double y, double z, float yaw, float pitch) {
+        // MoveEntity takes eye y (same as moveAvatar).
+        sendWrapped(b -> Mcpe014Packets.moveEntity(b, entityId,
+                (float) x, (float) y + EYE_HEIGHT, (float) z, yaw, pitch));
+    }
+
+    @Override
+    public void removeEntity(long entityId) {
+        sendWrapped(b -> Mcpe014Packets.removeEntity(b, entityId));
+    }
+
+    @Override
     public void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch) {
         // MoveEntity takes eye y.
         sendWrapped(b -> Mcpe014Packets.moveEntity(b, entityId,

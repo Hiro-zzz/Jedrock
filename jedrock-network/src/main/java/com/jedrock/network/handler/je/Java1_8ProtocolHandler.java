@@ -3,6 +3,7 @@ package com.jedrock.network.handler.je;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.Location;
+import com.jedrock.network.EntityTypeIds;
 import com.jedrock.network.JedrockConnection;
 import com.jedrock.network.handler.je.v1_8.Java1_8ChunkData;
 import com.jedrock.network.je.packet.ClientboundLoginSuccess;
@@ -298,6 +299,26 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
             b.writeBoolean(true);                            // on ground
         });
         send(c, CB_ENTITY_HEAD_ROTATION, b -> { ByteBufUtils.writeVarInt(b, (int) entityId); b.writeByte(angle(yaw)); });
+    }
+
+    @Override
+    public void spawnEntity(JedrockConnection c, long entityId, UUID uuid, com.jedrock.api.entity.EntityType type,
+                            double x, double y, double z, float yaw, float pitch) {
+        // Spawn Mob (0x0F): entityId, byte type (classic id), fixed-point pos, angle yaw/pitch/headYaw,
+        // 3× velocity short, then an empty (0x7f-terminated) metadata block. No uuid in 1.8's Spawn Mob.
+        send(c, CB_SPAWN_MOB, b -> {
+            ByteBufUtils.writeVarInt(b, (int) entityId);
+            b.writeByte(EntityTypeIds.javaId(type));
+            b.writeInt(fixed(x)); b.writeInt(fixed(y)); b.writeInt(fixed(z));
+            b.writeByte(angle(yaw)); b.writeByte(angle(pitch)); b.writeByte(angle(yaw)); // yaw, pitch, head yaw
+            b.writeShort(0); b.writeShort(0); b.writeShort(0);                            // velocity x, y, z
+            b.writeByte(META_END);
+        });
+    }
+
+    @Override
+    public void removeEntity(JedrockConnection c, long entityId) {
+        send(c, CB_ENTITY_DESTROY, b -> { ByteBufUtils.writeVarInt(b, 1); ByteBufUtils.writeVarInt(b, (int) entityId); });
     }
 
     @Override

@@ -8,6 +8,25 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Puppet entities — the foundation before the platform API.** A puppet is a server-puppeteered visual
+  entity (the base for mobs / NPCs / holograms), never simulated: the server spawns a visual, moves it and
+  relays it cross-edition, and that's all. New api contracts — `EntityType` (a canonical, protocol-agnostic
+  set), `PuppetEntity` (a handle to move / remove / hook interaction), and `Server.spawnPuppet` — plus the
+  entity counterpart of the block palette (`EntityTypeIds`: canonical → per-edition numeric id; classic JE
+  mob ids for 1.8 / 1.12.2, legacy MCPE ids for 1.1.5 / 0.14). `PlayerConnection` gained
+  `spawnEntity` / `moveEntity` / `removeEntity`, implemented on all four editions (JE Spawn Mob 0x03 / 0x0F,
+  PE AddEntity 0x0D / 0x98; despawn reuses the existing DestroyEntities / RemoveEntity wire). Core: a shared
+  `EntityIds` allocator (players + puppets share one id space), `CorePuppet`, `PuppetRegistry`, and lifecycle
+  relay in `JedrockServer` (spawn to all, show existing puppets to a joiner, move/despawn relay). An
+  **interaction hook** reuses the existing cross-edition attack decode — hitting a puppet fires its
+  `onInteract` callback (the seam the API will drive) and, as a demo, flashes it red on every client. A
+  **temporary `/puppet` command** (spawn / move / remove / list) exercises it before the API lands.
+  A **player-avatar puppet** (`EntityType.PLAYER`, a named NPC) is included: it renders through the same
+  cross-edition avatar machinery real players use (a tab / player-list entry + spawn-player, and move /
+  despawn via the avatar path) rather than spawn-mob — `/puppet spawn player <name>`.
+  Unit-tested (`EntityTypeIdsTest`, `ClientboundSpawnMobTest`); the PE 1.1.5 / 0.14 AddEntity byte layouts
+  are pending live-client verification.
+
 - **More in-game and console commands.** The in-game set grew from four to fourteen, all authored once and
   advertised to Bedrock via the `AvailableCommands` manifest: `/help [cmd]` (now details one command),
   `/list` (online players + edition), `/tps` (server health), `/say`, `/me`, `/msg` (private message),
