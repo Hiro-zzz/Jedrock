@@ -54,12 +54,29 @@ public final class Mcpe014Packets {
     public static final int PLAYER_LIST_ADD = 0;
     public static final int PLAYER_LIST_REMOVE = 1;
     // Entity metadata (0.14): DATA_FLAGS is a BYTE at index 0 (not a LONG like 1.1.5); terminator 0x7f.
+    // 0.14 copies the PC 1.8 layout, so the nametag sits at index 2 and its visibility at 3 — where 1.1.5
+    // has the nametag at 4 and folds visibility into flag bits. Writing 1.1.5's indices here does nothing.
     public static final int DATA_FLAGS_INDEX = 0;
+    public static final int DATA_NAMETAG_INDEX = 2;       // string: the floating nametag
+    public static final int DATA_SHOW_NAMETAG_INDEX = 3;  // byte: 1 = always show it
+    public static final int DATA_NO_AI_INDEX = 15;        // byte: 1 = immobile
     public static final int DATA_TYPE_BYTE = 0;
+    public static final int DATA_TYPE_STRING = 4;
     public static final int META_END = 0x7f;
+    public static final int FLAG_ON_FIRE = 1 << 0;  // 0x01
     public static final int FLAG_SNEAKING = 1 << 1; // 0x02
     public static final int FLAG_SPRINTING = 1 << 3; // 0x08
     public static final int FLAG_ACTION = 1 << 4;   // 0x10 — using an item
+    public static final int FLAG_INVISIBLE = 1 << 5; // 0x20
+
+    /**
+     * The MCPE entity id of a dropped-item entity (64 at both PE eras) — a hologram line hangs its name on
+     * one with no item attached, so only the text renders. PocketMine's own floating-text hack.
+     */
+    public static final int ITEM_ENTITY_TYPE_ID = 64;
+
+    /** PocketMine's own offset for floating text, so the name lands on the requested y. */
+    public static final double TEXT_LINE_Y_OFFSET = -0.75;
 
     // TextPacket types.
     public static final int TEXT_TYPE_RAW = 0;
@@ -210,13 +227,23 @@ public final class Mcpe014Packets {
     }
 
     /**
-     * Spawn a non-player entity (a puppet). {@code y} is FEET. Modeled on {@link #addPlayer} (BE fields).
-     * <b>UNVERIFIED against a live 0.14 client</b> — the protocol-45 AddEntity type-field width and the
-     * trailing metadata/links order are a best reconstruction; if a 0.14 client misbehaves, revert
-     * {@link PeSession014#spawnEntity} to a no-op (JE / 1.1.5 puppets are unaffected) until confirmed.
+     * Spawn a non-player entity (a puppet) with no metadata — a bare visual. {@code y} is FEET.
      */
     public static void addEntity(ByteBuf b, long eid, int type,
                                  float x, float y, float z, float yaw, float pitch) {
+        addEntity(b, eid, type, x, y, z, yaw, pitch, meta -> {});
+    }
+
+    /**
+     * Spawn a non-player entity, {@code metadata} writing the metadata entries (the {@code 0x7f} terminator
+     * is added here). {@code y} is FEET.
+     *
+     * <p>Field order is verbatim from PocketMine-MP {@code AddEntityPacket::encode} at protocol 45: the
+     * metadata block comes <em>before</em> the entity-links short, not after.
+     */
+    public static void addEntity(ByteBuf b, long eid, int type,
+                                 float x, float y, float z, float yaw, float pitch,
+                                 java.util.function.Consumer<ByteBuf> metadata) {
         b.writeByte(ID_ADD_ENTITY);
         b.writeLong(eid);
         b.writeInt(type);          // entity type (MCPE id)
@@ -228,8 +255,44 @@ public final class Mcpe014Packets {
         b.writeFloat(0f);          // speed z
         b.writeFloat(yaw);
         b.writeFloat(pitch);
+        metadata.accept(b);
+        b.writeByte(META_END);     // terminates the metadata block
         b.writeShort(0);           // entity links: none
-        b.writeByte(0x7f);         // empty entity metadata
+    }
+
+    /** One line of a hologram: an invisible, immobile item entity whose nametag is the floating text. */
+    public static void addTextLine(ByteBuf b, long eid, float x, float y, float z, String text) {
+        addEntity(b, eid, ITEM_ENTITY_TYPE_ID, x, (float) (y + TEXT_LINE_Y_OFFSET), z, 0f, 0f,
+                meta -> {
+                    writeMetaByte(meta, DATA_FLAGS_INDEX, FLAG_INVISIBLE);
+                    writeNameTagEntries(meta, text);
+                    writeMetaByte(meta, DATA_NO_AI_INDEX, 1);
+                });
+    }
+
+    /** The nametag string plus its visibility byte — the pair 0.14 needs to float a name. */
+    public static void writeNameTagEntries(ByteBuf b, String text) {
+        boolean shown = text != null && !text.isEmpty();
+        b.writeByte((DATA_TYPE_STRING << 5) | DATA_NAMETAG_INDEX);
+        writeMetaString(b, shown ? text : "");
+        writeMetaByte(b, DATA_SHOW_NAMETAG_INDEX, shown ? 1 : 0);
+    }
+
+    /** One byte-typed metadata entry: the key header packs type and index into a single byte. */
+    public static void writeMetaByte(ByteBuf b, int index, int value) {
+        b.writeByte((DATA_TYPE_BYTE << 5) | index);
+        b.writeByte(value);
+    }
+
+    /**
+     * A string <em>inside</em> a metadata block: a LITTLE-endian short length + UTF-8. Every other string
+     * in protocol 45 is big-endian ({@link Mcpe014Codec#writeString}); PocketMine's {@code writeMetadata}
+     * reaches for {@code writeLShort} here alone, so this one must not go through the codec.
+     */
+    private static void writeMetaString(ByteBuf b, String value) {
+        byte[] bytes = value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        b.writeShortLE(bytes.length);
+        b.writeBytes(bytes);
     }
 
     /** Move an entity (avatar). {@code y} must be EYE-level (feet + {@link #EYE_HEIGHT}). */
@@ -301,12 +364,23 @@ public final class Mcpe014Packets {
      */
     public static void setEntityDataFlags(ByteBuf b, long eid,
                                           boolean sneaking, boolean sprinting, boolean usingItem) {
-        int flags = (sneaking ? FLAG_SNEAKING : 0) | (sprinting ? FLAG_SPRINTING : 0)
-                | (usingItem ? FLAG_ACTION : 0);
+        setEntityFlags(b, eid, (sneaking ? FLAG_SNEAKING : 0) | (sprinting ? FLAG_SPRINTING : 0)
+                | (usingItem ? FLAG_ACTION : 0));
+    }
+
+    /** Set an entity's whole DATA_FLAGS byte (every flag lives in this one field, so it is written whole). */
+    public static void setEntityFlags(ByteBuf b, long eid, int flags) {
         b.writeByte(ID_SET_ENTITY_DATA);
         b.writeLong(eid);
-        b.writeByte((DATA_TYPE_BYTE << 5) | DATA_FLAGS_INDEX); // metadata key header
-        b.writeByte(flags);
+        writeMetaByte(b, DATA_FLAGS_INDEX, flags);
+        b.writeByte(META_END);
+    }
+
+    /** Set an entity's floating nametag; the flags field is a different index, so it stays untouched. */
+    public static void setEntityNameTag(ByteBuf b, long eid, String text) {
+        b.writeByte(ID_SET_ENTITY_DATA);
+        b.writeLong(eid);
+        writeNameTagEntries(b, text);
         b.writeByte(META_END);
     }
 

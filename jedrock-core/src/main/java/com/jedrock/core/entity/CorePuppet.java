@@ -2,6 +2,7 @@ package com.jedrock.core.entity;
 
 import com.jedrock.api.entity.EntityType;
 import com.jedrock.api.entity.PuppetEntity;
+import com.jedrock.api.entity.PuppetFlag;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
@@ -24,10 +25,19 @@ public final class CorePuppet implements PuppetEntity {
     private final String name;
     private final JedrockServer server;
 
+    /**
+     * The height a puppet "looks from" when aiming at something. Nominal and deliberately not per-type: the
+     * illusion only needs the head pointed roughly right, and a table of per-mob eye heights would be the
+     * start of exactly the simulation this server refuses to do.
+     */
+    private static final double NOMINAL_EYE_HEIGHT = 1.62;
+
     private volatile World world;
     private volatile Location location;
     private volatile Consumer<Player> interactHandler;
     private volatile boolean alive = true;
+    private volatile String nameTag;
+    private volatile int flags;
 
     public CorePuppet(EntityType type, String name, World world, Location location, JedrockServer server) {
         this.type = type;
@@ -98,9 +108,65 @@ public final class CorePuppet implements PuppetEntity {
     }
 
     @Override
+    public String getNameTag() {
+        return nameTag;
+    }
+
+    @Override
+    public void setNameTag(String nameTag) {
+        this.nameTag = nameTag;
+        server.relayPuppetNameTag(this); // relays the new text to every viewer
+    }
+
+    @Override
     public void teleport(Location to) {
         setLocation(to);
         server.movePuppet(this, to); // relays the move to every viewer
+    }
+
+    @Override
+    public void setRotation(float yaw, float pitch) {
+        Location at = location;
+        teleport(new Location(at.world(), at.x(), at.y(), at.z(), yaw, pitch));
+    }
+
+    @Override
+    public void lookAt(Location target) {
+        Location at = location;
+        double dx = target.x() - at.x();
+        double dy = target.y() - (at.y() + NOMINAL_EYE_HEIGHT);
+        double dz = target.z() - at.z();
+        double flat = Math.sqrt(dx * dx + dz * dz);
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float pitch = (float) Math.toDegrees(-Math.atan2(dy, flat));
+        setRotation(yaw, pitch);
+    }
+
+    @Override
+    public boolean hasFlag(PuppetFlag flag) {
+        return flag.isSet(flags);
+    }
+
+    @Override
+    public void setFlag(PuppetFlag flag, boolean on) {
+        // Every edition packs these into one field, so the whole set is what gets relayed.
+        this.flags = on ? (flags | flag.bit()) : (flags & ~flag.bit());
+        server.relayPuppetFlags(this);
+    }
+
+    /** The puppet's whole canonical flag mask — what the relay hands the network layer. */
+    public int getFlags() {
+        return flags;
+    }
+
+    @Override
+    public void swing() {
+        server.relayPuppetSwing(this);
+    }
+
+    @Override
+    public void hurt() {
+        server.relayPuppetHurt(this);
     }
 
     @Override

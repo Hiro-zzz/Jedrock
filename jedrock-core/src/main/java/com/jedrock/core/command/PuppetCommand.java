@@ -2,6 +2,7 @@ package com.jedrock.core.command;
 
 import com.jedrock.api.entity.EntityType;
 import com.jedrock.api.entity.PuppetEntity;
+import com.jedrock.api.entity.PuppetFlag;
 import com.jedrock.api.world.Location;
 import com.jedrock.core.JedrockServer;
 import com.jedrock.core.entity.CorePuppet;
@@ -30,7 +31,8 @@ public final class PuppetCommand implements Command {
 
     @Override
     public String usage() {
-        return "/puppet spawn <type> [name] | /puppet move <id> | /puppet remove <id> | /puppet list";
+        return "/puppet spawn <type> [name] | move <id> | look <id> | name <id> <text> | "
+                + "flag <id> <on_fire|invisible|sneaking> <on|off> | swing <id> | hurt <id> | remove <id> | list";
     }
 
     @Override
@@ -42,6 +44,11 @@ public final class PuppetCommand implements Command {
         switch (args[0].toLowerCase(java.util.Locale.ROOT)) {
             case "spawn" -> spawn(server, sender, args);
             case "move" -> move(server, sender, args);
+            case "look" -> look(server, sender, args);
+            case "name" -> name(server, sender, args);
+            case "flag" -> flag(server, sender, args);
+            case "swing" -> animate(server, sender, args, false);
+            case "hurt" -> animate(server, sender, args, true);
             case "remove", "kill" -> remove(server, sender, args);
             case "list" -> list(server, sender);
             default -> sender.sendMessage("{red}Usage: " + usage());
@@ -79,6 +86,75 @@ public final class PuppetCommand implements Command {
         Location here = sender.getLocation();
         puppet.teleport(new Location(sender.getWorld(), here.x(), here.y(), here.z(), here.yaw(), here.pitch()));
         sender.sendMessage("{green}Moved puppet {white}#" + puppet.getEntityId() + "{green} to you.");
+    }
+
+    /** Turn a puppet to face the sender — the whole "it noticed me" illusion, with no AI behind it. */
+    private void look(JedrockServer server, CorePlayer sender, String[] args) {
+        CorePuppet puppet = resolve(server, sender, args);
+        if (puppet == null) {
+            return;
+        }
+        puppet.lookAt(sender.getLocation());
+        sender.sendMessage("{green}Puppet {white}#" + puppet.getEntityId() + "{green} is looking at you.");
+    }
+
+    private void name(JedrockServer server, CorePlayer sender, String[] args) {
+        CorePuppet puppet = resolve(server, sender, args);
+        if (puppet == null) {
+            return;
+        }
+        if (args.length < 3) {
+            sender.sendMessage("{red}Usage: /puppet name <id> <text>  {gray}(markup works, e.g. {gold}Trader)");
+            return;
+        }
+        if (puppet.getEntityType().isPlayer()) {
+            sender.sendMessage("{red}A player puppet's name is its player name — respawn it to rename.");
+            return;
+        }
+        String text = String.join(" ", Arrays.copyOfRange(args, 2, args.length));
+        puppet.setNameTag(text);
+        sender.sendMessage("{green}Named puppet {white}#" + puppet.getEntityId() + "{green}: " + text);
+    }
+
+    private void flag(JedrockServer server, CorePlayer sender, String[] args) {
+        CorePuppet puppet = resolve(server, sender, args);
+        if (puppet == null) {
+            return;
+        }
+        if (args.length < 4) {
+            String valid = Arrays.stream(PuppetFlag.values())
+                    .map(f -> f.name().toLowerCase(java.util.Locale.ROOT)).collect(Collectors.joining(", "));
+            sender.sendMessage("{red}Usage: /puppet flag <id> <" + valid + "> <on|off>");
+            return;
+        }
+        PuppetFlag flag = null;
+        for (PuppetFlag candidate : PuppetFlag.values()) {
+            if (candidate.name().equalsIgnoreCase(args[2])) {
+                flag = candidate;
+            }
+        }
+        if (flag == null) {
+            sender.sendMessage("{red}Unknown flag: {white}" + ChatText.escape(args[2]));
+            return;
+        }
+        boolean on = args[3].equalsIgnoreCase("on") || args[3].equalsIgnoreCase("true");
+        puppet.setFlag(flag, on);
+        sender.sendMessage("{green}Puppet {white}#" + puppet.getEntityId() + "{green} "
+                + flag.name().toLowerCase(java.util.Locale.ROOT) + ": {white}" + (on ? "on" : "off"));
+    }
+
+    private void animate(JedrockServer server, CorePlayer sender, String[] args, boolean hurt) {
+        CorePuppet puppet = resolve(server, sender, args);
+        if (puppet == null) {
+            return;
+        }
+        if (hurt) {
+            puppet.hurt();
+        } else {
+            puppet.swing();
+        }
+        sender.sendMessage("{green}Puppet {white}#" + puppet.getEntityId() + "{green} "
+                + (hurt ? "flinched." : "swung."));
     }
 
     private void remove(JedrockServer server, CorePlayer sender, String[] args) {

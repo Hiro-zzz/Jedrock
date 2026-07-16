@@ -1,6 +1,7 @@
 package com.jedrock.api;
 
 import com.jedrock.api.entity.EntityType;
+import com.jedrock.api.entity.Hologram;
 import com.jedrock.api.entity.PuppetEntity;
 import com.jedrock.api.event.EventBus;
 import com.jedrock.api.player.Player;
@@ -81,6 +82,13 @@ public interface Server {
      * {@link EntityType#PLAYER} NPC (its tab / player-list entry).
      */
     PuppetEntity spawnPuppet(EntityType type, Location at, String name);
+
+    /**
+     * Spawn a hologram — floating lines of text — at {@code at}, visible to every player cross-edition.
+     * The topmost line sits at {@code at}; the rest hang below it. Returns a handle to re-text, move or
+     * remove it. Lines use the edition-agnostic chat markup, so one string renders the same everywhere.
+     */
+    Hologram spawnHologram(Location at, String... lines);
 
     /**
      * Current server tick (monotonic).

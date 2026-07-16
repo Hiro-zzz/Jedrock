@@ -115,6 +115,19 @@ final class McpeProtocol {
     static final long BASE_ENTITY_FLAGS =
             (1L << DATA_FLAG_CAN_SHOW_NAMETAG_BIT) | (1L << DATA_FLAG_ALWAYS_SHOW_NAMETAG_BIT);
 
+    /** Immobile / no-AI (bit 16) — a hologram line must never drift or be pushed around. */
+    static final int DATA_FLAG_IMMOBILE_BIT = 16;
+
+    /**
+     * The MCPE entity id of a dropped-item entity. Bedrock has no armor stand in the legacy eras, so a
+     * hologram line hangs its name on one of these with no item attached — nothing renders but the text.
+     * The same hack PocketMine's floating text uses (id 64 at both 0.14 and 1.1.5).
+     */
+    static final int ITEM_ENTITY_TYPE_ID = 64;
+
+    /** PocketMine's own offset for floating text, so the name lands on the requested y. */
+    static final double TEXT_LINE_Y_OFFSET = -0.75;
+
 
     /** MovePlayer mode: 0 normal (interpolated), 2 teleport (server reposition — used by the judge). */
     static final int MOVE_MODE_TELEPORT = 2;

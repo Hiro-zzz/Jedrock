@@ -58,6 +58,16 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Despawn a puppet entity previously shown via {@link #spawnEntity}. */
     void removeEntity(JedrockConnection c, long entityId);
 
+    /** Set a puppet entity's floating name ({@code null} / empty hides it), in this version's metadata format. */
+    void setEntityNameTag(JedrockConnection c, long entityId, String nameTag);
+
+    /** Set a puppet entity's whole flags byte, from a canonical {@code PuppetFlag} mask. */
+    void setEntityFlags(JedrockConnection c, long entityId, int flags);
+
+    /** Spawn one hologram line: an invisible marker armor stand whose custom name is {@code text}. */
+    void spawnTextLine(JedrockConnection c, long entityId, UUID uuid,
+                       double x, double y, double z, String text);
+
     /** Reposition this client's own player (the blind judge snapping an illegal move back). */
     void teleportSelf(JedrockConnection c, double x, double y, double z, float yaw, float pitch);
 

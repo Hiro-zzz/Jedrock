@@ -169,6 +169,14 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   item without consuming and never mints items on withdrawal). The server stays authoritative for the
   survival inventory — the client's own inventory echo is ignored — so a deposit→withdraw cycle can't
   duplicate items.
+- ✅ **Puppets and holograms — visuals the server drives, cross-edition.** A **puppet** is a mob / NPC the
+  server puppeteers and never simulates: spawn it, move it, turn it to face a player (`lookAt`), give it a
+  floating **name tag**, set it alight / invisible / crouching, make it swing or flinch — and hitting one
+  fires an interaction callback. A **hologram** is the same idea with the body removed: floating lines of
+  text, authored once in the shared markup, rendered on Java as an invisible marker armor stand and on
+  Bedrock as an item entity with no item (neither legacy Bedrock era has an armor stand). Both work on all
+  four editions and are driven for now by the temporary `/puppet` and `/hologram` commands — their real life
+  comes with the scripting API.
 
 Not yet: a real chest <em>window</em> on Bedrock 1.1.5 (click-transfer is the interim), cross-edition skin
 fidelity (a signed-texture limit, see above), knockback (deliberately — the server simulates no physics),
@@ -409,15 +417,21 @@ simulation stays out (see non-goals).
   and an embedded **script plugin loader** (GraalJS) with hot reload, so custom gameplay lives in fast,
   reloadable scripts rather than the compiled core. This is the "scriptable API" pillar going from
   *planned* to *real* — the whole point of the platform, and the gate everything below waits on.
-- **Puppet entities — foundation landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
+- **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
   **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
   cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry
   (`EntityTypeIds` — the block palette's counterpart, the two-headed monster's entity tax), `spawnEntity` /
   `moveEntity` / `removeEntity` on all four editions, a `CorePuppet` / `PuppetRegistry` with cross-edition
-  spawn/move/despawn relay, and an **interaction hook** (hitting a puppet fires a callback). A temporary
-  `/puppet` command drives it for now. Its life will come from the **API** — a script driving movement and
-  reacting to interaction — so a mob *appears* alive without the server ever running AI or pathfinding; the
-  same primitive becomes an NPC or a hologram. (Cross-edition spawn is pending live-client verification.)
+  spawn/move/despawn relay, and an **interaction hook** (hitting a puppet fires a callback).
+  A puppet can now **act**: a **name tag** (floating text in the unified markup), **`lookAt`** — the whole
+  "it noticed me" illusion, trigonometry rather than pathfinding — **flags** (`ON_FIRE` / `INVISIBLE` /
+  `SNEAKING`, a canonical set holding only what maps to one bit on *every* edition, mapped by `EntityFlagIds`),
+  and **swing / hurt** animations. **Holograms** are the purest form of it — a name tag with the body taken
+  away: each line is its own invisible entity (Java: a marker armor stand; Bedrock: an item entity with no
+  item, PocketMine's own floating-text hack), authored once in the shared markup. Temporary `/puppet` and
+  `/hologram` commands drive them until the **API** does, so a mob *appears* alive without the server ever
+  running AI or pathfinding. (The wire is ground-truthed and unit-tested; on-screen placement of holograms
+  still wants a nudge against a live client.)
 - **Final touch-ups.** Smaller polish, mostly unlocked by the API: **held-item / equipment relay** (show
   what a player holds and wears, rendering the specific item-use animation); a fuller **command framework**
   (typed args, tab-completion, permissions — the 14 built-ins already prove the cross-edition path); the

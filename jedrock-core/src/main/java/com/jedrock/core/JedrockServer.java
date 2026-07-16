@@ -5,6 +5,7 @@ import com.jedrock.api.Server;
 import com.jedrock.api.ServerStatus;
 import com.jedrock.api.config.ServerProperties;
 import com.jedrock.api.entity.EntityType;
+import com.jedrock.api.entity.Hologram;
 import com.jedrock.api.entity.PuppetEntity;
 import com.jedrock.api.event.EventBus;
 import com.jedrock.api.event.player.PlayerJoinEvent;
@@ -32,8 +33,10 @@ import com.jedrock.core.command.TeleportCommand;
 import com.jedrock.core.command.TpAllCommand;
 import com.jedrock.core.command.TpHereCommand;
 import com.jedrock.core.command.TpsCommand;
+import com.jedrock.core.command.HologramCommand;
 import com.jedrock.core.command.PuppetCommand;
 import com.jedrock.core.config.JedrockConfig;
+import com.jedrock.core.entity.CoreHologram;
 import com.jedrock.core.entity.CorePuppet;
 import com.jedrock.core.entity.PuppetRegistry;
 import com.jedrock.core.inventory.Container;
@@ -87,6 +90,8 @@ public class JedrockServer implements Server, ConnectionListener {
     // In-memory state layer
     private final PlayerRegistry playerRegistry = new PlayerRegistry();
     private final PuppetRegistry puppets = new PuppetRegistry();
+    /** Live holograms. Iterated on every join and mutated rarely, so a copy-on-write list fits. */
+    private final List<CoreHologram> holograms = new java.util.concurrent.CopyOnWriteArrayList<>();
     private final CoreWorld defaultWorld;
     private final BlindJudge judge;
     private final CommandManager commandManager = new CommandManager(this);
@@ -134,6 +139,7 @@ public class JedrockServer implements Server, ConnectionListener {
         commandManager.register(new KillCommand());
         commandManager.register(new ClearCommand());
         commandManager.register(new PuppetCommand());
+        commandManager.register(new HologramCommand());
     }
 
     /** The in-game command registry — used by commands (e.g. {@code /help}) to introspect. */
@@ -468,9 +474,49 @@ public class JedrockServer implements Server, ConnectionListener {
             conn.addToTab(puppet.getUniqueId(), puppet.getName()); // JE needs the tab entry before the avatar
             conn.showPlayer(puppet.getUniqueId(), puppet.getName(), puppet.getEntityId(),
                     loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
-        } else {
-            conn.spawnEntity(puppet.getEntityId(), puppet.getUniqueId(), puppet.getEntityType(),
-                    loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
+            return;
+        }
+        conn.spawnEntity(puppet.getEntityId(), puppet.getUniqueId(), puppet.getEntityType(),
+                loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
+        // Catch the newcomer up on the look the puppet has accumulated since it spawned.
+        if (puppet.getFlags() != 0) {
+            conn.setEntityFlags(puppet.getEntityId(), puppet.getFlags());
+        }
+        if (puppet.getNameTag() != null && !puppet.getNameTag().isEmpty()) {
+            conn.setEntityNameTag(puppet.getEntityId(), ChatText.toLegacy(puppet.getNameTag()));
+        }
+    }
+
+    /** Relay a puppet's floating text to every viewer. Called by {@link CorePuppet#setNameTag}. */
+    public void relayPuppetNameTag(CorePuppet puppet) {
+        if (puppet.getEntityType().isPlayer()) {
+            return; // a player avatar's name is its player name on every edition — nothing to set
+        }
+        String nameTag = puppet.getNameTag();
+        String rendered = nameTag == null ? "" : ChatText.toLegacy(nameTag);
+        for (CorePlayer p : playerRegistry.online()) {
+            p.getConnection().setEntityNameTag(puppet.getEntityId(), rendered);
+        }
+    }
+
+    /** Relay a puppet's whole flag set to every viewer. Called by {@link CorePuppet#setFlag}. */
+    public void relayPuppetFlags(CorePuppet puppet) {
+        for (CorePlayer p : playerRegistry.online()) {
+            p.getConnection().setEntityFlags(puppet.getEntityId(), puppet.getFlags());
+        }
+    }
+
+    /** Relay a puppet's arm swing to every viewer. Called by {@link CorePuppet#swing}. */
+    public void relayPuppetSwing(CorePuppet puppet) {
+        for (CorePlayer p : playerRegistry.online()) {
+            p.getConnection().swingArm(puppet.getEntityId());
+        }
+    }
+
+    /** Relay a puppet's hurt flash to every viewer. Called by {@link CorePuppet#hurt}. */
+    public void relayPuppetHurt(CorePuppet puppet) {
+        for (CorePlayer p : playerRegistry.online()) {
+            p.getConnection().playHurtAnimation(puppet.getEntityId());
         }
     }
 
@@ -505,6 +551,78 @@ public class JedrockServer implements Server, ConnectionListener {
     /** The live puppet roster — used by the {@code /puppet} command to list / resolve puppets. */
     public PuppetRegistry getPuppets() {
         return puppets;
+    }
+
+    // ===== Holograms (floating text) =====
+
+    @Override
+    public Hologram spawnHologram(Location at, String... lines) {
+        CoreHologram hologram = new CoreHologram(defaultWorld, at, this, lines);
+        holograms.add(hologram);
+        for (CorePlayer p : playerRegistry.online()) {
+            spawnHologramTo(p.getConnection(), hologram);
+        }
+        LOGGER.info("Spawned hologram #" + hologram.getEntityId() + " (" + lines.length + " lines) at "
+                + String.format(java.util.Locale.ROOT, "%.1f,%.1f,%.1f", at.x(), at.y(), at.z()));
+        return hologram;
+    }
+
+    /** Show every line of one hologram to one connection. Shared by the spawn broadcast and onLogin. */
+    private void spawnHologramTo(PlayerConnection conn, CoreHologram hologram) {
+        List<String> lines = hologram.getLines();
+        long[] ids = hologram.getLineIds();
+        for (int i = 0; i < lines.size(); i++) {
+            Location at = hologram.lineLocation(i);
+            conn.spawnTextLine(ids[i], hologram.getUniqueId(), at.x(), at.y(), at.z(),
+                    ChatText.toLegacy(lines.get(i)));
+        }
+    }
+
+    /** Relay one re-texted hologram line. Called by {@link CoreHologram#setLine}. */
+    public void relayHologramLine(CoreHologram hologram, int index) {
+        long id = hologram.getLineIds()[index];
+        String rendered = ChatText.toLegacy(hologram.getLines().get(index));
+        for (CorePlayer p : playerRegistry.online()) {
+            p.getConnection().setEntityNameTag(id, rendered);
+        }
+    }
+
+    /** Move a hologram's whole stack. Called by {@link CoreHologram#teleport}. */
+    public void moveHologram(CoreHologram hologram) {
+        long[] ids = hologram.getLineIds();
+        for (int i = 0; i < ids.length; i++) {
+            Location at = hologram.lineLocation(i);
+            for (CorePlayer p : playerRegistry.online()) {
+                p.getConnection().moveEntity(ids[i], at.x(), at.y(), at.z(), 0f, 0f);
+            }
+        }
+    }
+
+    /** Despawn {@code oldIds} and re-show the hologram — its line count changed ({@link CoreHologram#setLines}). */
+    public void respawnHologram(CoreHologram hologram, long[] oldIds) {
+        for (CorePlayer p : playerRegistry.online()) {
+            for (long id : oldIds) {
+                p.getConnection().removeEntity(id);
+            }
+            spawnHologramTo(p.getConnection(), hologram);
+        }
+    }
+
+    /** Despawn every line and drop the hologram. Called by {@link CoreHologram#remove}. */
+    public void removeHologram(CoreHologram hologram) {
+        if (!holograms.remove(hologram)) {
+            return; // already gone
+        }
+        for (CorePlayer p : playerRegistry.online()) {
+            for (long id : hologram.getLineIds()) {
+                p.getConnection().removeEntity(id);
+            }
+        }
+    }
+
+    /** The live holograms — used by the {@code /puppet} command to list / resolve them. */
+    public List<CoreHologram> getHolograms() {
+        return holograms;
     }
 
     // ===== ConnectionListener: network → core state bridge =====
@@ -576,9 +694,12 @@ public class JedrockServer implements Server, ConnectionListener {
                     spawn.x(), spawn.y(), spawn.z(), spawn.yaw(), spawn.pitch());
         }
 
-        // Show every existing puppet to the newcomer (existing players already see them).
+        // Show every existing puppet and hologram to the newcomer (existing players already see them).
         for (CorePuppet puppet : puppets.all()) {
             spawnPuppetTo(connection, puppet);
+        }
+        for (CoreHologram hologram : holograms) {
+            spawnHologramTo(connection, hologram);
         }
 
         LOGGER.info(username + " joined [" + connection.getProtocolVersion().getVersionName()

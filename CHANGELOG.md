@@ -8,6 +8,34 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Puppets came alive — name tags, gaze, poses, animations — and holograms.** The puppet foundation grew
+  from a mute mannequin into something that can act, without the server simulating a thing. New api:
+  `PuppetEntity.setNameTag` (floating text, in the unified chat markup), `lookAt` / `setRotation` (the whole
+  "it noticed me" illusion — trigonometry, not pathfinding), `setFlag` with a canonical `PuppetFlag` set
+  (`ON_FIRE` / `INVISIBLE` / `SNEAKING`), and `swing()` / `hurt()`. `PuppetFlag` holds only flags that map to
+  one bit on *every* edition — baby and glowing are deliberately out (Bedrock has a universal bit, Java
+  doesn't, so they'd render on a phone and silently do nothing on a PC). The mapping lives in a new
+  `EntityFlagIds`, `EntityTypeIds`' sibling and the rest of the entity tax.
+  **Holograms** (`Hologram`, `Server.spawnHologram`, `CoreHologram`) are the purest illusion here: a name tag
+  with the body taken away. Each line is its own invisible entity, and every edition plays the trick with what
+  it has — Java hangs the text on an invisible marker armor stand, Bedrock (no armor stand in either legacy
+  era) on an item entity with no item, which is PocketMine's own floating-text hack. Temporary `/hologram`
+  (spawn / setline / remove / list) and new `/puppet` verbs (name / look / flag / swing / hurt) drive both
+  until the API can. Unit-tested byte-for-byte (`EntityFlagIdsTest`, `PeTextLineEncodingTest`,
+  `Mcpe014AddEntityTest`, `ClientboundSpawnMobTest`); the four metadata dialects were ground-truthed against
+  ViaVersion (pinned per version) and PocketMine-MP at both PE eras.
+
+### Fixed
+
+- **PE 0.14 `AddEntity` wrote its fields in the wrong order**, so every 0.14 puppet was malformed on the wire:
+  the entity-links short was written *before* the metadata block, where protocol 45 puts metadata first and
+  links last. Found by reading PocketMine-MP's `AddEntityPacket::encode` at `CURRENT_PROTOCOL = 45` rather
+  than waiting on a client — this was the "pending live-client verification" note the previous entry left.
+  Pinned by `Mcpe014AddEntityTest`. Two related traps are now encoded in the same place: a string *inside*
+  0.14 metadata carries a **little-endian** length (every other 0.14 string is big-endian), and 0.14 keeps the
+  name tag at index **2** with a separate show-name-tag byte at 3 — where 1.1.5 uses index 4 and folds
+  visibility into flag bits, so 1.1.5's layout would have silently done nothing.
+
 - **Puppet entities — the foundation before the platform API.** A puppet is a server-puppeteered visual
   entity (the base for mobs / NPCs / holograms), never simulated: the server spawns a visual, moves it and
   relays it cross-edition, and that's all. New api contracts — `EntityType` (a canonical, protocol-agnostic

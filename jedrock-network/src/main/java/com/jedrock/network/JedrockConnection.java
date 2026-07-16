@@ -159,6 +159,21 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void setEntityNameTag(long entityId, String nameTag) {
+        protocolHandler.setEntityNameTag(this, entityId, nameTag);
+    }
+
+    @Override
+    public void setEntityFlags(long entityId, int flags) {
+        protocolHandler.setEntityFlags(this, entityId, flags);
+    }
+
+    @Override
+    public void spawnTextLine(long entityId, UUID uuid, double x, double y, double z, String text) {
+        protocolHandler.spawnTextLine(this, entityId, uuid, x, y, z, text);
+    }
+
+    @Override
     public void teleport(double x, double y, double z, float yaw, float pitch) {
         protocolHandler.teleportSelf(this, x, y, z, yaw, pitch);
     }

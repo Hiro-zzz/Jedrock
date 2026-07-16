@@ -119,6 +119,22 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     }
 
     @Override
+    public void spawnTextLine(long entityId, UUID uuid, double x, double y, double z, String text) {
+        sendWrapped(b -> Mcpe014Packets.addTextLine(b, entityId, (float) x, (float) y, (float) z, text));
+    }
+
+    @Override
+    public void setEntityNameTag(long entityId, String nameTag) {
+        sendWrapped(b -> Mcpe014Packets.setEntityNameTag(b, entityId, nameTag));
+    }
+
+    @Override
+    public void setEntityFlags(long entityId, int flags) {
+        sendWrapped(b -> Mcpe014Packets.setEntityFlags(b, entityId,
+                (int) com.jedrock.network.EntityFlagIds.bedrockBits(flags)));
+    }
+
+    @Override
     public void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch) {
         // MoveEntity takes eye y.
         sendWrapped(b -> Mcpe014Packets.moveEntity(b, entityId,
