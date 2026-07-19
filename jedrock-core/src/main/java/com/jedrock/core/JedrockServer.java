@@ -19,14 +19,19 @@ import com.jedrock.api.event.player.PlayerDamageEvent;
 import com.jedrock.api.event.player.PlayerDeathEvent;
 import com.jedrock.api.event.player.PlayerInteractEntityEvent;
 import com.jedrock.api.event.player.PlayerJoinEvent;
+import com.jedrock.api.event.player.PlayerLoginEvent;
 import com.jedrock.api.event.player.PlayerMoveEvent;
+import com.jedrock.api.event.player.PlayerPickupItemEvent;
 import com.jedrock.api.event.player.PlayerQuitEvent;
 import com.jedrock.api.event.player.PlayerRespawnEvent;
 import com.jedrock.api.event.player.PlayerTeleportEvent;
 import com.jedrock.api.event.player.PlayerToggleSneakEvent;
 import com.jedrock.api.event.player.PlayerToggleSprintEvent;
 import com.jedrock.api.event.player.PlayerUseItemEvent;
+import com.jedrock.api.event.server.ServerStartEvent;
+import com.jedrock.api.event.server.ServerStopEvent;
 import com.jedrock.api.event.server.ServerTickEvent;
+import com.jedrock.api.event.world.WorldSaveEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.player.PlayerConnection;
@@ -352,6 +357,9 @@ public class JedrockServer implements Server, ConnectionListener {
         }
 
         LOGGER.info("Jedrock server started successfully. Type 'help' for console commands.");
+
+        // Everything is up — let plugins do their one-time setup.
+        eventBus.post(new ServerStartEvent());
     }
 
     /** Bind one Bedrock listener without letting a busy port abort startup. */
@@ -384,6 +392,9 @@ public class JedrockServer implements Server, ConnectionListener {
         if (!running.compareAndSet(true, false)) return;
 
         LOGGER.info("Shutting down Jedrock...");
+
+        // Tell plugins first, while the world and players are still alive.
+        eventBus.post(new ServerStopEvent());
 
         gameLoop.stop();
         networkServer.shutdown();
@@ -443,6 +454,10 @@ public class JedrockServer implements Server, ConnectionListener {
     /** Save the world synchronously (used on shutdown). Best-effort: an I/O failure is logged, not fatal. */
     private void saveWorld() {
         Path file = levelFile();
+        // Let plugins flush any world-tied state they want persisted alongside the terrain.
+        if (eventBus.hasListeners(WorldSaveEvent.class)) {
+            eventBus.post(new WorldSaveEvent(defaultWorld));
+        }
         try {
             defaultWorld.save(file);
             LOGGER.info("Saved world to " + file.toAbsolutePath()
@@ -691,6 +706,17 @@ public class JedrockServer implements Server, ConnectionListener {
         // entry below. Markup sites still escape() it — stripCodes keeps a legitimate '_' intact.
         username = ChatText.stripCodes(username);
 
+        // The gate: a whitelist / ban check runs here, before any state is created for the player.
+        // Cancelling disconnects the client and nothing (registry, avatar, world entry) is set up.
+        if (eventBus.hasListeners(PlayerLoginEvent.class)) {
+            PlayerLoginEvent login = eventBus.post(
+                    new PlayerLoginEvent(uuid, username, connection.getAddress()));
+            if (login.isCancelled()) {
+                connection.close(login.getKickReason() != null ? login.getKickReason() : "Connection refused");
+                return;
+            }
+        }
+
         // Evict any stale session for the same account before the new one registers. A crashed client is
         // only timed out by RakNet later, so the same player can rejoin while their old session (avatar,
         // registry + world entry) still lingers; left in place it shows a ghost avatar to everyone and its
@@ -905,7 +931,18 @@ public class JedrockServer implements Server, ConnectionListener {
         // consumes it. Creative is untouched (the client has the creative menu). state 0 = air = a break.
         // Push just the changed slot so the hotbar HUD refreshes live (a full resend didn't).
         if (editor != null && editor.getGameMode() == GameMode.SURVIVAL) {
-            int slot = state == 0 ? editor.giveItem(previous) : editor.takeItem(state);
+            int slot;
+            if (state == Blocks.AIR) {
+                // A break hands the mined block to the miner (no item entities) — a listener may veto the
+                // pickup, leaving the block broken but uncollected.
+                if (eventBus.hasListeners(PlayerPickupItemEvent.class)
+                        && eventBus.post(new PlayerPickupItemEvent(editor, previous)).isCancelled()) {
+                    return;
+                }
+                slot = editor.giveItem(previous);
+            } else {
+                slot = editor.takeItem(state);
+            }
             if (slot >= 0) {
                 editor.syncSlot(slot);
             }

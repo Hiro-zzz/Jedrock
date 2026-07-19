@@ -8,6 +8,15 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Gate, inventory and lifecycle events — breadth across new categories.** Five more, deliberately spread
+  across shapes the model didn't cover: `PlayerLoginEvent` — the connection *gate*, fired before any state
+  is created (carries identity, not a `Player`, since there isn't one yet; cancel with a kick reason for a
+  whitelist / ban, distinct from the post-setup `PlayerJoinEvent`); `PlayerPickupItemEvent` — cancel a
+  survival mining pickup (the block still breaks, the item isn't collected — there are no item entities to
+  drop); `ServerStartEvent` / `ServerStopEvent` (`event.server`) — one-time plugin setup / teardown, fired
+  while the world and players are still alive; and `WorldSaveEvent` (new `event.world`) — flush world-tied
+  state before each autosave and the shutdown save. Tested in `PlayerEventsTest`. 215 tests green.
+
 - **Lifecycle + teleport events — and a scriptable heartbeat.** Four more: `ServerTickEvent` — a whole new
   category, fired once per loop tick (gated so an idle server pays nothing), the thing a script hangs "every
   N ticks" work on without polling; `PlayerRespawnEvent` (redirect where a dead player reappears — a bed, a

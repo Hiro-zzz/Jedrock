@@ -8,11 +8,14 @@ import com.jedrock.api.event.player.PlayerChatEvent;
 import com.jedrock.api.event.player.PlayerCommandEvent;
 import com.jedrock.api.event.player.PlayerDamageEvent;
 import com.jedrock.api.event.player.PlayerDeathEvent;
+import com.jedrock.api.event.player.PlayerLoginEvent;
+import com.jedrock.api.event.player.PlayerPickupItemEvent;
 import com.jedrock.api.event.player.PlayerRespawnEvent;
 import com.jedrock.api.event.player.PlayerTeleportEvent;
 import com.jedrock.api.event.player.PlayerToggleSneakEvent;
 import com.jedrock.api.event.player.PlayerUseItemEvent;
 import com.jedrock.api.event.server.ServerTickEvent;
+import com.jedrock.api.event.world.WorldSaveEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.world.Dimension;
 import com.jedrock.api.world.Location;
@@ -118,10 +121,40 @@ class PlayerEventsTest {
     }
 
     @Test
+    void loginEventCarriesIdentityAndAMutableKickReason() {
+        java.util.UUID id = java.util.UUID.randomUUID();
+        PlayerLoginEvent event = new PlayerLoginEvent(id, "Steve", "1.2.3.4:5678");
+        assertEquals(id, event.getUniqueId());
+        assertEquals("Steve", event.getUsername());
+        assertEquals("1.2.3.4:5678", event.getAddress());
+        assertNull(event.getKickReason(), "no reason until a listener sets one");
+        assertFalse(event.isCancelled());
+
+        event.setCancelled(true);
+        event.setKickReason("Not whitelisted");
+        assertTrue(event.isCancelled());
+        assertEquals("Not whitelisted", event.getKickReason());
+    }
+
+    @Test
+    void pickupCarriesTheMinedStateAndIsCancellable() {
+        PlayerPickupItemEvent event = new PlayerPickupItemEvent(null, 17 << 4);
+        assertEquals(17 << 4, event.getState(), "the canonical state of the mined block");
+        assertFalse(event.isCancelled());
+        event.setCancelled(true);
+        assertTrue(event.isCancelled(), "cancel = block breaks but the item isn't collected");
+    }
+
+    @Test
     void useItemAndTickReportTheirState() {
         assertTrue(new PlayerUseItemEvent(null, true).isUsing());
         assertFalse(new PlayerUseItemEvent(null, false).isUsing());
         assertEquals(40L, new ServerTickEvent(40L).getTick(), "the tick number rides along");
+    }
+
+    @Test
+    void worldSaveEventExposesItsWorld() {
+        assertSame(WORLD, new WorldSaveEvent(WORLD).getWorld(), "the world about to be written");
     }
 
     @Test

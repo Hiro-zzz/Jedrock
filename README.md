@@ -416,10 +416,11 @@ simulation stays out (see non-goals).
   extension surface. **The event engine is in:** a cancellable, priority-ordered **event model** the core
   actually routes its decisions through — cancel `BlockBreakEvent` and the block stays; cancel
   `PlayerChatEvent` and the line never sends; cancel `PlayerMoveEvent` and the player is snapped back. The
-  set spans join / quit / chat / command / move / teleport / block break / place / right-click /
-  interact-entity / damage / death / respawn / sneak / sprint / use-item / game-mode, plus a per-tick
-  `ServerTickEvent` heartbeat — each honoured by the core (cancel a `PlayerDamageEvent` for invulnerability,
-  redirect a `GameModeChangeEvent` or a `PlayerRespawnEvent`, suppress a `PlayerDeathEvent`'s broadcast).
+  set spans the player's whole arc — login gate / join / quit / chat / command / move / teleport / block
+  break / place / right-click / interact-entity / item-pickup / damage / death / respawn / sneak / sprint /
+  use-item / game-mode — plus server lifecycle (start / stop / per-tick heartbeat) and world save, each
+  honoured by the core (cancel a `PlayerLoginEvent` to reject a connection, a `PlayerDamageEvent` for
+  invulnerability, redirect a `GameModeChangeEvent` or `PlayerRespawnEvent`, suppress a `PlayerDeathEvent`).
   `EventBus` gained priorities (LOWEST…MONITOR), `ignoreCancelled` listeners, precise removal handles, and a
   `hasListeners` fast-path so the hottest paths (movement) allocate nothing when unlistened — reflection-free
   and dependency-free by design, so it maps cleanly onto the scripting binding to come. **Still to land:** the
