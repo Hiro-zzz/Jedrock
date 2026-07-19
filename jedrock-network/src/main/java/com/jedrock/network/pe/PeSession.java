@@ -8,6 +8,8 @@ import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
 import com.jedrock.network.ConnectionListener;
+import com.jedrock.network.EntityFlagIds;
+import com.jedrock.network.EntityTypeIds;
 import com.jedrock.network.chunk.ChunkView;
 import com.jedrock.utils.ByteBufUtils;
 import com.jedrock.utils.JLogger;
@@ -183,6 +185,128 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
                     ByteBufUtils.writeVarInt(b, 1);
                     McpeCodec.writeUuid(b, uuid);
                 });
+    }
+
+    @Override
+    public void spawnEntity(long entityId, UUID uuid, com.jedrock.api.entity.EntityType type,
+                            double x, double y, double z, float yaw, float pitch) {
+        // A puppet carries the nametag-visibility flags from birth, so a later setEntityNameTag shows up
+        // without having to re-send the flags (they share one DATA_FLAGS long).
+        int typeId = EntityTypeIds.bedrockId(type);
+        sendGameBatch(b -> writeAddEntity(b, entityId, typeId, x, y, z, yaw, pitch,
+                meta -> {
+                    ByteBufUtils.writeVarInt(meta, 1);         // metadata entry count
+                    writeFlagsEntry(meta, BASE_ENTITY_FLAGS);
+                }));
+    }
+
+    @Override
+    public void spawnTextLine(long entityId, UUID uuid, double x, double y, double z, String text) {
+        sendGameBatch(b -> writeAddTextLine(b, entityId, x, y, z, text));
+    }
+
+    /**
+     * Encode one hologram line: an item entity with no item — nothing renders but the name floating where
+     * the body would be, immobile so it can't be nudged. PocketMine's own floating-text hack, which
+     * deliberately does <em>not</em> set the invisible flag at protocol 113: an item entity that was never
+     * given an item draws nothing anyway.
+     */
+    static void writeAddTextLine(ByteBuf b, long entityId, double x, double y, double z, String text) {
+        long flags = BASE_ENTITY_FLAGS | (1L << DATA_FLAG_IMMOBILE_BIT);
+        writeAddEntity(b, entityId, ITEM_ENTITY_TYPE_ID, x, y + TEXT_LINE_Y_OFFSET, z, 0f, 0f,
+                meta -> {
+                    ByteBufUtils.writeVarInt(meta, 2);         // metadata entry count
+                    writeFlagsEntry(meta, flags);
+                    writeNameTagEntry(meta, text);
+                });
+    }
+
+    @Override
+    public void setEntityNameTag(long entityId, String nameTag) {
+        // Only the nametag string: metadata is a merge, and the visibility bits already rode in on spawn.
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_SET_ENTITY_DATA);
+            ByteBufUtils.writeVarLong(b, entityId);            // entity runtime id
+            ByteBufUtils.writeVarInt(b, 1);                    // metadata entry count
+            writeNameTagEntry(b, nameTag);
+        });
+    }
+
+    @Override
+    public void setEntityFlags(long entityId, int flags) {
+        // DATA_FLAGS is one long holding both the canonical flags and the nametag-visibility bits, so it
+        // is always written whole — dropping the base bits here would silently hide the puppet's name.
+        long bits = BASE_ENTITY_FLAGS | EntityFlagIds.bedrockBits(flags);
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_SET_ENTITY_DATA);
+            ByteBufUtils.writeVarLong(b, entityId);            // entity runtime id
+            ByteBufUtils.writeVarInt(b, 1);                    // metadata entry count
+            writeFlagsEntry(b, bits);
+        });
+    }
+
+    /**
+     * Encode an AddEntity body (0x0D): entity ids, the MCPE entity type, feet position, motion, rotation
+     * (pitch before yaw), then attributes, the metadata dictionary and entity links. Verbatim from
+     * PocketMine-MP at protocol 113 ({@code AddEntityPacket::encodePayload}).
+     */
+    static void writeAddEntity(ByteBuf b, long entityId, int typeId,
+                               double x, double y, double z, float yaw, float pitch,
+                               Consumer<ByteBuf> metadata) {
+        ByteBufUtils.writeVarInt(b, ID_ADD_ENTITY);
+        ByteBufUtils.writeSignedVarLong(b, entityId);      // entity unique id
+        ByteBufUtils.writeVarLong(b, entityId);            // entity runtime id
+        ByteBufUtils.writeVarInt(b, typeId);               // entity type (uvarint, MCPE id)
+        b.writeFloatLE((float) x);
+        b.writeFloatLE((float) y);                         // feet
+        b.writeFloatLE((float) z);
+        b.writeFloatLE(0f);                                // motion x
+        b.writeFloatLE(0f);                                // motion y
+        b.writeFloatLE(0f);                                // motion z
+        b.writeFloatLE(pitch);
+        b.writeFloatLE(yaw);
+        ByteBufUtils.writeVarInt(b, 0);                    // attributes: none
+        metadata.accept(b);                                // metadata dictionary (count + entries)
+        ByteBufUtils.writeVarInt(b, 0);                    // entity links: none
+    }
+
+    /** One DATA_FLAGS metadata entry (a zigzag long). */
+    private static void writeFlagsEntry(ByteBuf b, long flags) {
+        ByteBufUtils.writeVarInt(b, DATA_FLAGS_INDEX);     // key = DATA_FLAGS (0)
+        ByteBufUtils.writeVarInt(b, DATA_TYPE_LONG);       // type = LONG (7)
+        ByteBufUtils.writeSignedVarLong(b, flags);         // putVarLong (zigzag)
+    }
+
+    /** One DATA_NAMETAG metadata entry — index 4 at protocol 113 (0.14 puts it at 2). */
+    private static void writeNameTagEntry(ByteBuf b, String nameTag) {
+        ByteBufUtils.writeVarInt(b, DATA_NAMETAG_INDEX);   // key = DATA_NAMETAG (4)
+        ByteBufUtils.writeVarInt(b, DATA_TYPE_STRING);     // type = STRING (4)
+        ByteBufUtils.writeString(b, nameTag == null ? "" : nameTag);
+    }
+
+    @Override
+    public void moveEntity(long entityId, double x, double y, double z, float yaw, float pitch) {
+        // MoveEntity (0x12): runtime id, feet position, then byte-angle pitch / yaw / headYaw and a flags
+        // byte. Unlike MovePlayer (0x13, player-only) this addresses any entity runtime id.
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_MOVE_ENTITY);
+            ByteBufUtils.writeVarLong(b, entityId);
+            b.writeFloatLE((float) x);
+            b.writeFloatLE((float) y);                         // feet
+            b.writeFloatLE((float) z);
+            ByteBufUtils.writeAngle(b, pitch);
+            ByteBufUtils.writeAngle(b, yaw);
+            ByteBufUtils.writeAngle(b, yaw);                    // head yaw
+            b.writeByte(0);                                     // flags (on-ground / teleport)
+        });
+    }
+
+    @Override
+    public void removeEntity(long entityId) {
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_REMOVE_ENTITY);
+            ByteBufUtils.writeSignedVarLong(b, entityId);
+        });
     }
 
     @Override

@@ -8,6 +8,112 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Script plugins — the scripting layer lands (Rhino).** The platform's whole point: custom gameplay now
+  lives in hot-reloadable JavaScript, not the compiled core. Drop a `.js` in `plugins/` and it loads on
+  start; save an edit and it reloads within a second, no restart. A script gets three globals — `server`,
+  `events`, `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`, the handler receiving
+  the real Java event to read and mutate (`e.setCancelled(true)`, `e.setMessage(...)`). All 23 events are
+  scriptable by friendly name (`EventTypes`). Built on **`rhino-runtime` 1.7.13** — pure Java, ~1.5 MB, zero
+  transitive deps: the lightweight pick over GraalJS (tens of MB incl. ICU4J), in keeping with the project's
+  few-deps ethos, and it lives only in `core` so the `api` stays runtime-neutral. Rhino runs interpreted
+  (no per-script class generation, clean hot reload) with ES6 syntax (arrow functions, `let`/`const`); a
+  `ClassShutter` sandbox keeps scripts to Jedrock's classes and a safe JDK slice (best-effort guard rails,
+  not a security boundary — plugins are operator-installed). All script execution is serialized under one
+  lock (Rhino isn't thread-safe; events post from several threads). A `plugins` console command lists them
+  and `plugins reload` forces a reload. Sample `plugins/example.js` included. Unit-tested end-to-end
+  (`PluginManagerTest`: a real script cancels/edits a posted event, hot-reloads, tears down, survives a
+  throwing handler) and smoke-verified in a live server (the sample loads its 4 listeners on start).
+
+- **Gate, inventory and lifecycle events — breadth across new categories.** Five more, deliberately spread
+  across shapes the model didn't cover: `PlayerLoginEvent` — the connection *gate*, fired before any state
+  is created (carries identity, not a `Player`, since there isn't one yet; cancel with a kick reason for a
+  whitelist / ban, distinct from the post-setup `PlayerJoinEvent`); `PlayerPickupItemEvent` — cancel a
+  survival mining pickup (the block still breaks, the item isn't collected — there are no item entities to
+  drop); `ServerStartEvent` / `ServerStopEvent` (`event.server`) — one-time plugin setup / teardown, fired
+  while the world and players are still alive; and `WorldSaveEvent` (new `event.world`) — flush world-tied
+  state before each autosave and the shutdown save. Tested in `PlayerEventsTest`. 215 tests green.
+
+- **Lifecycle + teleport events — and a scriptable heartbeat.** Four more: `ServerTickEvent` — a whole new
+  category, fired once per loop tick (gated so an idle server pays nothing), the thing a script hangs "every
+  N ticks" work on without polling; `PlayerRespawnEvent` (redirect where a dead player reappears — a bed, a
+  lobby); `PlayerUseItemEvent` (completes the pose trio with sneak / sprint); and `PlayerTeleportEvent` (veto
+  or redirect a `/tp` / `/spawn`). `teleport()` now returns whether it applied and shares a private
+  `reposition()` with the respawn path — so a cancelled teleport can never strand a dead player (respawn
+  routes through `PlayerRespawnEvent`, not the vetoable teleport). Tested in `PlayerEventsTest`.
+
+- **More events — the model widened to cover damage, commands, poses and mode.** Building on the engine,
+  seven more cancellable events, each routed through the core so cancelling actually changes behaviour:
+  `PlayerDamageEvent` (a `DamageCause` — FALL / VOID / ATTACK / KILL — and a mutable amount; cancel or zero
+  it for invulnerability) and `PlayerDeathEvent` (restyle or suppress the death broadcast), both threaded
+  through the one `hurt()` funnel every source uses; `PlayerCommandEvent` (rewrite or veto a slash command
+  before dispatch); `PlayerToggleSneakEvent` / `PlayerToggleSprintEvent` (cancel makes the server ignore the
+  pose toggle); `GameModeChangeEvent` (veto or redirect a `/gamemode` switch — `setGameMode` now returns
+  whether it applied, and the command reports honestly); and `PlayerInteractBlockEvent` (gate a right-click
+  on any block — cancel suppresses both the chest open and the placement). Hot paths stay free via the
+  `hasListeners` gate. Unit-tested (`PlayerEventsTest`) for the mutable-field contracts the wiring depends on.
+
+- **The event engine — the platform API's foundation.** The `EventBus` went from a two-event stub to a real
+  extension seam, and — the part that matters — the core now actually *routes its decisions through it*, so a
+  listener can veto or reshape what the server is about to do. New: `EventPriority` (LOWEST…MONITOR, earliest
+  proposes, latest decides), priority-ordered dispatch, `ignoreCancelled` listeners, precise removal via a
+  returned `Subscription` handle, and a cached `hasListeners(type)` fast-path so a hot caller can skip
+  *building* an event nobody wants. Cancellable events wired end-to-end: `PlayerChatEvent` (cancel suppresses;
+  message + format are mutable), `BlockBreakEvent` / `BlockPlaceEvent` (cancel leaves the world untouched and
+  reverts the editor's client), `PlayerMoveEvent` (cancel snaps the player back — posted only when something
+  listens, so the hottest path stays free), `PlayerInteractEntityEvent` (cancel drops the hit before any
+  damage or puppet callback). `PlayerJoinEvent` / `PlayerQuitEvent` moved onto shared `PlayerEvent` /
+  `CancellablePlayerEvent` bases. Reflection-free and dependency-free, so it maps cleanly onto the planned
+  GraalJS binding. Unit-tested (`EventBusTest`: priority order, cancellation skipping, cache invalidation,
+  subscription removal, listener-fault isolation). Scripts / plugins are the next layer; this is the gate they
+  wait on.
+
+- **Puppets came alive — name tags, gaze, poses, animations — and holograms.** The puppet foundation grew
+  from a mute mannequin into something that can act, without the server simulating a thing. New api:
+  `PuppetEntity.setNameTag` (floating text, in the unified chat markup), `lookAt` / `setRotation` (the whole
+  "it noticed me" illusion — trigonometry, not pathfinding), `setFlag` with a canonical `PuppetFlag` set
+  (`ON_FIRE` / `INVISIBLE` / `SNEAKING`), and `swing()` / `hurt()`. `PuppetFlag` holds only flags that map to
+  one bit on *every* edition — baby and glowing are deliberately out (Bedrock has a universal bit, Java
+  doesn't, so they'd render on a phone and silently do nothing on a PC). The mapping lives in a new
+  `EntityFlagIds`, `EntityTypeIds`' sibling and the rest of the entity tax.
+  **Holograms** (`Hologram`, `Server.spawnHologram`, `CoreHologram`) are the purest illusion here: a name tag
+  with the body taken away. Each line is its own invisible entity, and every edition plays the trick with what
+  it has — Java hangs the text on an invisible marker armor stand, Bedrock (no armor stand in either legacy
+  era) on an item entity with no item, which is PocketMine's own floating-text hack. Temporary `/hologram`
+  (spawn / setline / remove / list) and new `/puppet` verbs (name / look / flag / swing / hurt) drive both
+  until the API can. Unit-tested byte-for-byte (`EntityFlagIdsTest`, `PeTextLineEncodingTest`,
+  `Mcpe014AddEntityTest`, `ClientboundSpawnMobTest`); the four metadata dialects were ground-truthed against
+  ViaVersion (pinned per version) and PocketMine-MP at both PE eras.
+
+### Fixed
+
+- **PE 0.14 `AddEntity` wrote its fields in the wrong order**, so every 0.14 puppet was malformed on the wire:
+  the entity-links short was written *before* the metadata block, where protocol 45 puts metadata first and
+  links last. Found by reading PocketMine-MP's `AddEntityPacket::encode` at `CURRENT_PROTOCOL = 45` rather
+  than waiting on a client — this was the "pending live-client verification" note the previous entry left.
+  Pinned by `Mcpe014AddEntityTest`. Two related traps are now encoded in the same place: a string *inside*
+  0.14 metadata carries a **little-endian** length (every other 0.14 string is big-endian), and 0.14 keeps the
+  name tag at index **2** with a separate show-name-tag byte at 3 — where 1.1.5 uses index 4 and folds
+  visibility into flag bits, so 1.1.5's layout would have silently done nothing.
+
+- **Puppet entities — the foundation before the platform API.** A puppet is a server-puppeteered visual
+  entity (the base for mobs / NPCs / holograms), never simulated: the server spawns a visual, moves it and
+  relays it cross-edition, and that's all. New api contracts — `EntityType` (a canonical, protocol-agnostic
+  set), `PuppetEntity` (a handle to move / remove / hook interaction), and `Server.spawnPuppet` — plus the
+  entity counterpart of the block palette (`EntityTypeIds`: canonical → per-edition numeric id; classic JE
+  mob ids for 1.8 / 1.12.2, legacy MCPE ids for 1.1.5 / 0.14). `PlayerConnection` gained
+  `spawnEntity` / `moveEntity` / `removeEntity`, implemented on all four editions (JE Spawn Mob 0x03 / 0x0F,
+  PE AddEntity 0x0D / 0x98; despawn reuses the existing DestroyEntities / RemoveEntity wire). Core: a shared
+  `EntityIds` allocator (players + puppets share one id space), `CorePuppet`, `PuppetRegistry`, and lifecycle
+  relay in `JedrockServer` (spawn to all, show existing puppets to a joiner, move/despawn relay). An
+  **interaction hook** reuses the existing cross-edition attack decode — hitting a puppet fires its
+  `onInteract` callback (the seam the API will drive) and, as a demo, flashes it red on every client. A
+  **temporary `/puppet` command** (spawn / move / remove / list) exercises it before the API lands.
+  A **player-avatar puppet** (`EntityType.PLAYER`, a named NPC) is included: it renders through the same
+  cross-edition avatar machinery real players use (a tab / player-list entry + spawn-player, and move /
+  despawn via the avatar path) rather than spawn-mob — `/puppet spawn player <name>`.
+  Unit-tested (`EntityTypeIdsTest`, `ClientboundSpawnMobTest`); the PE 1.1.5 / 0.14 AddEntity byte layouts
+  are pending live-client verification.
+
 - **More in-game and console commands.** The in-game set grew from four to fourteen, all authored once and
   advertised to Bedrock via the `AvailableCommands` manifest: `/help [cmd]` (now details one command),
   `/list` (online players + edition), `/tps` (server health), `/say`, `/me`, `/msg` (private message),

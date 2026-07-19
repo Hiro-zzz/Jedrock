@@ -59,7 +59,11 @@ public final class GameModeCommand implements Command {
             target = cp;
         }
 
-        server.setGameMode(target, mode); // persists the choice + pushes the live switch to the client
+        // persists the choice + pushes the live switch to the client; a listener may veto it.
+        if (!server.setGameMode(target, mode)) {
+            sender.sendMessage("{red}The game mode change was cancelled.");
+            return;
+        }
         target.sendMessage("{green}Your game mode is now {white}" + mode.displayName());
         if (target != sender) {
             sender.sendMessage("{green}Set {white}" + ChatText.escape(target.getName())

@@ -32,6 +32,12 @@
             <artifactId>jedrock-gameloop</artifactId>
         </dependency>
 
+        <!-- Script plugin backend (Rhino). Only the core knows about it; the api stays neutral. -->
+        <dependency>
+            <groupId>org.mozilla</groupId>
+            <artifactId>rhino-runtime</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

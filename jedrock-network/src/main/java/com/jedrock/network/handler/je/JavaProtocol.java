@@ -44,6 +44,30 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Move an avatar previously shown via {@link #showPlayer} to an absolute position. */
     void moveAvatar(JedrockConnection c, long entityId, double x, double y, double z, float yaw, float pitch);
 
+    /** Spawn a non-player puppet entity of the given canonical type (this version's spawn-mob packet). */
+    void spawnEntity(JedrockConnection c, long entityId, java.util.UUID uuid,
+                     com.jedrock.api.entity.EntityType type,
+                     double x, double y, double z, float yaw, float pitch);
+
+    /** Move a puppet entity previously shown via {@link #spawnEntity} (same wire as {@link #moveAvatar}). */
+    default void moveEntity(JedrockConnection c, long entityId,
+                            double x, double y, double z, float yaw, float pitch) {
+        moveAvatar(c, entityId, x, y, z, yaw, pitch); // an entity teleport works for any entity id
+    }
+
+    /** Despawn a puppet entity previously shown via {@link #spawnEntity}. */
+    void removeEntity(JedrockConnection c, long entityId);
+
+    /** Set a puppet entity's floating name ({@code null} / empty hides it), in this version's metadata format. */
+    void setEntityNameTag(JedrockConnection c, long entityId, String nameTag);
+
+    /** Set a puppet entity's whole flags byte, from a canonical {@code PuppetFlag} mask. */
+    void setEntityFlags(JedrockConnection c, long entityId, int flags);
+
+    /** Spawn one hologram line: an invisible marker armor stand whose custom name is {@code text}. */
+    void spawnTextLine(JedrockConnection c, long entityId, UUID uuid,
+                       double x, double y, double z, String text);
+
     /** Reposition this client's own player (the blind judge snapping an illegal move back). */
     void teleportSelf(JedrockConnection c, double x, double y, double z, float yaw, float pitch);
 

@@ -27,6 +27,7 @@ public final class Java1_8Protocol {
     public static final int CB_HELD_ITEM = 0x09;
     public static final int CB_ANIMATION = 0x0B;
     public static final int CB_SPAWN_PLAYER = 0x0C;       // named entity spawn (fixed-point coords)
+    public static final int CB_SPAWN_MOB = 0x0F;          // non-player entity spawn (byte type, fixed-point)
     public static final int CB_ENTITY_DESTROY = 0x13;
     public static final int CB_ENTITY_TELEPORT = 0x18;   // fixed-point coords
     public static final int CB_ENTITY_HEAD_ROTATION = 0x19;
@@ -60,12 +61,34 @@ public final class Java1_8Protocol {
     public static final int SB_CREATIVE_ACTION = 0x10;      // creative set-slot (slot short + item)
 
     // ===== 1.8 entity metadata (old format): header = (type << 5) | index, list ends with 0x7F =====
+    // Type ids are 1.8's own (byte 0, short 1, int 2, float 3, string 4, …) — 1.12.2 renumbered them.
     public static final int META_TYPE_BYTE = 0;
+    public static final int META_TYPE_STRING = 4;
     public static final int META_INDEX_FLAGS = 0;   // shared entity flags byte
+    public static final int META_INDEX_CUSTOM_NAME = 2;          // string
+    public static final int META_INDEX_CUSTOM_NAME_VISIBLE = 3;  // byte (1.8 has no boolean type)
+    /** ArmorStand flags — index 10 in 1.8, where 1.12.2 puts them at 11. */
+    public static final int META_INDEX_ARMOR_STAND_FLAGS = 10;
     public static final int META_END = 0x7F;
+    public static final int FLAG_ON_FIRE = 0x01;
     public static final int FLAG_CROUCHED = 0x02;
     public static final int FLAG_SPRINTING = 0x08;
     public static final int FLAG_USING_ITEM = 0x10;  // eating / drinking / blocking / drawing bow
+    public static final int FLAG_INVISIBLE = 0x20;
+
+    /** ArmorStand flag bits (index 10) — a hologram line hangs on a small, marker, plateless stand. */
+    public static final int ARMOR_STAND_SMALL = 0x01;
+    public static final int ARMOR_STAND_NO_BASE_PLATE = 0x08;
+    public static final int ARMOR_STAND_MARKER = 0x10;
+
+    /** The classic mob id of an armor stand — the body a hologram line's text hangs on. */
+    public static final int ARMOR_STAND_TYPE_ID = 30;
+
+    /**
+     * Where to put a hologram line's armor stand so its name lands on the requested y (see the 1.12.2
+     * counterpart). Cosmetic and approximate — worth a nudge against a live client.
+     */
+    public static final double ARMOR_STAND_NAME_OFFSET = -0.5;
 
     /** Fixed-point factor for 1.8 absolute entity coordinates (block = value / 32). */
     public static final int FIXED_POINT = 32;

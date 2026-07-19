@@ -5,13 +5,13 @@ import com.jedrock.api.player.Player;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
+import com.jedrock.core.entity.EntityIds;
 import com.jedrock.core.inventory.Container;
 import com.jedrock.core.inventory.Cursor;
 import com.jedrock.core.world.CoreWorld;
 import com.jedrock.utils.text.ChatText;
 
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * In-memory player state. A thin wrapper over the abstract {@link PlayerConnection};
@@ -19,16 +19,11 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class CorePlayer implements Player {
 
-    /**
-     * Avatar entity ids start above the self-ids the protocol handlers hardcode for the
-     * client's own player (JE JoinGame / PE StartGame both use 1), so they never collide.
-     */
-    private static final AtomicLong ENTITY_IDS = new AtomicLong(1000);
-
     private final UUID uniqueId;
     private final String name;
     private final PlayerConnection connection;
-    private final long entityId = ENTITY_IDS.getAndIncrement();
+    /** Shared with puppets via {@link EntityIds}, so an avatar id never collides with a puppet id. */
+    private final long entityId = EntityIds.next();
 
     private volatile CoreWorld world;
     private volatile Location location;
@@ -125,11 +120,24 @@ public final class CorePlayer implements Player {
     }
 
     /**
-     * Add one {@code state} to a storage slot (0-35), stacking onto a match or filling the first empty.
+     * Add one {@code state} to a storage slot (0-35), stacking onto a match or filling the first empty,
+     * <b>without</b> touching the client. The core's own batch paths (chest moves, cursor drain) call this
+     * and then sync in bulk; the client-facing {@link #giveItem(int)} is the scripting-friendly wrapper.
      * @return the affected slot index, or -1 if it didn't fit (so the caller can push just that slot).
      */
-    public int giveItem(int state) {
+    public int addToInventory(int state) {
         return inventory.give(state, 0, STORAGE_SLOTS);
+    }
+
+    /** Give one {@code state} and refresh that slot on the client. @return true if it fit. (api {@link Player}) */
+    @Override
+    public boolean giveItem(int state) {
+        int slot = addToInventory(state);
+        if (slot < 0) {
+            return false;
+        }
+        syncSlot(slot);
+        return true;
     }
 
     /** Remove one {@code state} from a storage slot (a survival placement). @return the affected slot, or -1. */
@@ -153,19 +161,33 @@ public final class CorePlayer implements Player {
     public static final int MAX_HEALTH = 20;
     private volatile int health = MAX_HEALTH;
 
+    @Override
     public int getHealth() {
         return health;
     }
 
-    /** Apply {@code amount} of damage, clamped to zero. @return the new health. */
+    @Override
+    public int getMaxHealth() {
+        return MAX_HEALTH;
+    }
+
+    /**
+     * Apply {@code amount} of damage, clamped to zero, <b>without</b> touching the client — the combat
+     * funnel syncs the resulting health itself. @return the new health.
+     */
     public int damage(int amount) {
         health = Math.max(0, health - Math.max(0, amount));
         return health;
     }
 
-    /** Set health directly (e.g. reset to {@link #MAX_HEALTH} on respawn), clamped to 0..max. */
+    /**
+     * Set health directly (e.g. reset to {@link #MAX_HEALTH} on respawn), clamped to 0..max, and refresh
+     * the client's health HUD — the client-facing setter used by scripts and the respawn resets.
+     */
+    @Override
     public void setHealth(int value) {
         health = Math.max(0, Math.min(MAX_HEALTH, value));
+        connection.setHealth(health);
     }
 
     /** Vanilla-style post-hit invulnerability window (half a second) for melee, in nanoseconds. */
@@ -227,6 +249,7 @@ public final class CorePlayer implements Player {
     }
 
     /** Whether the player is currently crouching — used to sync pose to players who join later. */
+    @Override
     public boolean isSneaking() {
         return sneaking;
     }
@@ -236,6 +259,7 @@ public final class CorePlayer implements Player {
     }
 
     /** Whether the player is currently sprinting — synced (with sneak) to players who join later. */
+    @Override
     public boolean isSprinting() {
         return sprinting;
     }
@@ -245,6 +269,7 @@ public final class CorePlayer implements Player {
     }
 
     /** Whether the player is currently using an item (eat / drink / block / draw bow). */
+    @Override
     public boolean isUsingItem() {
         return usingItem;
     }

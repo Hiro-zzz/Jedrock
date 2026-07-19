@@ -29,14 +29,14 @@ class CorePlayerInventoryTest {
         CorePlayer p = player(new NoopConnection());
         int stone = Blocks.state(Blocks.STONE, 0);
 
-        assertEquals(0, p.giveItem(stone), "first stone → hotbar slot 0");
-        assertEquals(0, p.giveItem(stone), "second stone stacks in slot 0");
+        assertEquals(0, p.addToInventory(stone), "first stone → hotbar slot 0");
+        assertEquals(0, p.addToInventory(stone), "second stone stacks in slot 0");
         assertEquals(stone, p.inventoryStates()[0]);
         assertEquals(2, p.inventoryCounts()[0]);
         assertEquals(0, p.inventoryStates()[1], "still one stack of stone, nothing spilled");
 
         int dirt = Blocks.state(Blocks.DIRT, 0);
-        assertEquals(1, p.giveItem(dirt), "dirt → next empty slot 1");
+        assertEquals(1, p.addToInventory(dirt), "dirt → next empty slot 1");
         assertEquals(dirt, p.inventoryStates()[1]);
         assertEquals(1, p.inventoryCounts()[1]);
     }
@@ -44,21 +44,39 @@ class CorePlayerInventoryTest {
     @Test
     void giveRejectsAirAndFullInventory() {
         CorePlayer p = player(new NoopConnection());
-        assertEquals(-1, p.giveItem(0), "air is never an item");
+        assertEquals(-1, p.addToInventory(0), "air is never an item");
 
         // Fill all 36 slots with distinct single items (id in the meta-free high bits).
         for (int i = 0; i < 36; i++) {
-            assertTrue(p.giveItem(Blocks.state(10 + i, 0)) >= 0);
+            assertTrue(p.addToInventory(Blocks.state(10 + i, 0)) >= 0);
         }
-        assertEquals(-1, p.giveItem(Blocks.state(200, 0)), "a full inventory drops the extra item");
+        assertEquals(-1, p.addToInventory(Blocks.state(200, 0)), "a full inventory drops the extra item");
+    }
+
+    @Test
+    void giveItemSyncsTheSlotAndReportsWhetherItFit() {
+        CapturingConnection conn = new CapturingConnection();
+        CorePlayer p = player(conn);
+        int stone = Blocks.state(Blocks.STONE, 0);
+
+        assertTrue(p.giveItem(stone), "fit into an empty inventory");
+        assertEquals(0, conn.slot, "the affected slot was pushed to the client");
+        assertEquals(stone, conn.slotState);
+        assertEquals(1, conn.slotCount);
+
+        // Fill the rest, then a give that can't fit returns false.
+        for (int i = 1; i < 36; i++) {
+            assertTrue(p.giveItem(Blocks.state(10 + i, 0)));
+        }
+        assertFalse(p.giveItem(Blocks.state(200, 0)), "a full inventory can't take the item");
     }
 
     @Test
     void takeDecrementsAndClearsSlot() {
         CorePlayer p = player(new NoopConnection());
         int stone = Blocks.state(Blocks.STONE, 0);
-        p.giveItem(stone);
-        p.giveItem(stone);
+        p.addToInventory(stone);
+        p.addToInventory(stone);
 
         assertEquals(0, p.takeItem(stone));
         assertEquals(1, p.inventoryCounts()[0]);
@@ -72,7 +90,7 @@ class CorePlayerInventoryTest {
         CapturingConnection conn = new CapturingConnection();
         CorePlayer p = player(conn);
         int stone = Blocks.state(Blocks.STONE, 0);
-        int slot = p.giveItem(stone);
+        int slot = p.addToInventory(stone);
 
         p.syncSlot(slot);
         assertEquals(slot, conn.slot);
@@ -84,7 +102,7 @@ class CorePlayerInventoryTest {
     void syncInventoryPushesTheWholeModel() {
         CapturingConnection conn = new CapturingConnection();
         CorePlayer p = player(conn);
-        p.giveItem(Blocks.state(Blocks.STONE, 0));
+        p.addToInventory(Blocks.state(Blocks.STONE, 0));
 
         p.syncInventory();
         assertArrayEquals(p.inventoryStates(), conn.states);
@@ -103,6 +121,20 @@ class CorePlayerInventoryTest {
         assertEquals(20, p.getHealth(), "health never exceeds the max");
         p.setHealth(-5);
         assertEquals(0, p.getHealth());
+    }
+
+    @Test
+    void setHealthClampsAndSyncsToTheClient() {
+        CapturingConnection conn = new CapturingConnection();
+        CorePlayer p = player(conn);
+        assertEquals(20, p.getMaxHealth());
+
+        p.setHealth(6);
+        assertEquals(6, p.getHealth());
+        assertEquals(6, conn.health, "the client's health HUD was refreshed");
+
+        p.setHealth(999);
+        assertEquals(20, conn.health, "clamped to max before it reached the client");
     }
 
     @Test
@@ -174,6 +206,7 @@ class CorePlayerInventoryTest {
         int slot = -1;
         int slotState;
         int slotCount;
+        int health = -1;
         @Override public void setInventory(int[] states, int[] counts) {
             this.states = states.clone();
             this.counts = counts.clone();
@@ -182,6 +215,9 @@ class CorePlayerInventoryTest {
             this.slot = slot;
             this.slotState = state;
             this.slotCount = count;
+        }
+        @Override public void setHealth(int health) {
+            this.health = health;
         }
     }
 }

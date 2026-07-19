@@ -55,6 +55,44 @@ public interface PlayerConnection {
     /** Despawn a player avatar previously shown via {@link #showPlayer}. */
     void hidePlayer(java.util.UUID uuid, long entityId);
 
+    /**
+     * Spawn a non-player <b>puppet</b> entity of the given canonical {@code type} in this client's world.
+     * Unlike {@link #showPlayer} (which spawns a player avatar via the tab list), this writes the edition's
+     * spawn-mob / add-entity packet, mapping {@code type} to that edition's numeric entity id. {@code uuid}
+     * is the entity's uuid (JE 1.12.2 SpawnMob carries it; other editions ignore it). A connection that
+     * can't render it may ignore the call.
+     */
+    default void spawnEntity(long entityId, java.util.UUID uuid, com.jedrock.api.entity.EntityType type,
+                             double x, double y, double z, float yaw, float pitch) {}
+
+    /** Move a puppet entity previously shown via {@link #spawnEntity} to an absolute position. */
+    default void moveEntity(long entityId, double x, double y, double z, float yaw, float pitch) {}
+
+    /** Despawn a puppet entity previously shown via {@link #spawnEntity}. */
+    default void removeEntity(long entityId) {}
+
+    /**
+     * Set the floating text above a puppet entity ({@code null} / empty removes it). Every edition carries
+     * it as entity metadata, but at its own index and its own string encoding, so this stays a request for
+     * an effect rather than a wire format. A player avatar ignores it — its floating name is its player name.
+     */
+    default void setEntityNameTag(long entityId, String nameTag) {}
+
+    /**
+     * Set a puppet entity's visual flags — a canonical {@link com.jedrock.api.entity.PuppetFlag} mask, which
+     * each edition maps onto its own flags field. Always sent as the entity's <em>whole</em> flag set: every
+     * edition packs these bits into one field, so a partial write would clear the flags left out.
+     */
+    default void setEntityFlags(long entityId, int flags) {}
+
+    /**
+     * Spawn an entity whose only job is to float one line of {@code text} at {@code (x, y, z)} — a hologram
+     * line. There is no canonical entity type for this: each edition picks whatever it can make invisible
+     * and hang a name on, and compensates its own rendering offset so the text lands at {@code y}. Despawn
+     * it with {@link #removeEntity}; re-text it with {@link #setEntityNameTag}.
+     */
+    default void spawnTextLine(long entityId, java.util.UUID uuid, double x, double y, double z, String text) {}
+
     /** Move a player avatar previously shown via {@link #showPlayer} to an absolute position. */
     void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch);
 

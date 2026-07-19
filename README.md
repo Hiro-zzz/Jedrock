@@ -169,10 +169,24 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   item without consuming and never mints items on withdrawal). The server stays authoritative for the
   survival inventory — the client's own inventory echo is ignored — so a deposit→withdraw cycle can't
   duplicate items.
+- ✅ **Puppets and holograms — visuals the server drives, cross-edition.** A **puppet** is a mob / NPC the
+  server puppeteers and never simulates: spawn it, move it, turn it to face a player (`lookAt`), give it a
+  floating **name tag**, set it alight / invisible / crouching, make it swing or flinch — and hitting one
+  fires an interaction callback. A **hologram** is the same idea with the body removed: floating lines of
+  text, authored once in the shared markup, rendered on Java as an invisible marker armor stand and on
+  Bedrock as an item entity with no item (neither legacy Bedrock era has an armor stand). Both work on all
+  four editions and are driven for now by the temporary `/puppet` and `/hologram` commands — their real life
+  comes with the scripting API.
+
+- ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
+  backend, not the compiled core: a script gets `server` / `events` / `console` and wires behaviour with
+  `events.on('PlayerJoin', e => …)`, the handler receiving the real event to read and cancel. Every one of
+  the events above is scriptable by name; a saved edit reloads within a second. Rhino (~1.5 MB, pure Java,
+  zero transitive deps) was chosen over GraalJS for weight; it lives only in `core`. See `plugins/example.js`.
 
 Not yet: a real chest <em>window</em> on Bedrock 1.1.5 (click-transfer is the interim), cross-edition skin
-fidelity (a signed-texture limit, see above), knockback (deliberately — the server simulates no physics),
-scripting. See [Roadmap](#roadmap).
+fidelity (a signed-texture limit, see above), knockback (deliberately — the server simulates no physics).
+See [Roadmap](#roadmap).
 
 ---
 
@@ -227,8 +241,8 @@ packet switch that spends CPU and memory only when it absolutely must**. Five pi
 4. **The two-headed monster.** The network layer isolates the core from both protocols' nightmares
    (RakNet, zlib batches, differing block palettes). To the core, a PC player and a phone player
    are identical `Player` objects.
-5. **Scriptable API.** Custom logic is meant to live in fast, hot-reloadable scripts rather than
-   compiled jars — *planned*.
+5. **Scriptable API.** Custom logic lives in hot-reloadable JavaScript plugins (`plugins/*.js`, a Rhino
+   backend) rather than the compiled core — subscribe to events, read and cancel them, no restart to iterate.
 
 Concretely, the codebase holds to three rules: **lightweight** (few deps, few allocations),
 **absolute abstraction** (the `api` module knows nothing about packets or wire formats), and
@@ -252,7 +266,8 @@ jedrock
 │       └── v014/         # Bedrock 0.14 (protocol 45): Pe014RakNetServer + PeSession014 + the
 │                         #   pre-VarInt codec (Mcpe014Codec/Login/Packets/ChunkSerializer/Batch)
 ├── jedrock-gameloop     # Dedicated 20 TPS drift-correcting loop + Scheduler (Tickable)
-└── jedrock-core         # The server: PlayerRegistry, CoreWorld/BlockStorage, JedrockServer
+└── jedrock-core         # The server: PlayerRegistry, CoreWorld/BlockStorage, JedrockServer,
+                         #   plugin/ (the Rhino script host — the only place a non-api dep lives besides network)
 ```
 
 Dependency direction: `network → api`, `core → api + network + gameloop + utils`. The network
@@ -324,7 +339,7 @@ scratch buffers, so encoding a chunk allocates nothing per section.
 | `TerrainGenerator` / `BiomeGenerator` / `WorldDecorator` | core | One-time bake: heightmap, biomes, trees / lakes / caves — then frozen |
 | `LevelIO` / `BiomeStorage` | core | Persist the baked world + biome map to a compact `world/level.jdw` |
 | `PlayerRegistry` | core | Thread-safe roster indexed by uuid / name / connection |
-| `EventBus` | api | Zero-reflection listener registration |
+| `EventBus` / `EventPriority` | api | Cancellable, priority-ordered events the core routes decisions through; reflection-free, with a `hasListeners` hot-path gate |
 | `GameLoop` / `Scheduler` | gameloop | 20 TPS heartbeat, run-later / repeating tasks |
 | `TickMetrics` / `ServerStatus` | gameloop / api | Live TPS, MSPT (+ peak), uptime and memory — via `Server.getStatus()` |
 | `Debug` | utils | Optional category-scoped verbose logging (off by default, zero cost) |
@@ -375,6 +390,7 @@ Once running, the server reads commands on stdin (headless-safe — it runs fine
 | `say <message>` | broadcast a server message to every online player |
 | `kick <player> [reason]` | disconnect a player by name |
 | `kill <player>` / `heal <player>` | kill or fully heal a survival player |
+| `plugins [reload]` | list loaded script plugins; `reload` hot-reloads changed files now |
 | `debug [all\|off\|<tags>]` | toggle extended debug logging; scope by logger-name tags, e.g. `debug pe,chunk` |
 | `gc` | request a GC, then print status |
 | `stop` | graceful shutdown |
@@ -404,20 +420,39 @@ simulation stays out (see non-goals).
   frozen (all generation disabled, served as static decoration): persistence, the terrain bake, biomes,
   tree/lake/cave decoration and the edge wall are all in, and the block matrix is palette-compressed
   (per-section palette + bit-packed indices) so the whole world stays cheap in RAM (~13 MB for 48×48).
-- **The platform API — the centrepiece (next).** Turn `api` from a thin contract into a real extension
-  surface: a broader, cancellable **event model** (join / quit / chat / move / block-edit / attack / …)
-  and an embedded **script plugin loader** (GraalJS) with hot reload, so custom gameplay lives in fast,
-  reloadable scripts rather than the compiled core. This is the "scriptable API" pillar going from
-  *planned* to *real* — the whole point of the platform, and the gate everything below waits on.
-- **Puppet entities — mobs, NPCs, holograms.** The illusionist take on mobs: a mob is a
-  **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays its
-  metadata cross-edition, and that's all. Out of the box it's a *dummy*: it stands where placed, a
-  decoration like the world, costing nothing. Its life comes from the **API** — a script drives its
-  movement, reacts to events (a player nears / hits / interacts with it) and decides its "health" and
-  drops, so a mob *appears* alive without the server ever running AI or pathfinding. The same primitive is
-  an NPC (named, interactable) or a hologram (a floating name, no body). It reuses the avatar machinery
-  that already spawns and moves players cross-edition; the real work is a **canonical entity-type registry**
-  mapped to each edition's ids — the block palette's counterpart, the two-headed monster's entity tax.
+- **The platform API — the centrepiece (in progress).** Turn `api` from a thin contract into a real
+  extension surface. **The event engine is in:** a cancellable, priority-ordered **event model** the core
+  actually routes its decisions through — cancel `BlockBreakEvent` and the block stays; cancel
+  `PlayerChatEvent` and the line never sends; cancel `PlayerMoveEvent` and the player is snapped back. The
+  set spans the player's whole arc — login gate / join / quit / chat / command / move / teleport / block
+  break / place / right-click / interact-entity / item-pickup / damage / death / respawn / sneak / sprint /
+  use-item / game-mode — plus server lifecycle (start / stop / per-tick heartbeat) and world save, each
+  honoured by the core (cancel a `PlayerLoginEvent` to reject a connection, a `PlayerDamageEvent` for
+  invulnerability, redirect a `GameModeChangeEvent` or `PlayerRespawnEvent`, suppress a `PlayerDeathEvent`).
+  `EventBus` gained priorities (LOWEST…MONITOR), `ignoreCancelled` listeners, precise removal handles, and a
+  `hasListeners` fast-path so the hottest paths (movement) allocate nothing when unlistened — reflection-free
+  and dependency-free by design. **The script loader landed too:** custom gameplay now lives in
+  hot-reloadable **JavaScript** plugins (`plugins/*.js`) on a **Rhino** backend, not the compiled core. A
+  script gets `server` / `events` / `console` and wires behaviour with `events.on('PlayerJoin', e => …)`,
+  the handler receiving the real event to read and cancel. Rhino (`rhino-runtime`, ~1.5 MB, pure Java, zero
+  transitive deps) was chosen over GraalJS (tens of MB incl. ICU4J) to keep the tree lean; it lives only in
+  `core`, so the `api` stays runtime-neutral. This is the "scriptable API" pillar going from *planned* to
+  *real* — the gate the rest of the roadmap waited on.
+- **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
+  **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
+  cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry
+  (`EntityTypeIds` — the block palette's counterpart, the two-headed monster's entity tax), `spawnEntity` /
+  `moveEntity` / `removeEntity` on all four editions, a `CorePuppet` / `PuppetRegistry` with cross-edition
+  spawn/move/despawn relay, and an **interaction hook** (hitting a puppet fires a callback).
+  A puppet can now **act**: a **name tag** (floating text in the unified markup), **`lookAt`** — the whole
+  "it noticed me" illusion, trigonometry rather than pathfinding — **flags** (`ON_FIRE` / `INVISIBLE` /
+  `SNEAKING`, a canonical set holding only what maps to one bit on *every* edition, mapped by `EntityFlagIds`),
+  and **swing / hurt** animations. **Holograms** are the purest form of it — a name tag with the body taken
+  away: each line is its own invisible entity (Java: a marker armor stand; Bedrock: an item entity with no
+  item, PocketMine's own floating-text hack), authored once in the shared markup. Temporary `/puppet` and
+  `/hologram` commands drive them until the **API** does, so a mob *appears* alive without the server ever
+  running AI or pathfinding. (The wire is ground-truthed and unit-tested; on-screen placement of holograms
+  still wants a nudge against a live client.)
 - **Final touch-ups.** Smaller polish, mostly unlocked by the API: **held-item / equipment relay** (show
   what a player holds and wears, rendering the specific item-use animation); a fuller **command framework**
   (typed args, tab-completion, permissions — the 14 built-ins already prove the cross-edition path); the

@@ -3,6 +3,8 @@ package com.jedrock.network.handler.je;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.Location;
+import com.jedrock.network.EntityFlagIds;
+import com.jedrock.network.EntityTypeIds;
 import com.jedrock.network.JedrockConnection;
 import com.jedrock.network.je.packet.*;
 import com.jedrock.network.protocol.ProtocolState;
@@ -269,6 +271,33 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     public void moveAvatar(JedrockConnection c, long entityId, double x, double y, double z, float yaw, float pitch) {
         c.send(new ClientboundEntityTeleport((int) entityId, x, y, z, yaw, pitch));
         c.send(new ClientboundEntityHeadLook((int) entityId, yaw));
+    }
+
+    @Override
+    public void spawnEntity(JedrockConnection c, long entityId, UUID uuid, com.jedrock.api.entity.EntityType type,
+                            double x, double y, double z, float yaw, float pitch) {
+        c.send(new ClientboundSpawnMob((int) entityId, uuid, EntityTypeIds.javaId(type), x, y, z, yaw, pitch));
+    }
+
+    @Override
+    public void removeEntity(JedrockConnection c, long entityId) {
+        c.send(new ClientboundDestroyEntities((int) entityId));
+    }
+
+    @Override
+    public void setEntityNameTag(JedrockConnection c, long entityId, String nameTag) {
+        c.send(ClientboundEntityMetadata.nameTag((int) entityId, nameTag));
+    }
+
+    @Override
+    public void setEntityFlags(JedrockConnection c, long entityId, int flags) {
+        c.send(ClientboundEntityMetadata.flags((int) entityId, EntityFlagIds.javaBits(flags)));
+    }
+
+    @Override
+    public void spawnTextLine(JedrockConnection c, long entityId, UUID uuid,
+                              double x, double y, double z, String text) {
+        c.send(ClientboundSpawnMob.textLine((int) entityId, uuid, x, y, z, text));
     }
 
     @Override

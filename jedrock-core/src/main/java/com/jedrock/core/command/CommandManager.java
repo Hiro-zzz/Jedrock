@@ -39,6 +39,20 @@ public final class CommandManager {
         }
     }
 
+    /**
+     * Unregister a command — drop its name and every alias, but only where they still point at <em>this</em>
+     * command, so a later registration that reused a label isn't clobbered. Used to tear down a script's
+     * commands on unload / hot-reload. A no-op if it isn't the registered command.
+     */
+    public void unregister(Command command) {
+        String name = command.name().toLowerCase(Locale.ROOT);
+        commands.remove(name, command);
+        byLabel.remove(name, command);
+        for (String alias : command.aliases()) {
+            byLabel.remove(alias.toLowerCase(Locale.ROOT), command);
+        }
+    }
+
     /** The distinct registered commands, in registration order (for {@code /help}). */
     public Collection<Command> commands() {
         return commands.values();
