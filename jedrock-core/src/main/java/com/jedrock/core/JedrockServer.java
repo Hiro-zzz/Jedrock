@@ -21,8 +21,12 @@ import com.jedrock.api.event.player.PlayerInteractEntityEvent;
 import com.jedrock.api.event.player.PlayerJoinEvent;
 import com.jedrock.api.event.player.PlayerMoveEvent;
 import com.jedrock.api.event.player.PlayerQuitEvent;
+import com.jedrock.api.event.player.PlayerRespawnEvent;
+import com.jedrock.api.event.player.PlayerTeleportEvent;
 import com.jedrock.api.event.player.PlayerToggleSneakEvent;
 import com.jedrock.api.event.player.PlayerToggleSprintEvent;
+import com.jedrock.api.event.player.PlayerUseItemEvent;
+import com.jedrock.api.event.server.ServerTickEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.player.PlayerConnection;
@@ -212,9 +216,29 @@ public class JedrockServer implements Server, ConnectionListener {
      * player's avatar. Bypasses the blind judge (the server initiated it) and the edge wall; callers
      * are responsible for sane destinations.
      */
-    public void teleport(CorePlayer player, Location to) {
+    public boolean teleport(CorePlayer player, Location to) {
+        // Listeners may veto the teleport or redirect it elsewhere. A respawn is not routed here (it fires
+        // PlayerRespawnEvent and repositions directly) so a cancelled teleport can never strand a dead player.
+        if (eventBus.hasListeners(PlayerTeleportEvent.class)) {
+            PlayerTeleportEvent event = eventBus.post(new PlayerTeleportEvent(player, player.getLocation(), to));
+            if (event.isCancelled()) {
+                return false;
+            }
+            to = event.getTo();
+        }
+        reposition(player, to);
+        return true;
+    }
+
+    /**
+     * The mechanics of a server-authoritative teleport, with no event: set the position, clear fall
+     * tracking (a teleport is not a fall — don't bill the next move for the jump or a void drop), tell the
+     * player's own client, and relay the move to every other avatar. Shared by {@link #teleport} and the
+     * respawn path.
+     */
+    private void reposition(CorePlayer player, Location to) {
         player.setLocation(to);
-        player.resetFall(); // a teleport is not a fall — don't bill the next move for the jump (or a void drop)
+        player.resetFall();
         player.getConnection().teleport(to.x(), to.y(), to.z(), to.yaw(), to.pitch());
         long entityId = player.getEntityId();
         for (CorePlayer other : playerRegistry.online()) {
@@ -241,6 +265,12 @@ public class JedrockServer implements Server, ConnectionListener {
         // stopped sending position updates. Gated to a coarse interval — no need to check every tick.
         if (currentTick % ENVIRONMENT_TICK_INTERVAL == 0) {
             environmentTick();
+        }
+
+        // The scriptable heartbeat: fire a tick event for listeners hanging periodic work on the loop.
+        // Only built when something is listening, so an idle server pays nothing for it.
+        if (eventBus.hasListeners(ServerTickEvent.class)) {
+            eventBus.post(new ServerTickEvent(currentTick));
         }
     }
 
@@ -937,7 +967,12 @@ public class JedrockServer implements Server, ConnectionListener {
                 message = eventBus.post(new PlayerDeathEvent(player, cause, deathMessage)).getDeathMessage();
             }
             player.setHealth(CorePlayer.MAX_HEALTH);
-            teleport(player, defaultWorld.getSpawnLocation()); // resets fall tracking too
+            // Where they respawn — world spawn by default, but a listener may redirect it (a bed, a lobby).
+            Location respawn = defaultWorld.getSpawnLocation();
+            if (eventBus.hasListeners(PlayerRespawnEvent.class)) {
+                respawn = eventBus.post(new PlayerRespawnEvent(player, respawn)).getRespawnLocation();
+            }
+            reposition(player, respawn); // resets fall tracking too; not the eventful teleport (uncancellable)
             connection.setHealth(CorePlayer.MAX_HEALTH);
             if (message != null && !message.isEmpty()) {
                 broadcast(message, null);
@@ -986,6 +1021,10 @@ public class JedrockServer implements Server, ConnectionListener {
     public void onUseItem(PlayerConnection connection, boolean using) {
         CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
         if (player == null) {
+            return;
+        }
+        if (eventBus.hasListeners(PlayerUseItemEvent.class)
+                && eventBus.post(new PlayerUseItemEvent(player, using)).isCancelled()) {
             return;
         }
         player.setUsingItem(using);

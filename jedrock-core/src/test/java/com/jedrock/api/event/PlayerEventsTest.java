@@ -8,13 +8,21 @@ import com.jedrock.api.event.player.PlayerChatEvent;
 import com.jedrock.api.event.player.PlayerCommandEvent;
 import com.jedrock.api.event.player.PlayerDamageEvent;
 import com.jedrock.api.event.player.PlayerDeathEvent;
+import com.jedrock.api.event.player.PlayerRespawnEvent;
+import com.jedrock.api.event.player.PlayerTeleportEvent;
 import com.jedrock.api.event.player.PlayerToggleSneakEvent;
+import com.jedrock.api.event.player.PlayerUseItemEvent;
+import com.jedrock.api.event.server.ServerTickEvent;
 import com.jedrock.api.player.GameMode;
+import com.jedrock.api.world.Dimension;
+import com.jedrock.api.world.Location;
+import com.jedrock.core.world.CoreWorld;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -80,6 +88,40 @@ class PlayerEventsTest {
     void toggleEventsReportTheirNewState() {
         assertTrue(new PlayerToggleSneakEvent(null, true).isSneaking());
         assertFalse(new PlayerToggleSneakEvent(null, false).isSneaking());
+    }
+
+    private static final CoreWorld WORLD = new CoreWorld("events", Dimension.OVERWORLD, 1L);
+
+    @Test
+    void respawnLocationCanBeRedirected() {
+        Location spawn = new Location(WORLD, 0, 64, 0, 0f, 0f);
+        Location bed = new Location(WORLD, 100, 70, 100, 0f, 0f);
+        PlayerRespawnEvent event = new PlayerRespawnEvent(null, spawn);
+        assertSame(spawn, event.getRespawnLocation(), "defaults to the given location");
+
+        event.setRespawnLocation(bed);
+        assertSame(bed, event.getRespawnLocation(), "a listener can send them elsewhere");
+    }
+
+    @Test
+    void teleportDestinationIsMutableAndFromIsNot() {
+        Location from = new Location(WORLD, 0, 64, 0, 0f, 0f);
+        Location to = new Location(WORLD, 10, 64, 10, 0f, 0f);
+        Location redirect = new Location(WORLD, 20, 64, 20, 0f, 0f);
+        PlayerTeleportEvent event = new PlayerTeleportEvent(null, from, to);
+        assertSame(from, event.getFrom());
+        assertSame(to, event.getTo());
+
+        event.setTo(redirect);
+        assertSame(redirect, event.getTo(), "a listener can redirect the teleport");
+        assertSame(from, event.getFrom(), "origin stays put");
+    }
+
+    @Test
+    void useItemAndTickReportTheirState() {
+        assertTrue(new PlayerUseItemEvent(null, true).isUsing());
+        assertFalse(new PlayerUseItemEvent(null, false).isUsing());
+        assertEquals(40L, new ServerTickEvent(40L).getTick(), "the tick number rides along");
     }
 
     @Test

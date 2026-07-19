@@ -8,6 +8,14 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Lifecycle + teleport events — and a scriptable heartbeat.** Four more: `ServerTickEvent` — a whole new
+  category, fired once per loop tick (gated so an idle server pays nothing), the thing a script hangs "every
+  N ticks" work on without polling; `PlayerRespawnEvent` (redirect where a dead player reappears — a bed, a
+  lobby); `PlayerUseItemEvent` (completes the pose trio with sneak / sprint); and `PlayerTeleportEvent` (veto
+  or redirect a `/tp` / `/spawn`). `teleport()` now returns whether it applied and shares a private
+  `reposition()` with the respawn path — so a cancelled teleport can never strand a dead player (respawn
+  routes through `PlayerRespawnEvent`, not the vetoable teleport). Tested in `PlayerEventsTest`.
+
 - **More events — the model widened to cover damage, commands, poses and mode.** Building on the engine,
   seven more cancellable events, each routed through the core so cancelling actually changes behaviour:
   `PlayerDamageEvent` (a `DamageCause` — FALL / VOID / ATTACK / KILL — and a mutable amount; cancel or zero
