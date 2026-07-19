@@ -60,6 +60,21 @@ public interface Server {
     Optional<Player> getPlayer(String name);
 
     /**
+     * Number of players currently online. Defaults to the size of {@link #getPlayers()}; an implementation
+     * with a cheaper counter may override it.
+     */
+    default int getPlayerCount() {
+        return getPlayers().size();
+    }
+
+    /**
+     * Send a system message to every online player. Each connection serializes it in its own protocol, so a
+     * Java and a Bedrock player see the same line — the heart of cross-platform chat. The text uses the
+     * unified {@code {color}} + Markdown markup.
+     */
+    void broadcast(String message);
+
+    /**
      * World management - minimal.
      */
     Collection<World> getWorlds();

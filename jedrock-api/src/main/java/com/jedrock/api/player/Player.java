@@ -34,6 +34,39 @@ public interface Player extends Entity {
     void setGameMode(GameMode gameMode);
 
     /**
+     * Current health in half-heart points. Full is {@link #getMaxHealth()} (20 = 10 hearts). Health is
+     * server-authoritative — the client only reports that it was hit; the server decides the number.
+     */
+    int getHealth();
+
+    /** Full health in half-heart points (20 = 10 hearts). */
+    int getMaxHealth();
+
+    /**
+     * Set health directly, clamped to {@code 0..}{@link #getMaxHealth()}, and refresh the client's health
+     * HUD. Setting it to 0 does not itself trigger the death/respawn flow — that lives in the damage path.
+     */
+    void setHealth(int health);
+
+    /** {@code true} while the player is crouching. */
+    boolean isSneaking();
+
+    /** {@code true} while the player is sprinting. */
+    boolean isSprinting();
+
+    /** {@code true} while the player is using an item (eating, drinking, blocking, drawing a bow). */
+    boolean isUsingItem();
+
+    /**
+     * Give one item of the canonical block/item {@code state} ({@code (id << 4) | meta}) to the player's
+     * storage inventory, stacking onto a match or filling the first empty slot, and refresh that slot on the
+     * client. Only meaningful in survival — creative players carry the creative menu, not this inventory.
+     *
+     * @return {@code true} if it fit, {@code false} if the storage inventory was full
+     */
+    boolean giveItem(int state);
+
+    /**
      * Kick with a message. Abstract - actual disconnect is implementation detail.
      */
     void kick(String reason);

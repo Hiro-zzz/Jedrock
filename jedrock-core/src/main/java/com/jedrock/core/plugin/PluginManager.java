@@ -2,6 +2,10 @@ package com.jedrock.core.plugin;
 
 import com.jedrock.api.Server;
 import com.jedrock.api.event.EventBus;
+import com.jedrock.core.command.Command;
+import com.jedrock.core.command.CommandManager;
+import com.jedrock.core.player.CorePlayer;
+import com.jedrock.gameloop.Scheduler;
 import com.jedrock.utils.JLogger;
 import org.mozilla.javascript.ClassShutter;
 import org.mozilla.javascript.Context;
@@ -62,23 +66,47 @@ public final class PluginManager {
                 || fullName.startsWith("java.text.");
     };
 
+    /**
+     * A tiny prelude evaluated in every script's scope before its own source, defining the familiar
+     * millisecond-based timer globals in terms of the tick-based {@code scheduler}. Its own eval, so a
+     * script's error line numbers stay honest. 50 ms == 1 tick; every delay is floored to at least one tick.
+     */
+    private static final String TIMER_PRELUDE =
+            "function setTimeout(fn, ms) { return scheduler.runLater(fn, Math.max(1, Math.round((ms || 0) / 50))); }\n"
+            + "function setInterval(fn, ms) { var t = Math.max(1, Math.round((ms || 0) / 50)); return scheduler.runTimer(fn, t, t); }\n"
+            + "function clearTimeout(h) { if (h) h.cancel(); }\n"
+            + "function clearInterval(h) { if (h) h.cancel(); }\n";
+
     private final ContextFactory contextFactory = new ScriptContextFactory();
     private final ReentrantLock scriptLock = new ReentrantLock();
     private final Map<String, ScriptPlugin> plugins = new LinkedHashMap<>();
 
     private final EventBus eventBus;
     private final Server server;
+    private final Scheduler scheduler;
+    private final CommandManager commandManager;
     private final Path pluginsDir;
     private volatile Thread watcher;
 
-    public PluginManager(EventBus eventBus, Server server, Path pluginsDir) {
+    public PluginManager(EventBus eventBus, Server server, Scheduler scheduler, CommandManager commandManager,
+                         Path pluginsDir) {
         this.eventBus = eventBus;
         this.server = server;
+        this.scheduler = scheduler;
+        this.commandManager = commandManager;
         this.pluginsDir = pluginsDir;
     }
 
     EventBus eventBus() {
         return eventBus;
+    }
+
+    Scheduler scheduler() {
+        return scheduler;
+    }
+
+    CommandManager commandManager() {
+        return commandManager;
     }
 
     /**
@@ -161,9 +189,16 @@ public final class PluginManager {
                 ScriptableObject.putProperty(scope, "server", Context.javaToJS(server, scope));
                 ScriptableObject.putProperty(scope, "events",
                         Context.javaToJS(new ScriptEvents(this, plugin), scope));
+                ScriptableObject.putProperty(scope, "scheduler",
+                        Context.javaToJS(new ScriptScheduler(this, plugin), scope));
+                ScriptableObject.putProperty(scope, "commands",
+                        Context.javaToJS(new ScriptCommands(this, plugin), scope));
                 ScriptableObject.putProperty(scope, "console",
                         Context.javaToJS(new ScriptConsole(name), scope));
 
+                // Define setTimeout/setInterval on top of `scheduler`, in its own eval so the script's own
+                // line numbers stay correct, then run the script itself.
+                cx.evaluateString(scope, TIMER_PRELUDE, "<jedrock-timers>", 1, null);
                 cx.evaluateString(scope, source, name, 1, null);
 
                 Object onDisable = scope.get("onDisable", scope);
@@ -276,7 +311,68 @@ public final class PluginManager {
         }
     }
 
-    /** Call a plugin's onDisable (if any) and drop its subscriptions. Caller holds the script lock. */
+    /**
+     * Run a no-argument script callback that a scheduled task fired. Mirrors {@link #callHandler} — same
+     * script lock, same Rhino context, same swallow-and-log — but for a {@code scheduler} task. When
+     * {@code oneShotHandle} is non-null the task was a one-shot: drop it from the plugin now it has fired,
+     * so a busy script's task list doesn't grow without bound. Removal runs under the lock, as does every
+     * other mutation of that list, so it is safe.
+     */
+    void runScheduled(ScriptPlugin plugin, Function fn, Scheduler.Task oneShotHandle) {
+        scriptLock.lock();
+        try {
+            Context cx = contextFactory.enterContext();
+            try {
+                Scriptable scope = plugin.scope();
+                fn.call(cx, scope, scope, new Object[0]);
+            } finally {
+                Context.exit();
+            }
+        } catch (RuntimeException e) {
+            LOGGER.error("Plugin " + plugin.name() + " scheduled task threw: " + e.getMessage());
+        } finally {
+            if (oneShotHandle != null) {
+                plugin.removeTask(oneShotHandle);
+            }
+            scriptLock.unlock();
+        }
+    }
+
+    /**
+     * Run a script command handler with the sender (as an api {@code Player}) and the raw args. Serialized
+     * under the script lock in a Rhino context like every other script call — but, unlike {@link #callHandler}
+     * and {@link #runScheduled}, a thrown error is <b>not</b> swallowed: it propagates to
+     * {@link com.jedrock.core.command.CommandManager#dispatch}, which logs it and tells the sender the command
+     * failed. That is the command contract, and it keeps errors visible to whoever ran the command.
+     */
+    void callCommand(ScriptPlugin plugin, Function handler, CorePlayer sender, String[] args) {
+        scriptLock.lock();
+        try {
+            Context cx = contextFactory.enterContext();
+            try {
+                Scriptable scope = plugin.scope();
+                // Build a real JS string array so scripts get the familiar element access and array methods
+                // (args.length, args[0], args.join(' ')). newArray of raw Java strings hands elements back as
+                // Java objects (parseInt etc. then misbehave), so wrap each as a JS string first.
+                Object[] jsElements = new Object[args.length];
+                for (int i = 0; i < args.length; i++) {
+                    jsElements[i] = cx.newObject(scope, "String", new Object[]{args[i]});
+                }
+                Scriptable jsArgs = cx.newArray(scope, jsElements);
+                handler.call(cx, scope, scope,
+                        new Object[]{Context.javaToJS(sender, scope), jsArgs});
+            } finally {
+                Context.exit();
+            }
+        } finally {
+            scriptLock.unlock();
+        }
+    }
+
+    /**
+     * Call a plugin's onDisable (if any), cancel its scheduled tasks, unregister its commands and drop its
+     * subscriptions. Caller holds the script lock.
+     */
     private void teardown(ScriptPlugin plugin) {
         Function onDisable = plugin.onDisable();
         if (onDisable != null) {
@@ -288,6 +384,12 @@ public final class PluginManager {
             } finally {
                 Context.exit();
             }
+        }
+        for (Scheduler.Task task : plugin.tasks()) {
+            task.cancel();
+        }
+        for (Command command : plugin.commands()) {
+            commandManager.unregister(command);
         }
         for (EventBus.Subscription subscription : plugin.subscriptions()) {
             subscription.remove();

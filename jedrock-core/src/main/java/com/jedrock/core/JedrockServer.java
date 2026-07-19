@@ -108,10 +108,12 @@ public class JedrockServer implements Server, ConnectionListener {
     private final EventBus eventBus = new EventBus();
     private final GameLoop gameLoop = new GameLoop();
     private final Scheduler scheduler = new Scheduler();
+    private final CommandManager commandManager = new CommandManager(this);
     private final NetworkServer networkServer;
 
-    /** The scripting layer: JS plugins in {@code plugins/} that subscribe to events. */
-    private final PluginManager plugins = new PluginManager(eventBus, this, Path.of("plugins"));
+    /** The scripting layer: JS plugins in {@code plugins/} that subscribe to events and register commands. */
+    private final PluginManager plugins =
+            new PluginManager(eventBus, this, scheduler, commandManager, Path.of("plugins"));
     /** How often (ms) the background watcher polls the plugins folder for changed files to hot-reload. */
     private static final long PLUGIN_RELOAD_MILLIS = 1000L;
 
@@ -122,7 +124,6 @@ public class JedrockServer implements Server, ConnectionListener {
     private final List<CoreHologram> holograms = new java.util.concurrent.CopyOnWriteArrayList<>();
     private final CoreWorld defaultWorld;
     private final BlindJudge judge;
-    private final CommandManager commandManager = new CommandManager(this);
     /** Remembers each player's last chosen game mode this run, so it survives a reconnect. */
     private final java.util.Map<UUID, GameMode> gameModes = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -958,7 +959,7 @@ public class JedrockServer implements Server, ConnectionListener {
                         && eventBus.post(new PlayerPickupItemEvent(editor, previous)).isCancelled()) {
                     return;
                 }
-                slot = editor.giveItem(previous);
+                slot = editor.addToInventory(previous);
             } else {
                 slot = editor.takeItem(state);
             }
@@ -1022,14 +1023,13 @@ public class JedrockServer implements Server, ConnectionListener {
             if (eventBus.hasListeners(PlayerDeathEvent.class)) {
                 message = eventBus.post(new PlayerDeathEvent(player, cause, deathMessage)).getDeathMessage();
             }
-            player.setHealth(CorePlayer.MAX_HEALTH);
+            player.setHealth(CorePlayer.MAX_HEALTH); // clamps + refreshes the client's health HUD
             // Where they respawn — world spawn by default, but a listener may redirect it (a bed, a lobby).
             Location respawn = defaultWorld.getSpawnLocation();
             if (eventBus.hasListeners(PlayerRespawnEvent.class)) {
                 respawn = eventBus.post(new PlayerRespawnEvent(player, respawn)).getRespawnLocation();
             }
             reposition(player, respawn); // resets fall tracking too; not the eventful teleport (uncancellable)
-            connection.setHealth(CorePlayer.MAX_HEALTH);
             if (message != null && !message.isEmpty()) {
                 broadcast(message, null);
             }
@@ -1153,7 +1153,7 @@ public class JedrockServer implements Server, ConnectionListener {
         player.closeContainer(); // a chest, if any, is no longer open
         Cursor cur = player.getCursor();
         // Return any carried item to storage; whatever doesn't fit is lost (no item entities to drop).
-        while (!cur.isEmpty() && player.giveItem(cur.state()) >= 0) {
+        while (!cur.isEmpty() && player.addToInventory(cur.state()) >= 0) {
             cur.set(cur.state(), cur.count() - 1);
         }
         cur.clear();
@@ -1241,7 +1241,7 @@ public class JedrockServer implements Server, ConnectionListener {
             }
             int prev = -1, moved = 0;
             for (int c = 0; c < have; c++) {
-                int slot = player.giveItem(state);
+                int slot = player.addToInventory(state);
                 if (slot < 0) break; // inventory full
                 if (slot != prev) {
                     if (prev >= 0) player.syncSlot(prev);
@@ -1510,6 +1510,7 @@ public class JedrockServer implements Server, ConnectionListener {
     }
 
     /** Broadcast a system line to every online player (used by {@code /say} and the console {@code say}). */
+    @Override
     public void broadcast(String message) {
         broadcast(message, null);
     }
@@ -1540,8 +1541,7 @@ public class JedrockServer implements Server, ConnectionListener {
         if (player.getGameMode() != GameMode.SURVIVAL) {
             return false;
         }
-        player.setHealth(CorePlayer.MAX_HEALTH);
-        player.getConnection().setHealth(CorePlayer.MAX_HEALTH);
+        player.setHealth(CorePlayer.MAX_HEALTH); // clamps + refreshes the client's health HUD
         return true;
     }
 
