@@ -44,14 +44,9 @@ public interface Server {
     boolean isRunning();
 
     /**
-     * Global lightweight event bus.
+     * Global lightweight event bus — where plugin and script code registers event listeners.
      */
     EventBus getEventBus();
-
-    /** The event bus — the shorter name plugin and script code registers listeners through. */
-    default EventBus events() {
-        return getEventBus();
-    }
 
     /**
      * Returns all currently connected players.

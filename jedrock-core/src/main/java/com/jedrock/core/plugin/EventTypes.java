@@ -83,15 +83,4 @@ public final class EventTypes {
     public static Class<? extends Event> byName(String name) {
         return name == null ? null : BY_NAME.get(key(name));
     }
-
-    /** Every script-visible event name (canonical casing), for diagnostics / error messages. */
-    public static Iterable<String> names() {
-        // The keys are lower-cased; return the count via a small helper isn't worth it — expose class names.
-        return BY_NAME.keySet();
-    }
-
-    /** How many events are scriptable. */
-    public static int count() {
-        return BY_NAME.size();
-    }
 }

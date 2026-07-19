@@ -17,8 +17,8 @@ final class ScriptPlugin {
     private final String name;
     private final Scriptable scope;
     private final List<EventBus.Subscription> subscriptions = new ArrayList<>();
+    private final long lastModified;
     private volatile Function onDisable;
-    private volatile long lastModified;
 
     ScriptPlugin(String name, Scriptable scope, long lastModified) {
         this.name = name;
@@ -36,10 +36,6 @@ final class ScriptPlugin {
 
     long lastModified() {
         return lastModified;
-    }
-
-    void setLastModified(long lastModified) {
-        this.lastModified = lastModified;
     }
 
     /** Remember an event subscription so it can be removed when the script is unloaded. */

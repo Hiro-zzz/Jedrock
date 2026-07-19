@@ -2,7 +2,6 @@ package com.jedrock.api.event;
 
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -155,14 +154,5 @@ public final class EventBus {
                 interestCache.clear();
             }
         }
-    }
-
-    /** Snapshot of the registered event types — for diagnostics / tests, not the hot path. */
-    List<Class<?>> registeredTypes() {
-        List<Class<?>> types = new ArrayList<>();
-        for (Registration<?> registration : listeners) {
-            types.add(registration.eventType);
-        }
-        return types;
     }
 }
