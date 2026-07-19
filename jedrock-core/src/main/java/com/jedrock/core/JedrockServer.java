@@ -62,6 +62,7 @@ import com.jedrock.core.entity.CoreHologram;
 import com.jedrock.core.entity.CorePuppet;
 import com.jedrock.core.entity.PuppetRegistry;
 import com.jedrock.core.inventory.Container;
+import com.jedrock.core.plugin.PluginManager;
 import com.jedrock.core.inventory.Cursor;
 import com.jedrock.core.inventory.InventoryClick;
 import com.jedrock.core.player.CorePlayer;
@@ -108,6 +109,11 @@ public class JedrockServer implements Server, ConnectionListener {
     private final GameLoop gameLoop = new GameLoop();
     private final Scheduler scheduler = new Scheduler();
     private final NetworkServer networkServer;
+
+    /** The scripting layer: JS plugins in {@code plugins/} that subscribe to events. */
+    private final PluginManager plugins = new PluginManager(eventBus, this, Path.of("plugins"));
+    /** How often (ticks) to poll the plugins folder for changed files and hot-reload them. */
+    private static final long PLUGIN_RELOAD_INTERVAL = TickUtil.TPS; // ~1s
 
     // In-memory state layer
     private final PlayerRegistry playerRegistry = new PlayerRegistry();
@@ -358,6 +364,11 @@ public class JedrockServer implements Server, ConnectionListener {
 
         LOGGER.info("Jedrock server started successfully. Type 'help' for console commands.");
 
+        // Load script plugins before ServerStartEvent, so a plugin can subscribe to it. Then poll the
+        // folder for changes so a saved edit hot-reloads without a restart.
+        plugins.loadAll();
+        scheduler.runTaskTimer(plugins::reloadChanged, PLUGIN_RELOAD_INTERVAL, PLUGIN_RELOAD_INTERVAL);
+
         // Everything is up — let plugins do their one-time setup.
         eventBus.post(new ServerStartEvent());
     }
@@ -393,8 +404,10 @@ public class JedrockServer implements Server, ConnectionListener {
 
         LOGGER.info("Shutting down Jedrock...");
 
-        // Tell plugins first, while the world and players are still alive.
+        // Tell plugins first, while the world and players are still alive, then tear the scripts down
+        // (their onDisable runs, their listeners are removed) before the world and loop go away.
         eventBus.post(new ServerStopEvent());
+        plugins.unloadAll();
 
         gameLoop.stop();
         networkServer.shutdown();
@@ -691,6 +704,11 @@ public class JedrockServer implements Server, ConnectionListener {
     /** The live holograms — used by the {@code /puppet} command to list / resolve them. */
     public List<CoreHologram> getHolograms() {
         return holograms;
+    }
+
+    /** The script plugin manager — used by the console {@code plugins} command. */
+    public PluginManager getPlugins() {
+        return plugins;
     }
 
     // ===== ConnectionListener: network → core state bridge =====

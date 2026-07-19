@@ -8,6 +8,22 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Script plugins — the scripting layer lands (Rhino).** The platform's whole point: custom gameplay now
+  lives in hot-reloadable JavaScript, not the compiled core. Drop a `.js` in `plugins/` and it loads on
+  start; save an edit and it reloads within a second, no restart. A script gets three globals — `server`,
+  `events`, `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`, the handler receiving
+  the real Java event to read and mutate (`e.setCancelled(true)`, `e.setMessage(...)`). All 23 events are
+  scriptable by friendly name (`EventTypes`). Built on **`rhino-runtime` 1.7.13** — pure Java, ~1.5 MB, zero
+  transitive deps: the lightweight pick over GraalJS (tens of MB incl. ICU4J), in keeping with the project's
+  few-deps ethos, and it lives only in `core` so the `api` stays runtime-neutral. Rhino runs interpreted
+  (no per-script class generation, clean hot reload) with ES6 syntax (arrow functions, `let`/`const`); a
+  `ClassShutter` sandbox keeps scripts to Jedrock's classes and a safe JDK slice (best-effort guard rails,
+  not a security boundary — plugins are operator-installed). All script execution is serialized under one
+  lock (Rhino isn't thread-safe; events post from several threads). A `plugins` console command lists them
+  and `plugins reload` forces a reload. Sample `plugins/example.js` included. Unit-tested end-to-end
+  (`PluginManagerTest`: a real script cancels/edits a posted event, hot-reloads, tears down, survives a
+  throwing handler) and smoke-verified in a live server (the sample loads its 4 listeners on start).
+
 - **Gate, inventory and lifecycle events — breadth across new categories.** Five more, deliberately spread
   across shapes the model didn't cover: `PlayerLoginEvent` — the connection *gate*, fired before any state
   is created (carries identity, not a `Player`, since there isn't one yet; cancel with a kick reason for a

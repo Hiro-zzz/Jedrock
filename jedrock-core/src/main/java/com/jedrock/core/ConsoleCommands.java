@@ -9,6 +9,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -75,9 +76,10 @@ final class ConsoleCommands implements Runnable {
             case "kick" -> kick(args);
             case "kill" -> affect(args, "kill", server::kill, "killed", "is in creative (no damage)");
             case "heal" -> affect(args, "heal", server::heal, "healed", "is in creative (no health)");
+            case "plugins", "pl" -> plugins(args);
             case "help", "?" -> LOGGER.info("commands: status | players | say <msg> | "
                     + "kick <player> [reason] | kill <player> | heal <player> | "
-                    + "debug [all|off|<tags>] | gc | stop | help");
+                    + "plugins [reload] | debug [all|off|<tags>] | gc | stop | help");
             case "stop", "shutdown", "exit" -> {
                 LOGGER.info("stopping...");
                 server.shutdown();
@@ -85,6 +87,17 @@ final class ConsoleCommands implements Runnable {
             }
             default -> LOGGER.info("unknown command '" + cmd + "' — try 'help'");
         }
+    }
+
+    /** {@code plugins} lists loaded script plugins; {@code plugins reload} hot-reloads changed files now. */
+    private void plugins(String args) {
+        if (args.equalsIgnoreCase("reload")) {
+            server.getPlugins().reloadChanged();
+            LOGGER.info("reloaded changed plugins");
+        }
+        List<String> names = server.getPlugins().pluginNames();
+        LOGGER.info(names.isEmpty() ? "no plugins loaded" : "plugins (" + names.size() + "): "
+                + String.join(", ", names));
     }
 
     /** {@code say <message>} — broadcast a server line to every online player, like the in-game {@code /say}. */

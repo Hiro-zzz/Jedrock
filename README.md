@@ -178,9 +178,15 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   four editions and are driven for now by the temporary `/puppet` and `/hologram` commands — their real life
   comes with the scripting API.
 
+- ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
+  backend, not the compiled core: a script gets `server` / `events` / `console` and wires behaviour with
+  `events.on('PlayerJoin', e => …)`, the handler receiving the real event to read and cancel. Every one of
+  the events above is scriptable by name; a saved edit reloads within a second. Rhino (~1.5 MB, pure Java,
+  zero transitive deps) was chosen over GraalJS for weight; it lives only in `core`. See `plugins/example.js`.
+
 Not yet: a real chest <em>window</em> on Bedrock 1.1.5 (click-transfer is the interim), cross-edition skin
-fidelity (a signed-texture limit, see above), knockback (deliberately — the server simulates no physics),
-scripting. See [Roadmap](#roadmap).
+fidelity (a signed-texture limit, see above), knockback (deliberately — the server simulates no physics).
+See [Roadmap](#roadmap).
 
 ---
 
@@ -235,8 +241,8 @@ packet switch that spends CPU and memory only when it absolutely must**. Five pi
 4. **The two-headed monster.** The network layer isolates the core from both protocols' nightmares
    (RakNet, zlib batches, differing block palettes). To the core, a PC player and a phone player
    are identical `Player` objects.
-5. **Scriptable API.** Custom logic is meant to live in fast, hot-reloadable scripts rather than
-   compiled jars — *planned*.
+5. **Scriptable API.** Custom logic lives in hot-reloadable JavaScript plugins (`plugins/*.js`, a Rhino
+   backend) rather than the compiled core — subscribe to events, read and cancel them, no restart to iterate.
 
 Concretely, the codebase holds to three rules: **lightweight** (few deps, few allocations),
 **absolute abstraction** (the `api` module knows nothing about packets or wire formats), and
@@ -260,7 +266,8 @@ jedrock
 │       └── v014/         # Bedrock 0.14 (protocol 45): Pe014RakNetServer + PeSession014 + the
 │                         #   pre-VarInt codec (Mcpe014Codec/Login/Packets/ChunkSerializer/Batch)
 ├── jedrock-gameloop     # Dedicated 20 TPS drift-correcting loop + Scheduler (Tickable)
-└── jedrock-core         # The server: PlayerRegistry, CoreWorld/BlockStorage, JedrockServer
+└── jedrock-core         # The server: PlayerRegistry, CoreWorld/BlockStorage, JedrockServer,
+                         #   plugin/ (the Rhino script host — the only place a non-api dep lives besides network)
 ```
 
 Dependency direction: `network → api`, `core → api + network + gameloop + utils`. The network
@@ -383,6 +390,7 @@ Once running, the server reads commands on stdin (headless-safe — it runs fine
 | `say <message>` | broadcast a server message to every online player |
 | `kick <player> [reason]` | disconnect a player by name |
 | `kill <player>` / `heal <player>` | kill or fully heal a survival player |
+| `plugins [reload]` | list loaded script plugins; `reload` hot-reloads changed files now |
 | `debug [all\|off\|<tags>]` | toggle extended debug logging; scope by logger-name tags, e.g. `debug pe,chunk` |
 | `gc` | request a GC, then print status |
 | `stop` | graceful shutdown |
@@ -423,10 +431,13 @@ simulation stays out (see non-goals).
   invulnerability, redirect a `GameModeChangeEvent` or `PlayerRespawnEvent`, suppress a `PlayerDeathEvent`).
   `EventBus` gained priorities (LOWEST…MONITOR), `ignoreCancelled` listeners, precise removal handles, and a
   `hasListeners` fast-path so the hottest paths (movement) allocate nothing when unlistened — reflection-free
-  and dependency-free by design, so it maps cleanly onto the scripting binding to come. **Still to land:** the
-  embedded **script plugin loader** (GraalJS) with hot reload, so custom gameplay lives in fast, reloadable
-  scripts rather than the compiled core. That's the "scriptable API" pillar's second half — and the gate the
-  items below still wait on.
+  and dependency-free by design. **The script loader landed too:** custom gameplay now lives in
+  hot-reloadable **JavaScript** plugins (`plugins/*.js`) on a **Rhino** backend, not the compiled core. A
+  script gets `server` / `events` / `console` and wires behaviour with `events.on('PlayerJoin', e => …)`,
+  the handler receiving the real event to read and cancel. Rhino (`rhino-runtime`, ~1.5 MB, pure Java, zero
+  transitive deps) was chosen over GraalJS (tens of MB incl. ICU4J) to keep the tree lean; it lives only in
+  `core`, so the `api` stays runtime-neutral. This is the "scriptable API" pillar going from *planned* to
+  *real* — the gate the rest of the roadmap waited on.
 - **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
   **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
   cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry
