@@ -69,6 +69,7 @@ public final class PluginManager {
     private final EventBus eventBus;
     private final Server server;
     private final Path pluginsDir;
+    private volatile Thread watcher;
 
     public PluginManager(EventBus eventBus, Server server, Path pluginsDir) {
         this.eventBus = eventBus;
@@ -78,6 +79,34 @@ public final class PluginManager {
 
     EventBus eventBus() {
         return eventBus;
+    }
+
+    /**
+     * Start a background daemon that polls the plugins folder for changes and hot-reloads them, every
+     * {@code intervalMillis}. Deliberately <em>off</em> the game-loop thread — the poll blocks on directory
+     * and {@code stat} I/O, which must never sit in a tick's budget. Idempotent.
+     */
+    public void startWatching(long intervalMillis) {
+        if (watcher != null) {
+            return;
+        }
+        Thread thread = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    Thread.sleep(intervalMillis);
+                } catch (InterruptedException e) {
+                    return; // asked to stop
+                }
+                try {
+                    reloadChanged();
+                } catch (RuntimeException e) {
+                    LOGGER.error("Plugin watcher failed: " + e.getMessage());
+                }
+            }
+        }, "jedrock-plugin-watch");
+        thread.setDaemon(true);
+        watcher = thread;
+        thread.start();
     }
 
     /** Load every {@code .js} in the plugins folder (creating the folder if absent). */
@@ -197,8 +226,13 @@ public final class PluginManager {
         }
     }
 
-    /** Unload every plugin — called on shutdown. */
+    /** Unload every plugin and stop the hot-reload watcher — called on shutdown. */
     public void unloadAll() {
+        Thread thread = watcher;
+        if (thread != null) {
+            watcher = null;
+            thread.interrupt();
+        }
         scriptLock.lock();
         try {
             for (ScriptPlugin plugin : plugins.values()) {

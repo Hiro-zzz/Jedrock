@@ -112,8 +112,8 @@ public class JedrockServer implements Server, ConnectionListener {
 
     /** The scripting layer: JS plugins in {@code plugins/} that subscribe to events. */
     private final PluginManager plugins = new PluginManager(eventBus, this, Path.of("plugins"));
-    /** How often (ticks) to poll the plugins folder for changed files and hot-reload them. */
-    private static final long PLUGIN_RELOAD_INTERVAL = TickUtil.TPS; // ~1s
+    /** How often (ms) the background watcher polls the plugins folder for changed files to hot-reload. */
+    private static final long PLUGIN_RELOAD_MILLIS = 1000L;
 
     // In-memory state layer
     private final PlayerRegistry playerRegistry = new PlayerRegistry();
@@ -364,10 +364,10 @@ public class JedrockServer implements Server, ConnectionListener {
 
         LOGGER.info("Jedrock server started successfully. Type 'help' for console commands.");
 
-        // Load script plugins before ServerStartEvent, so a plugin can subscribe to it. Then poll the
-        // folder for changes so a saved edit hot-reloads without a restart.
+        // Load script plugins before ServerStartEvent, so a plugin can subscribe to it. A background
+        // watcher (off the game-loop thread — the poll blocks on disk I/O) hot-reloads a saved edit.
         plugins.loadAll();
-        scheduler.runTaskTimer(plugins::reloadChanged, PLUGIN_RELOAD_INTERVAL, PLUGIN_RELOAD_INTERVAL);
+        plugins.startWatching(PLUGIN_RELOAD_MILLIS);
 
         // Everything is up — let plugins do their one-time setup.
         eventBus.post(new ServerStartEvent());
@@ -563,8 +563,9 @@ public class JedrockServer implements Server, ConnectionListener {
         if (puppet.getFlags() != 0) {
             conn.setEntityFlags(puppet.getEntityId(), puppet.getFlags());
         }
-        if (puppet.getNameTag() != null && !puppet.getNameTag().isEmpty()) {
-            conn.setEntityNameTag(puppet.getEntityId(), ChatText.toLegacy(puppet.getNameTag()));
+        String nameTag = puppet.getNameTag();
+        if (nameTag != null && !nameTag.isEmpty()) {
+            conn.setEntityNameTag(puppet.getEntityId(), ChatText.toLegacy(nameTag));
         }
     }
 
@@ -1474,19 +1475,24 @@ public class JedrockServer implements Server, ConnectionListener {
             commandManager.dispatch(sender, "/" + command);
             return;
         }
-        // Let listeners edit or veto the line before it goes out. Cancelling suppresses it entirely.
-        PlayerChatEvent event = eventBus.post(new PlayerChatEvent(sender, message));
-        if (event.isCancelled()) {
-            LOGGER.debug(() -> "[chat] cancelled <" + sender.getName() + "> " + message);
-            return;
+        // Let listeners edit or veto the line before it goes out (cancel suppresses it). Only built when a
+        // listener wants it — with none, the default format applies and no event is allocated.
+        String format = PlayerChatEvent.DEFAULT_FORMAT;
+        String body = message;
+        if (eventBus.hasListeners(PlayerChatEvent.class)) {
+            PlayerChatEvent event = eventBus.post(new PlayerChatEvent(sender, message));
+            if (event.isCancelled()) {
+                LOGGER.debug(() -> "[chat] cancelled <" + sender.getName() + "> " + message);
+                return;
+            }
+            format = event.getFormat();
+            body = event.getMessage();
         }
         // The name is escaped so an untrusted username (a 0.14 client picks its own; a '_' would
         // otherwise italicise) can't inject markup. The message body is intentionally left raw —
         // rendering it is the documented "players can use {color} / Markdown in chat" feature.
-        String line = event.getFormat()
-                .replace("%name%", ChatText.escape(sender.getName()))
-                .replace("%s", event.getMessage());
-        LOGGER.info("[chat] <" + sender.getName() + "> " + event.getMessage());
+        String line = format.replace("%name%", ChatText.escape(sender.getName())).replace("%s", body);
+        LOGGER.info("[chat] <" + sender.getName() + "> " + body);
         broadcast(line, null); // relay to everyone, including the sender
     }
 

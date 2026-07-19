@@ -294,9 +294,9 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             b.writeFloatLE((float) x);
             b.writeFloatLE((float) y);                         // feet
             b.writeFloatLE((float) z);
-            b.writeByte(byteAngle(pitch));
-            b.writeByte(byteAngle(yaw));
-            b.writeByte(byteAngle(yaw));                        // head yaw
+            ByteBufUtils.writeAngle(b, pitch);
+            ByteBufUtils.writeAngle(b, yaw);
+            ByteBufUtils.writeAngle(b, yaw);                    // head yaw
             b.writeByte(0);                                     // flags (on-ground / teleport)
         });
     }
@@ -307,11 +307,6 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             ByteBufUtils.writeVarInt(b, ID_REMOVE_ENTITY);
             ByteBufUtils.writeSignedVarLong(b, entityId);
         });
-    }
-
-    /** A rotation in degrees packed into a signed byte (256 units = 360°), as MCPE MoveEntity uses. */
-    private static int byteAngle(float degrees) {
-        return (byte) (int) (degrees * 256.0f / 360.0f);
     }
 
     @Override

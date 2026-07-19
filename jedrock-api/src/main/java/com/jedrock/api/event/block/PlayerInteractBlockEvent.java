@@ -1,6 +1,5 @@
 package com.jedrock.api.event.block;
 
-import com.jedrock.api.event.player.CancellablePlayerEvent;
 import com.jedrock.api.player.Player;
 
 /**
@@ -8,37 +7,11 @@ import com.jedrock.api.player.Player;
  * neither opens the block (a chest) nor places the held item against it, so the interaction does nothing.
  *
  * <p>This fires for a right-click on <em>any</em> block, so a listener can gate access to a block or attach
- * custom behaviour to one the core otherwise treats as inert. Coordinates are the clicked block's.
+ * custom behaviour to one the core otherwise treats as inert. {@link #getState()} is the clicked block.
  */
-public class PlayerInteractBlockEvent extends CancellablePlayerEvent {
-
-    private final int x;
-    private final int y;
-    private final int z;
-    private final int state;
+public class PlayerInteractBlockEvent extends BlockEvent {
 
     public PlayerInteractBlockEvent(Player player, int x, int y, int z, int state) {
-        super(player);
-        this.x = x;
-        this.y = y;
-        this.z = z;
-        this.state = state;
-    }
-
-    public int getX() {
-        return x;
-    }
-
-    public int getY() {
-        return y;
-    }
-
-    public int getZ() {
-        return z;
-    }
-
-    /** The canonical {@code (id << 4) | meta} state of the clicked block. */
-    public int getState() {
-        return state;
+        super(player, x, y, z, state);
     }
 }
