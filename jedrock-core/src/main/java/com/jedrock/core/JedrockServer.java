@@ -10,11 +10,19 @@ import com.jedrock.api.entity.PuppetEntity;
 import com.jedrock.api.event.EventBus;
 import com.jedrock.api.event.block.BlockBreakEvent;
 import com.jedrock.api.event.block.BlockPlaceEvent;
+import com.jedrock.api.event.block.PlayerInteractBlockEvent;
+import com.jedrock.api.event.player.DamageCause;
+import com.jedrock.api.event.player.GameModeChangeEvent;
 import com.jedrock.api.event.player.PlayerChatEvent;
+import com.jedrock.api.event.player.PlayerCommandEvent;
+import com.jedrock.api.event.player.PlayerDamageEvent;
+import com.jedrock.api.event.player.PlayerDeathEvent;
 import com.jedrock.api.event.player.PlayerInteractEntityEvent;
 import com.jedrock.api.event.player.PlayerJoinEvent;
 import com.jedrock.api.event.player.PlayerMoveEvent;
 import com.jedrock.api.event.player.PlayerQuitEvent;
+import com.jedrock.api.event.player.PlayerToggleSneakEvent;
+import com.jedrock.api.event.player.PlayerToggleSprintEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.player.PlayerConnection;
@@ -179,7 +187,16 @@ public class JedrockServer implements Server, ConnectionListener {
      * Change a player's game mode: remember it (so a reconnect keeps it — the only way MCPE 0.14
      * ever changes mode) and push the live switch to the client where the edition supports it.
      */
-    public void setGameMode(CorePlayer player, GameMode mode) {
+    public boolean setGameMode(CorePlayer player, GameMode mode) {
+        // Listeners may veto the switch or redirect it to a different mode.
+        if (eventBus.hasListeners(GameModeChangeEvent.class)) {
+            GameModeChangeEvent event = eventBus.post(
+                    new GameModeChangeEvent(player, player.getGameMode(), mode));
+            if (event.isCancelled()) {
+                return false;
+            }
+            mode = event.getNewGameMode();
+        }
         gameModes.put(player.getUniqueId(), mode);
         player.setGameMode(mode);
         // Entering survival, show the survival inventory (empty, or what's been mined) so any items the
@@ -187,6 +204,7 @@ public class JedrockServer implements Server, ConnectionListener {
         if (mode == GameMode.SURVIVAL) {
             player.syncInventory();
         }
+        return true;
     }
 
     /**
@@ -235,7 +253,7 @@ public class JedrockServer implements Server, ConnectionListener {
     private void environmentTick() {
         for (CorePlayer player : playerRegistry.online()) {
             if (player.getGameMode() == GameMode.SURVIVAL && defaultWorld.isInVoid(player.getLocation().y())) {
-                hurt(player, VOID_DAMAGE,
+                hurt(player, VOID_DAMAGE, DamageCause.VOID,
                         "{gray}" + ChatText.escape(player.getName()) + " fell out of the world");
             }
         }
@@ -880,7 +898,8 @@ public class JedrockServer implements Server, ConnectionListener {
      */
     private void applyFallDamage(CorePlayer player, double fallDistance) {
         int damage = (int) Math.floor(fallDistance) - 3;
-        hurt(player, damage, "{gray}" + ChatText.escape(player.getName()) + " fell to their death");
+        hurt(player, damage, DamageCause.FALL,
+                "{gray}" + ChatText.escape(player.getName()) + " fell to their death");
     }
 
     /**
@@ -889,9 +908,18 @@ public class JedrockServer implements Server, ConnectionListener {
      * a silent respawn at spawn with full health, no death-screen handshake (a kept feature) — and
      * broadcasts {@code deathMessage}. A no-op outside survival or for a non-positive {@code amount}.
      */
-    private void hurt(CorePlayer player, int amount, String deathMessage) {
+    private void hurt(CorePlayer player, int amount, DamageCause cause, String deathMessage) {
         if (player.getGameMode() != GameMode.SURVIVAL || amount <= 0) {
             return;
+        }
+        // Let listeners veto or rescale the damage before it lands (invulnerability, a difficulty tweak).
+        // Zeroing the amount is the same as cancelling.
+        if (eventBus.hasListeners(PlayerDamageEvent.class)) {
+            PlayerDamageEvent event = eventBus.post(new PlayerDamageEvent(player, cause, amount));
+            if (event.isCancelled() || event.getAmount() <= 0) {
+                return;
+            }
+            amount = event.getAmount();
         }
         // Show the hit to everyone else: the victim's avatar flashes red (its own client shows the hit
         // from its dropping health bar, so it doesn't need this). Covers every source — PvP, fall, void.
@@ -903,10 +931,17 @@ public class JedrockServer implements Server, ConnectionListener {
         }
         PlayerConnection connection = player.getConnection();
         if (player.damage(amount) <= 0) {
+            // Death: a listener may restyle or suppress the announcement (null / empty = no broadcast).
+            String message = deathMessage;
+            if (eventBus.hasListeners(PlayerDeathEvent.class)) {
+                message = eventBus.post(new PlayerDeathEvent(player, cause, deathMessage)).getDeathMessage();
+            }
             player.setHealth(CorePlayer.MAX_HEALTH);
             teleport(player, defaultWorld.getSpawnLocation()); // resets fall tracking too
             connection.setHealth(CorePlayer.MAX_HEALTH);
-            broadcast(deathMessage, null);
+            if (message != null && !message.isEmpty()) {
+                broadcast(message, null);
+            }
         } else {
             connection.setHealth(player.getHealth());
         }
@@ -923,6 +958,12 @@ public class JedrockServer implements Server, ConnectionListener {
         if (player == null) {
             return;
         }
+        // Cancelling makes the server ignore the toggle — the pose isn't recorded (so a late joiner and
+        // the sneak-to-deposit chest check don't see it) and isn't relayed.
+        if (eventBus.hasListeners(PlayerToggleSneakEvent.class)
+                && eventBus.post(new PlayerToggleSneakEvent(player, sneaking)).isCancelled()) {
+            return;
+        }
         player.setSneaking(sneaking);
         relayPose(player);
     }
@@ -931,6 +972,10 @@ public class JedrockServer implements Server, ConnectionListener {
     public void onSprint(PlayerConnection connection, boolean sprinting) {
         CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
         if (player == null) {
+            return;
+        }
+        if (eventBus.hasListeners(PlayerToggleSprintEvent.class)
+                && eventBus.post(new PlayerToggleSprintEvent(player, sprinting)).isCancelled()) {
             return;
         }
         player.setSprinting(sprinting);
@@ -1031,6 +1076,15 @@ public class JedrockServer implements Server, ConnectionListener {
 
     @Override
     public boolean onUseBlock(PlayerConnection connection, int x, int y, int z) {
+        CorePlayer clicker = playerRegistry.getByConnectionOrNull(connection);
+        // Let listeners gate the right-click on any block. Cancelling consumes the click — no chest opens
+        // and no block is placed against it — so a plugin can protect a block or handle it itself.
+        if (clicker != null && eventBus.hasListeners(PlayerInteractBlockEvent.class)) {
+            int state = defaultWorld.getBlockId(x, y, z);
+            if (eventBus.post(new PlayerInteractBlockEvent(clicker, x, y, z, state)).isCancelled()) {
+                return true; // consumed: suppress both the chest open and any placement
+            }
+        }
         if (Blocks.idOf(defaultWorld.getBlockId(x, y, z)) != Blocks.CHEST) {
             return false; // not interactable — let the caller place the held block
         }
@@ -1301,7 +1355,7 @@ public class JedrockServer implements Server, ConnectionListener {
         if (victim.isOnHurtCooldown()) {
             return;
         }
-        hurt(victim, ATTACK_DAMAGE, "{gray}" + ChatText.escape(victim.getName())
+        hurt(victim, ATTACK_DAMAGE, DamageCause.ATTACK, "{gray}" + ChatText.escape(victim.getName())
                 + " was slain by " + ChatText.escape(attacker.getName()));
     }
 
@@ -1311,9 +1365,19 @@ public class JedrockServer implements Server, ConnectionListener {
         if (sender == null) {
             return;
         }
-        // A line starting with '/' is a command, not chat — dispatch it and never broadcast it.
+        // A line starting with '/' is a command, not chat — dispatch it and never broadcast it. Listeners
+        // may rewrite the line or cancel it (a plugin that fully handled the command cancels so the core
+        // doesn't also try). The event carries the line without its leading slash.
         if (message.startsWith("/")) {
-            commandManager.dispatch(sender, message);
+            String command = message.substring(1);
+            if (eventBus.hasListeners(PlayerCommandEvent.class)) {
+                PlayerCommandEvent event = eventBus.post(new PlayerCommandEvent(sender, command));
+                if (event.isCancelled()) {
+                    return;
+                }
+                command = event.getCommand();
+            }
+            commandManager.dispatch(sender, "/" + command);
             return;
         }
         // Let listeners edit or veto the line before it goes out. Cancelling suppresses it entirely.
@@ -1361,7 +1425,8 @@ public class JedrockServer implements Server, ConnectionListener {
         if (player.getGameMode() != GameMode.SURVIVAL) {
             return false;
         }
-        hurt(player, CorePlayer.MAX_HEALTH, "{gray}" + ChatText.escape(player.getName()) + " died");
+        hurt(player, CorePlayer.MAX_HEALTH, DamageCause.KILL,
+                "{gray}" + ChatText.escape(player.getName()) + " died");
         return true;
     }
 

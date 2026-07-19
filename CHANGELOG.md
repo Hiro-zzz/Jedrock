@@ -8,6 +8,17 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **More events — the model widened to cover damage, commands, poses and mode.** Building on the engine,
+  seven more cancellable events, each routed through the core so cancelling actually changes behaviour:
+  `PlayerDamageEvent` (a `DamageCause` — FALL / VOID / ATTACK / KILL — and a mutable amount; cancel or zero
+  it for invulnerability) and `PlayerDeathEvent` (restyle or suppress the death broadcast), both threaded
+  through the one `hurt()` funnel every source uses; `PlayerCommandEvent` (rewrite or veto a slash command
+  before dispatch); `PlayerToggleSneakEvent` / `PlayerToggleSprintEvent` (cancel makes the server ignore the
+  pose toggle); `GameModeChangeEvent` (veto or redirect a `/gamemode` switch — `setGameMode` now returns
+  whether it applied, and the command reports honestly); and `PlayerInteractBlockEvent` (gate a right-click
+  on any block — cancel suppresses both the chest open and the placement). Hot paths stay free via the
+  `hasListeners` gate. Unit-tested (`PlayerEventsTest`) for the mutable-field contracts the wiring depends on.
+
 - **The event engine — the platform API's foundation.** The `EventBus` went from a two-event stub to a real
   extension seam, and — the part that matters — the core now actually *routes its decisions through it*, so a
   listener can veto or reshape what the server is about to do. New: `EventPriority` (LOWEST…MONITOR, earliest
