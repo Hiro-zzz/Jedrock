@@ -332,7 +332,7 @@ scratch buffers, so encoding a chunk allocates nothing per section.
 | `TerrainGenerator` / `BiomeGenerator` / `WorldDecorator` | core | One-time bake: heightmap, biomes, trees / lakes / caves — then frozen |
 | `LevelIO` / `BiomeStorage` | core | Persist the baked world + biome map to a compact `world/level.jdw` |
 | `PlayerRegistry` | core | Thread-safe roster indexed by uuid / name / connection |
-| `EventBus` | api | Zero-reflection listener registration |
+| `EventBus` / `EventPriority` | api | Cancellable, priority-ordered events the core routes decisions through; reflection-free, with a `hasListeners` hot-path gate |
 | `GameLoop` / `Scheduler` | gameloop | 20 TPS heartbeat, run-later / repeating tasks |
 | `TickMetrics` / `ServerStatus` | gameloop / api | Live TPS, MSPT (+ peak), uptime and memory — via `Server.getStatus()` |
 | `Debug` | utils | Optional category-scoped verbose logging (off by default, zero cost) |
@@ -412,11 +412,16 @@ simulation stays out (see non-goals).
   frozen (all generation disabled, served as static decoration): persistence, the terrain bake, biomes,
   tree/lake/cave decoration and the edge wall are all in, and the block matrix is palette-compressed
   (per-section palette + bit-packed indices) so the whole world stays cheap in RAM (~13 MB for 48×48).
-- **The platform API — the centrepiece (next).** Turn `api` from a thin contract into a real extension
-  surface: a broader, cancellable **event model** (join / quit / chat / move / block-edit / attack / …)
-  and an embedded **script plugin loader** (GraalJS) with hot reload, so custom gameplay lives in fast,
-  reloadable scripts rather than the compiled core. This is the "scriptable API" pillar going from
-  *planned* to *real* — the whole point of the platform, and the gate everything below waits on.
+- **The platform API — the centrepiece (in progress).** Turn `api` from a thin contract into a real
+  extension surface. **The event engine is in:** a cancellable, priority-ordered **event model** the core
+  actually routes its decisions through — cancel `BlockBreakEvent` and the block stays; cancel
+  `PlayerChatEvent` and the line never sends; cancel `PlayerMoveEvent` and the player is snapped back.
+  `EventBus` gained priorities (LOWEST…MONITOR), `ignoreCancelled` listeners, precise removal handles, and a
+  `hasListeners` fast-path so the hottest paths (movement) allocate nothing when unlistened — reflection-free
+  and dependency-free by design, so it maps cleanly onto the scripting binding to come. **Still to land:** the
+  embedded **script plugin loader** (GraalJS) with hot reload, so custom gameplay lives in fast, reloadable
+  scripts rather than the compiled core. That's the "scriptable API" pillar's second half — and the gate the
+  items below still wait on.
 - **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
   **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
   cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry

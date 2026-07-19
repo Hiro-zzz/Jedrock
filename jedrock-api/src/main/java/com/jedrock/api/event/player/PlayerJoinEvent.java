@@ -1,41 +1,26 @@
 package com.jedrock.api.event.player;
 
-import com.jedrock.api.event.Cancellable;
-import com.jedrock.api.event.Event;
 import com.jedrock.api.player.Player;
 
 /**
- * Example event. Real events will be added as needed.
+ * Fired as a player joins, before the welcome and roster broadcasts. <b>Cancellable</b>: a listener that
+ * cancels it refuses the join — the core rolls back the state it added and disconnects the client with
+ * {@link #getJoinMessage()} (or a default) as the reason.
  */
-public class PlayerJoinEvent implements Event, Cancellable {
+public class PlayerJoinEvent extends CancellablePlayerEvent {
 
-    private final Player player;
-    private boolean cancelled = false;
     private String joinMessage;
 
     public PlayerJoinEvent(Player player) {
-        this.player = player;
+        super(player);
     }
 
-    public Player getPlayer() {
-        return player;
-    }
-
+    /** The message shown if the join is cancelled (a kick reason), or {@code null} for a default. */
     public String getJoinMessage() {
         return joinMessage;
     }
 
     public void setJoinMessage(String joinMessage) {
         this.joinMessage = joinMessage;
-    }
-
-    @Override
-    public boolean isCancelled() {
-        return cancelled;
-    }
-
-    @Override
-    public void setCancelled(boolean cancelled) {
-        this.cancelled = cancelled;
     }
 }

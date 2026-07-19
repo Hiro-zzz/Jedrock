@@ -8,6 +8,21 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **The event engine — the platform API's foundation.** The `EventBus` went from a two-event stub to a real
+  extension seam, and — the part that matters — the core now actually *routes its decisions through it*, so a
+  listener can veto or reshape what the server is about to do. New: `EventPriority` (LOWEST…MONITOR, earliest
+  proposes, latest decides), priority-ordered dispatch, `ignoreCancelled` listeners, precise removal via a
+  returned `Subscription` handle, and a cached `hasListeners(type)` fast-path so a hot caller can skip
+  *building* an event nobody wants. Cancellable events wired end-to-end: `PlayerChatEvent` (cancel suppresses;
+  message + format are mutable), `BlockBreakEvent` / `BlockPlaceEvent` (cancel leaves the world untouched and
+  reverts the editor's client), `PlayerMoveEvent` (cancel snaps the player back — posted only when something
+  listens, so the hottest path stays free), `PlayerInteractEntityEvent` (cancel drops the hit before any
+  damage or puppet callback). `PlayerJoinEvent` / `PlayerQuitEvent` moved onto shared `PlayerEvent` /
+  `CancellablePlayerEvent` bases. Reflection-free and dependency-free, so it maps cleanly onto the planned
+  GraalJS binding. Unit-tested (`EventBusTest`: priority order, cancellation skipping, cache invalidation,
+  subscription removal, listener-fault isolation). Scripts / plugins are the next layer; this is the gate they
+  wait on.
+
 - **Puppets came alive — name tags, gaze, poses, animations — and holograms.** The puppet foundation grew
   from a mute mannequin into something that can act, without the server simulating a thing. New api:
   `PuppetEntity.setNameTag` (floating text, in the unified chat markup), `lookAt` / `setRotation` (the whole

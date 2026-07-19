@@ -8,7 +8,12 @@ import com.jedrock.api.entity.EntityType;
 import com.jedrock.api.entity.Hologram;
 import com.jedrock.api.entity.PuppetEntity;
 import com.jedrock.api.event.EventBus;
+import com.jedrock.api.event.block.BlockBreakEvent;
+import com.jedrock.api.event.block.BlockPlaceEvent;
+import com.jedrock.api.event.player.PlayerChatEvent;
+import com.jedrock.api.event.player.PlayerInteractEntityEvent;
 import com.jedrock.api.event.player.PlayerJoinEvent;
+import com.jedrock.api.event.player.PlayerMoveEvent;
 import com.jedrock.api.event.player.PlayerQuitEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
@@ -760,6 +765,18 @@ public class JedrockServer implements Server, ConnectionListener {
             connection.teleport(from.x(), from.y(), from.z(), yaw, pitch);
             return;
         }
+
+        // Let listeners veto a move (a region border, a freeze). This is the hottest path in the server —
+        // a packet per client per move — so the event is only built when something is actually listening;
+        // with no listener, movement costs exactly what it did before the event existed. Cancelling snaps
+        // the client back to where it was and drops the report.
+        if (eventBus.hasListeners(PlayerMoveEvent.class)) {
+            Location to = new Location(player.getWorld(), x, y, z, yaw, pitch);
+            if (eventBus.post(new PlayerMoveEvent(player, from, to)).isCancelled()) {
+                connection.teleport(from.x(), from.y(), from.z(), from.yaw(), from.pitch());
+                return;
+            }
+        }
         player.setLocation(new Location(player.getWorld(), x, y, z, yaw, pitch));
 
         // Fall damage for editions with no client fall-report packet: watch the descent server-side and
@@ -805,10 +822,24 @@ public class JedrockServer implements Server, ConnectionListener {
                 return;
             }
         }
-        LOGGER.debug(() -> "[edit] APPLIED " + x + "," + y + "," + z + " state=" + state
-                + " → " + playerRegistry.size() + " clients");
         // The block that was here, captured before the edit — a survival miner picks it up.
         int previous = defaultWorld.getBlockId(x, y, z);
+
+        // Let listeners veto the edit. A break is state 0 (air); anything else is a place. Cancelling
+        // leaves the world untouched and re-sends the real block to the editor, so their client reverts
+        // the change they optimistically drew. (Only posted when the editor is a known player.)
+        if (editor != null && eventBus.hasListeners(state == Blocks.AIR ? BlockBreakEvent.class : BlockPlaceEvent.class)) {
+            boolean cancelled = state == Blocks.AIR
+                    ? eventBus.post(new BlockBreakEvent(editor, x, y, z, previous)).isCancelled()
+                    : eventBus.post(new BlockPlaceEvent(editor, x, y, z, state, previous)).isCancelled();
+            if (cancelled) {
+                LOGGER.debug(() -> "[edit] cancelled " + x + "," + y + "," + z);
+                editor.getConnection().sendBlockChange(x, y, z, previous);
+                return;
+            }
+        }
+        LOGGER.debug(() -> "[edit] APPLIED " + x + "," + y + "," + z + " state=" + state
+                + " → " + playerRegistry.size() + " clients");
 
         // Apply to the shared world, then push the edit to every client (including the editor, so
         // the server stays authoritative). {@code state} is the canonical (id << 4 | meta) value;
@@ -1236,6 +1267,11 @@ public class JedrockServer implements Server, ConnectionListener {
         if (attacker == null) {
             return;
         }
+        // Let listeners veto the interaction before anything acts on it — no damage, no puppet callback.
+        if (eventBus.hasListeners(PlayerInteractEntityEvent.class)
+                && eventBus.post(new PlayerInteractEntityEvent(attacker, targetEntityId)).isCancelled()) {
+            return;
+        }
         CorePlayer victim = playerRegistry.getByEntityIdOrNull(targetEntityId);
         if (victim == null) {
             // Not a player — maybe a puppet. Fire its interaction hook (the seam the API subscribes to)
@@ -1280,11 +1316,19 @@ public class JedrockServer implements Server, ConnectionListener {
             commandManager.dispatch(sender, message);
             return;
         }
+        // Let listeners edit or veto the line before it goes out. Cancelling suppresses it entirely.
+        PlayerChatEvent event = eventBus.post(new PlayerChatEvent(sender, message));
+        if (event.isCancelled()) {
+            LOGGER.debug(() -> "[chat] cancelled <" + sender.getName() + "> " + message);
+            return;
+        }
         // The name is escaped so an untrusted username (a 0.14 client picks its own; a '_' would
         // otherwise italicise) can't inject markup. The message body is intentionally left raw —
         // rendering it is the documented "players can use {color} / Markdown in chat" feature.
-        String line = "{gray}<{aqua}" + ChatText.escape(sender.getName()) + "{gray}>{reset} " + message;
-        LOGGER.info("[chat] <" + sender.getName() + "> " + message);
+        String line = event.getFormat()
+                .replace("%name%", ChatText.escape(sender.getName()))
+                .replace("%s", event.getMessage());
+        LOGGER.info("[chat] <" + sender.getName() + "> " + event.getMessage());
         broadcast(line, null); // relay to everyone, including the sender
     }
 
