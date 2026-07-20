@@ -46,6 +46,35 @@ public interface ConnectionListener {
         return 0;
     }
 
+    // ===== Packet taps (the raw-packet escape hatch) =====
+
+    /**
+     * Whether any packet tap is registered — the network layer's skip-everything gate. When {@code false}
+     * (the common case) the hooks below do no work at all: no byte copy, no event. A single cheap read;
+     * called on the packet hot path. Defaults to {@code false}.
+     */
+    default boolean hasPacketTaps() {
+        return false;
+    }
+
+    /**
+     * Offer a client→server packet ({@code id} + {@code payload}, the bytes after the id) to the packet taps
+     * <em>before</em> the edition handles it. Returns {@code true} to <b>cancel</b> it — the core never sees
+     * it. Only called when {@link #hasPacketTaps()} is {@code true}. Fires on an I/O thread.
+     */
+    default boolean onInboundPacket(PlayerConnection connection, int packetId, byte[] payload) {
+        return false;
+    }
+
+    /**
+     * Offer a server→client packet ({@code id} + {@code payload}) to the packet taps <em>before</em> it hits
+     * the socket. Returns {@code true} to <b>cancel</b> it — nothing is sent. Only called when
+     * {@link #hasPacketTaps()} is {@code true}. Fires on whatever thread is sending (often not the client's).
+     */
+    default boolean onOutboundPacket(PlayerConnection connection, int packetId, byte[] payload) {
+        return false;
+    }
+
     /** A player started or stopped sneaking (crouch pose); the core relays it to everyone else. */
     default void onSneak(PlayerConnection connection, boolean sneaking) {}
 

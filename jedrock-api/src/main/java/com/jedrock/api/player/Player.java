@@ -67,7 +67,14 @@ public interface Player extends Entity {
     boolean giveItem(int state);
 
     /**
-     * Kick with a message. Abstract - actual disconnect is implementation detail.
+     * The player's remote network address (IP:port or an edition-specific string). A convenience over
+     * {@code getConnection().getAddress()}.
+     */
+    String getAddress();
+
+    /**
+     * Kick with a message. Abstract - actual disconnect is implementation detail. Fires a cancellable
+     * {@code PlayerKickEvent}; a listener may cancel it (leaving the player online) or rewrite the reason.
      */
     void kick(String reason);
 

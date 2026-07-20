@@ -75,6 +75,12 @@ public interface Server {
     void broadcast(String message);
 
     /**
+     * Run a command as {@code player}, exactly as if they had typed it in chat — the same dispatch, so
+     * script- and core-registered commands both work. A leading {@code /} is optional.
+     */
+    void dispatchCommand(Player player, String commandLine);
+
+    /**
      * World management - minimal.
      */
     Collection<World> getWorlds();

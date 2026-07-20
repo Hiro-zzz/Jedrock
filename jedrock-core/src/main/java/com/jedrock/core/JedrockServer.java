@@ -13,6 +13,7 @@ import com.jedrock.api.event.block.BlockPlaceEvent;
 import com.jedrock.api.event.block.PlayerInteractBlockEvent;
 import com.jedrock.api.event.player.DamageCause;
 import com.jedrock.api.event.player.GameModeChangeEvent;
+import com.jedrock.api.event.player.InventoryClickEvent;
 import com.jedrock.api.event.player.PlayerChatEvent;
 import com.jedrock.api.event.player.PlayerCommandEvent;
 import com.jedrock.api.event.player.PlayerDamageEvent;
@@ -66,6 +67,9 @@ import com.jedrock.core.plugin.PluginManager;
 import com.jedrock.core.inventory.Cursor;
 import com.jedrock.core.inventory.InventoryClick;
 import com.jedrock.core.player.CorePlayer;
+import com.jedrock.core.net.PacketDirection;
+import com.jedrock.core.net.PacketEvent;
+import com.jedrock.core.net.PacketTapRegistry;
 import com.jedrock.core.player.PlayerRegistry;
 import com.jedrock.core.world.CoreWorld;
 import com.jedrock.core.world.LevelData;
@@ -109,11 +113,13 @@ public class JedrockServer implements Server, ConnectionListener {
     private final GameLoop gameLoop = new GameLoop();
     private final Scheduler scheduler = new Scheduler();
     private final CommandManager commandManager = new CommandManager(this);
+    /** Raw packet taps (the {@code packets} scripting hook); consulted by the network layer via this listener. */
+    private final PacketTapRegistry packetTaps = new PacketTapRegistry();
     private final NetworkServer networkServer;
 
     /** The scripting layer: JS plugins in {@code plugins/} that subscribe to events and register commands. */
     private final PluginManager plugins =
-            new PluginManager(eventBus, this, scheduler, commandManager, Path.of("plugins"));
+            new PluginManager(eventBus, this, scheduler, commandManager, packetTaps, Path.of("plugins"));
     /** How often (ms) the background watcher polls the plugins folder for changed files to hot-reload. */
     private static final long PLUGIN_RELOAD_MILLIS = 1000L;
 
@@ -751,24 +757,31 @@ public class JedrockServer implements Server, ConnectionListener {
         Location spawn = defaultWorld.getSpawnLocation();
         // Match the mode the client actually joined in (the same value the join packets used): the
         // remembered choice from earlier this run, or the config default for a first join.
-        CorePlayer player = new CorePlayer(uuid, username, connection, defaultWorld, spawn, gameModeFor(uuid));
+        CorePlayer player = new CorePlayer(uuid, username, connection, defaultWorld, spawn,
+                gameModeFor(uuid), eventBus);
 
         playerRegistry.add(player);
         defaultWorld.addPlayer(player);
 
         PlayerJoinEvent event = new PlayerJoinEvent(player);
+        // Seed the default announcement so a listener sees it and can restyle, replace or suppress it
+        // (null / empty = no broadcast) — the same contract as the death message.
+        event.setJoinMessage("{yellow}" + ChatText.escape(username) + " joined the game");
         eventBus.post(event);
 
         if (event.isCancelled()) {
             // A listener refused the join — undo the state we just added and drop the client.
             defaultWorld.removePlayer(player);
             playerRegistry.removeByConnection(connection);
-            player.kick(event.getJoinMessage() != null ? event.getJoinMessage() : "Connection refused");
+            player.kick("Connection refused");
             return;
         }
 
         player.sendMessage("{green}Welcome to **Jedrock**!");
-        broadcast("{yellow}" + ChatText.escape(username) + " joined the game", player);
+        String joinMessage = event.getJoinMessage();
+        if (joinMessage != null && !joinMessage.isEmpty()) {
+            broadcast(joinMessage, player);
+        }
 
         // Tab list: give the newcomer the whole roster, and add the newcomer to everyone else's.
         // Tab entries must land before the avatar spawns below (JE renders only listed uuids).
@@ -812,8 +825,13 @@ public class JedrockServer implements Server, ConnectionListener {
             return; // never fully logged in, or a stale connection already replaced by a re-login
         }
         evictPlayer(player);
-        eventBus.post(new PlayerQuitEvent(player));
-        broadcast("{yellow}" + ChatText.escape(player.getName()) + " left the game", null);
+        PlayerQuitEvent event = new PlayerQuitEvent(player);
+        event.setQuitMessage("{yellow}" + ChatText.escape(player.getName()) + " left the game");
+        eventBus.post(event);
+        String quitMessage = event.getQuitMessage();
+        if (quitMessage != null && !quitMessage.isEmpty()) {
+            broadcast(quitMessage, null);
+        }
         LOGGER.info(player.getName() + " disconnected (" + playerRegistry.size() + " online)");
     }
 
@@ -1043,6 +1061,25 @@ public class JedrockServer implements Server, ConnectionListener {
         return playerRegistry.size();
     }
 
+    // ===== Packet taps: bridge the network layer's raw-packet hooks to the tap registry =====
+
+    @Override
+    public boolean hasPacketTaps() {
+        return packetTaps.hasTaps();
+    }
+
+    @Override
+    public boolean onInboundPacket(PlayerConnection connection, int packetId, byte[] payload) {
+        return packetTaps.dispatch(new PacketEvent(connection.getProtocolVersion(), PacketDirection.INBOUND,
+                packetId, payload, playerRegistry.getByConnectionOrNull(connection), connection));
+    }
+
+    @Override
+    public boolean onOutboundPacket(PlayerConnection connection, int packetId, byte[] payload) {
+        return packetTaps.dispatch(new PacketEvent(connection.getProtocolVersion(), PacketDirection.OUTBOUND,
+                packetId, payload, playerRegistry.getByConnectionOrNull(connection), connection));
+    }
+
     @Override
     public void onSneak(PlayerConnection connection, boolean sneaking) {
         CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
@@ -1122,8 +1159,12 @@ public class JedrockServer implements Server, ConnectionListener {
         }
         Container inv = player.getInventory();
         Cursor cur = player.getCursor();
+        // Let a listener veto the click before it's applied. A cancel still falls through to the resync
+        // below, so the client's optimistic move is reverted.
+        boolean vetoed = eventBus.hasListeners(InventoryClickEvent.class)
+                && eventBus.post(new InventoryClickEvent(player, coreSlot, button, shift)).isCancelled();
         // coreSlot < 0 = an unbacked slot (crafting grid) or a click mode we don't model — resync only.
-        if (coreSlot >= 0 && coreSlot < inv.size()) {
+        if (!vetoed && coreSlot >= 0 && coreSlot < inv.size()) {
             if (shift) {
                 // Quick-move to the "other" region: hotbar↔main, and armor/off-hand back into storage.
                 int from, to;
@@ -1513,6 +1554,15 @@ public class JedrockServer implements Server, ConnectionListener {
     @Override
     public void broadcast(String message) {
         broadcast(message, null);
+    }
+
+    @Override
+    public void dispatchCommand(Player player, String commandLine) {
+        if (!(player instanceof CorePlayer sender) || commandLine == null) {
+            return;
+        }
+        String line = commandLine.startsWith("/") ? commandLine : "/" + commandLine;
+        commandManager.dispatch(sender, line);
     }
 
     /**

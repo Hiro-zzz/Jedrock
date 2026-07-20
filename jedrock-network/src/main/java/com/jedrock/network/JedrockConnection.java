@@ -294,7 +294,17 @@ public class JedrockConnection implements Connection, PlayerConnection {
         ByteBuf buf = channel.alloc().buffer();
         try {
             ByteBufUtils.writeVarInt(buf, packet.getPacketId());
+            int idLen = buf.writerIndex();          // where the payload begins, past the VarInt id
             packet.write(buf);
+            // Offer the outbound packet to any tap; a cancel drops it before it reaches the pipeline.
+            if (listener != null && listener.hasPacketTaps()) {
+                byte[] payload = new byte[buf.writerIndex() - idLen];
+                buf.getBytes(idLen, payload);
+                if (listener.onOutboundPacket(this, packet.getPacketId(), payload)) {
+                    buf.release();
+                    return;
+                }
+            }
             LOGGER.debug(() -> "Outgoing packet 0x" + Integer.toHexString(packet.getPacketId()));
             send(buf); // ownership transferred to the pipeline
         } catch (Exception e) {
@@ -351,7 +361,40 @@ public class JedrockConnection implements Connection, PlayerConnection {
     @Override
     public void handleInboundPacket(LazyPacket packet) {
         if (packet == null) return;
+        // Offer the raw packet to any tap first; a cancel drops it before the core ever sees it.
+        if (listener != null && listener.hasPacketTaps()) {
+            ByteBuf payload = packet.getPayload();
+            byte[] bytes;
+            if (payload != null) {
+                bytes = new byte[payload.readableBytes()];
+                payload.getBytes(payload.readerIndex(), bytes); // absolute read — doesn't consume
+            } else {
+                bytes = EMPTY_PAYLOAD;
+            }
+            if (listener.onInboundPacket(this, packet.getPacketId(), bytes)) {
+                packet.release();
+                return;
+            }
+        }
         protocolHandler.handleInbound(packet, this);
+    }
+
+    private static final byte[] EMPTY_PAYLOAD = new byte[0];
+
+    @Override
+    public void sendRawPacket(int packetId, byte[] payload) {
+        if (!isOpen()) return;
+        byte[] body = payload != null ? payload : EMPTY_PAYLOAD;
+        // Injected packets are tapped like any other send; the registry's re-entrancy guard stops a tap
+        // that injects from recursing into itself.
+        if (listener != null && listener.hasPacketTaps()
+                && listener.onOutboundPacket(this, packetId, body)) {
+            return;
+        }
+        ByteBuf buf = channel.alloc().buffer();
+        ByteBufUtils.writeVarInt(buf, packetId); // JE framing: VarInt id + payload
+        buf.writeBytes(body);
+        send(buf); // low-level: does not re-tap (send(ClientboundPacket) is the tapped path)
     }
 
     /**

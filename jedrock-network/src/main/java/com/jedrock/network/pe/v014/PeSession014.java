@@ -19,6 +19,7 @@ import com.nukkitx.network.util.DisconnectReason;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 
+import java.util.Arrays;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -217,7 +218,15 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
 
         int offset = (data[0] & 0xFF) == WRAPPER ? 1 : 0; // strip the 0x8e game wrapper
         int id = data[offset] & 0xFF;
-        ByteBuf body = Unpooled.wrappedBuffer(data, offset + 1, n - offset - 1);
+        int bodyLen = n - offset - 1;
+        // Offer the raw packet to any tap; a cancel drops it before the session handles it.
+        if (listener != null && listener.hasPacketTaps()) {
+            byte[] payload = Arrays.copyOfRange(data, offset + 1, n);
+            if (listener.onInboundPacket(this, id, payload)) {
+                return; // cancelled
+            }
+        }
+        ByteBuf body = Unpooled.wrappedBuffer(data, offset + 1, bodyLen);
         try {
             handleGamePacket(id, body);
         } catch (RuntimeException e) {
@@ -456,6 +465,16 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         ByteBuf out = Unpooled.buffer();
         out.writeByte(WRAPPER);
         body.accept(out);
+        // out = [WRAPPER][id][fields]; offer (id, fields) to any outbound tap.
+        if (listener != null && listener.hasPacketTaps() && out.readableBytes() >= 2) {
+            int id = out.getByte(1) & 0xFF;
+            byte[] payload = new byte[out.readableBytes() - 2];
+            out.getBytes(2, payload);
+            if (listener.onOutboundPacket(this, id, payload)) {
+                out.release();
+                return; // cancelled
+            }
+        }
         session.send(out, RakNetReliability.RELIABLE_ORDERED);
     }
 
@@ -468,11 +487,31 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         pkt.readBytes(pktBytes);
         pkt.release();
 
+        // pktBytes = [id][fields]; offer to any outbound tap before compressing/framing.
+        if (listener != null && listener.hasPacketTaps() && pktBytes.length >= 1) {
+            int id = pktBytes[0] & 0xFF;
+            byte[] payload = Arrays.copyOfRange(pktBytes, 1, pktBytes.length);
+            if (listener.onOutboundPacket(this, id, payload)) {
+                return; // cancelled
+            }
+        }
+
         byte[] batch = Mcpe014Batch.of(pktBytes);
         ByteBuf out = Unpooled.buffer(1 + batch.length);
         out.writeByte(WRAPPER);
         out.writeBytes(batch);
         session.send(out, RakNetReliability.RELIABLE_ORDERED);
+    }
+
+    @Override
+    public void sendRawPacket(int packetId, byte[] payload) {
+        // Frame as a normal 0x8e-wrapped packet ([id byte][payload]); it's tapped like any other send.
+        sendWrapped(b -> {
+            b.writeByte(packetId);
+            if (payload != null) {
+                b.writeBytes(payload);
+            }
+        });
     }
 
     /** One chunk column, FullChunkData in a 0x92 zlib batch. */
