@@ -13,6 +13,7 @@ import com.jedrock.api.event.block.BlockPlaceEvent;
 import com.jedrock.api.event.block.PlayerInteractBlockEvent;
 import com.jedrock.api.event.player.DamageCause;
 import com.jedrock.api.event.player.GameModeChangeEvent;
+import com.jedrock.api.event.player.InventoryClickEvent;
 import com.jedrock.api.event.player.PlayerChatEvent;
 import com.jedrock.api.event.player.PlayerCommandEvent;
 import com.jedrock.api.event.player.PlayerDamageEvent;
@@ -756,7 +757,8 @@ public class JedrockServer implements Server, ConnectionListener {
         Location spawn = defaultWorld.getSpawnLocation();
         // Match the mode the client actually joined in (the same value the join packets used): the
         // remembered choice from earlier this run, or the config default for a first join.
-        CorePlayer player = new CorePlayer(uuid, username, connection, defaultWorld, spawn, gameModeFor(uuid));
+        CorePlayer player = new CorePlayer(uuid, username, connection, defaultWorld, spawn,
+                gameModeFor(uuid), eventBus);
 
         playerRegistry.add(player);
         defaultWorld.addPlayer(player);
@@ -1157,8 +1159,12 @@ public class JedrockServer implements Server, ConnectionListener {
         }
         Container inv = player.getInventory();
         Cursor cur = player.getCursor();
+        // Let a listener veto the click before it's applied. A cancel still falls through to the resync
+        // below, so the client's optimistic move is reverted.
+        boolean vetoed = eventBus.hasListeners(InventoryClickEvent.class)
+                && eventBus.post(new InventoryClickEvent(player, coreSlot, button, shift)).isCancelled();
         // coreSlot < 0 = an unbacked slot (crafting grid) or a click mode we don't model — resync only.
-        if (coreSlot >= 0 && coreSlot < inv.size()) {
+        if (!vetoed && coreSlot >= 0 && coreSlot < inv.size()) {
             if (shift) {
                 // Quick-move to the "other" region: hotbar↔main, and armor/off-hand back into storage.
                 int from, to;
@@ -1548,6 +1554,15 @@ public class JedrockServer implements Server, ConnectionListener {
     @Override
     public void broadcast(String message) {
         broadcast(message, null);
+    }
+
+    @Override
+    public void dispatchCommand(Player player, String commandLine) {
+        if (!(player instanceof CorePlayer sender) || commandLine == null) {
+            return;
+        }
+        String line = commandLine.startsWith("/") ? commandLine : "/" + commandLine;
+        commandManager.dispatch(sender, line);
     }
 
     /**

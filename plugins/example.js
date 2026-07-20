@@ -6,8 +6,10 @@
 // no restart. Six globals are in scope:
 //
 //   server     — the server: players, worlds, broadcast, puppets, holograms, status.
-//   events     — events.on(name, fn): subscribe to one of the 23 events below. The handler gets the real
-//                Java event; call its getters/setters directly. Cancellable events have setCancelled(true).
+//   events     — events.on(name, fn): subscribe to a built-in event (25 below) OR a custom, script-defined
+//                one (any other name). Built-in handlers get the real Java event (getters/setters, cancel);
+//                custom handlers get {getName, getData, cancel, isCancelled}. events.emit(name, data) fires a
+//                custom event to every listener and returns it (read data / isCancelled back).
 //   scheduler  — run code later, in ticks (20/sec): run / runLater / runTimer, each returning a handle with
 //                .cancel(). setTimeout / setInterval / clearTimeout / clearInterval work too (milliseconds).
 //   commands   — commands.register(name, fn)  OR  register({name, aliases, description, usage, execute}).
@@ -96,6 +98,17 @@ events.on('PlayerPickupItem', function (e) {            // canonical item state;
     bump('PlayerPickupItem');
 });
 
+events.on('InventoryClick', function (e) {              // survival inventory click; slot/button/shift; cancellable
+    bump('InventoryClick');
+    // e.setCancelled(true) to lock a slot; the server re-syncs so the client reverts.
+});
+
+events.on('PlayerKick', function (e) {                  // before a kick; cancellable, reason rewritable
+    bump('PlayerKick');
+    console.log('kicking', e.getPlayer().getName(), '—', e.getReason());
+    // e.setCancelled(true) to veto, or e.setReason('...') to rewrite.
+});
+
 // --- Poses ---
 events.on('PlayerToggleSneak', function (e) { bump('PlayerToggleSneak'); });   // e.isSneaking()
 events.on('PlayerToggleSprint', function (e) { bump('PlayerToggleSprint'); }); // e.isSprinting()
@@ -156,6 +169,7 @@ commands.register('test', function (player, args) {
 
     player.sendMessage('{gold}== Player ==');
     player.sendMessage(' name={white}' + player.getName() + '{gray} id={white}' + player.getEntityId());
+    player.sendMessage(' address={white}' + player.getAddress());
     player.sendMessage(' health={white}' + player.getHealth() + '/' + player.getMaxHealth()
         + '{gray} gamemode={white}' + player.getGameMode().name());
     player.sendMessage(' pose: sneak={white}' + player.isSneaking()
@@ -207,6 +221,12 @@ commands.register('testspawn', function (player, args) {
     scheduler.runLater(function () { puppet.remove(); holo.remove(); }, 20 * 20);
 });
 
+// /run <command…> — run a command AS the caller, via server.dispatchCommand.
+commands.register('run', function (player, args) {
+    if (args.length === 0) { player.sendMessage('{red}Usage: /run <command>'); return; }
+    server.dispatchCommand(player, args.join(' '));   // e.g. /run test
+});
+
 // /testtimer — one-shot + repeating scheduler + a setTimeout (ms) demo.
 commands.register('testtimer', function (player, args) {
     player.sendMessage('{gray}now; +1s (setTimeout); then 3 ticks of a timer…');
@@ -216,6 +236,26 @@ commands.register('testtimer', function (player, args) {
         player.sendMessage('{white}timer tick ' + (++n));
         if (n >= 3) handle.cancel();
     }, 20);
+});
+
+// ============================================================================
+//  CUSTOM EVENTS — plugin-to-plugin messaging via events.emit / events.on.
+// ============================================================================
+// Any name that isn't a built-in event is a custom channel. Listeners share the data object and can
+// cancel; the emitter reads both back. Another plugin could listen for 'example:greet' and react.
+
+events.on('example:greet', function (e) {               // a custom listener
+    var d = e.getData();
+    d.reply = 'Hello from the test plugin, ' + d.who + '!';
+    // e.cancel();   // a listener may veto — the emitter sees isCancelled()
+});
+
+// /greet — emit the custom event and show what a listener wrote back.
+commands.register('greet', function (player, args) {
+    var result = events.emit('example:greet', { who: player.getName(), reply: null });
+    player.sendMessage(result.isCancelled()
+        ? '{red}greet was cancelled'
+        : '{green}' + result.getData().reply);
 });
 
 // ============================================================================

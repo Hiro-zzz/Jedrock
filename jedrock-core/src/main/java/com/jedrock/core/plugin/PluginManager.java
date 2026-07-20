@@ -82,6 +82,8 @@ public final class PluginManager {
     private final ContextFactory contextFactory = new ScriptContextFactory();
     private final ReentrantLock scriptLock = new ReentrantLock();
     private final Map<String, ScriptPlugin> plugins = new LinkedHashMap<>();
+    /** Channel for script-defined custom events (events.emit / events.on for a non-built-in name). */
+    private final CustomEventBus customEvents = new CustomEventBus();
 
     private final EventBus eventBus;
     private final Server server;
@@ -115,6 +117,10 @@ public final class PluginManager {
 
     PacketTapRegistry packetTaps() {
         return packetTaps;
+    }
+
+    CustomEventBus customEvents() {
+        return customEvents;
     }
 
     /**
@@ -424,6 +430,9 @@ public final class PluginManager {
             commandManager.unregister(command);
         }
         for (PacketTapRegistry.Registration registration : plugin.packetTaps()) {
+            registration.remove();
+        }
+        for (CustomEventBus.Registration registration : plugin.customListeners()) {
             registration.remove();
         }
         for (EventBus.Subscription subscription : plugin.subscriptions()) {

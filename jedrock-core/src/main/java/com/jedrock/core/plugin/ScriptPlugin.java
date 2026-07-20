@@ -26,6 +26,8 @@ final class ScriptPlugin {
     private final List<Command> commands = new ArrayList<>();
     /** Packet taps this script registered; removed on teardown so a reload doesn't leave them tapping. */
     private final List<PacketTapRegistry.Registration> packetTaps = new ArrayList<>();
+    /** Custom-event listeners this script registered; removed on teardown. */
+    private final List<CustomEventBus.Registration> customListeners = new ArrayList<>();
     private final long lastModified;
     private volatile Function onDisable;
 
@@ -86,6 +88,15 @@ final class ScriptPlugin {
 
     List<PacketTapRegistry.Registration> packetTaps() {
         return packetTaps;
+    }
+
+    /** Remember a custom-event listener so it can be removed when the script is unloaded. */
+    void addCustomListener(CustomEventBus.Registration registration) {
+        customListeners.add(registration);
+    }
+
+    List<CustomEventBus.Registration> customListeners() {
+        return customListeners;
     }
 
     Function onDisable() {

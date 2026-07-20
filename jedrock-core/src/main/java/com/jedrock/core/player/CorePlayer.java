@@ -1,5 +1,7 @@
 package com.jedrock.core.player;
 
+import com.jedrock.api.event.EventBus;
+import com.jedrock.api.event.player.PlayerKickEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.player.PlayerConnection;
@@ -31,9 +33,16 @@ public final class CorePlayer implements Player {
     private volatile boolean sneaking = false;
     private volatile boolean sprinting = false;
     private volatile boolean usingItem = false;
+    /** For firing {@code PlayerKickEvent} from {@link #kick}; null in tests that don't wire the bus. */
+    private final EventBus eventBus;
 
     public CorePlayer(UUID uniqueId, String name, PlayerConnection connection,
                       CoreWorld world, Location location, GameMode gameMode) {
+        this(uniqueId, name, connection, world, location, gameMode, null);
+    }
+
+    public CorePlayer(UUID uniqueId, String name, PlayerConnection connection,
+                      CoreWorld world, Location location, GameMode gameMode, EventBus eventBus) {
         this.uniqueId = uniqueId;
         this.name = name;
         this.connection = connection;
@@ -42,6 +51,7 @@ public final class CorePlayer implements Player {
         // Set directly (not via setGameMode): the join sequence already told the client this mode, so
         // there's no packet to send here — only later /gamemode changes push a live update to the client.
         this.gameMode = gameMode;
+        this.eventBus = eventBus;
     }
 
     @Override
@@ -322,7 +332,20 @@ public final class CorePlayer implements Player {
     }
 
     @Override
+    public String getAddress() {
+        return connection.getAddress();
+    }
+
+    @Override
     public void kick(String reason) {
+        // A listener may veto the kick or rewrite its reason. No bus wired (tests) → kick straight away.
+        if (eventBus != null) {
+            PlayerKickEvent event = eventBus.post(new PlayerKickEvent(this, reason));
+            if (event.isCancelled()) {
+                return;
+            }
+            reason = event.getReason();
+        }
         connection.close(reason);
     }
 

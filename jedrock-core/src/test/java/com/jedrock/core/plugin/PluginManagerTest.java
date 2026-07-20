@@ -151,14 +151,15 @@ class PluginManagerTest {
     }
 
     @Test
-    void anUnknownEventNameIsReportedNotSilentlyIgnored(@TempDir Path dir) {
+    void aNonBuiltinEventNameRegistersACustomListener(@TempDir Path dir) {
         EventBus bus = new EventBus();
         PluginManager plugins = manager(bus, dir);
-        // The script throws on load (unknown event); the manager logs and moves on, leaving no listener.
-        plugins.loadSource("bad.js", "events.on('NoSuchEvent', function(e){});", 1L);
+        // A name that isn't a built-in event is now a custom-event channel (not an error): the plugin loads,
+        // and no Java event bus listener is added for it.
+        plugins.loadSource("custom.js", "events.on('NoSuchEvent', function(e){});", 1L);
 
-        assertTrue(plugins.pluginNames().isEmpty(), "a script that failed to load isn't registered");
-        assertFalse(bus.hasListeners(PlayerChatEvent.class));
+        assertEquals(1, plugins.pluginNames().size(), "the plugin loaded — the name is a custom event");
+        assertFalse(bus.hasListeners(PlayerChatEvent.class), "no core event listener was registered");
     }
 
     @Test
@@ -350,6 +351,43 @@ class PluginManagerTest {
         cm.dispatch(player, "/boom");
         assertTrue(conn.lastMessage != null && conn.lastMessage.contains("failed"),
                 "the sender was told the command failed, got: " + conn.lastMessage);
+    }
+
+    @Test
+    void customEventsFlowBetweenPluginsWithSharedDataAndCancel(@TempDir Path dir) {
+        CommandManager cm = new CommandManager(null);
+        PluginManager plugins = manager(new EventBus(), dir, cm);
+        // Plugin A listens for a custom 'score' event and mutates the shared data; the second listener cancels.
+        plugins.loadSource("a.js",
+                "events.on('score', function(e) { e.getData().n = e.getData().n + 1; });\n"
+              + "events.on('score', function(e) { e.getData().n = e.getData().n + 10;\n"
+              + "                                  if (e.getData().n >= 5) e.cancel(); });", 1L);
+        // Plugin B emits it (from a command) and reports the result the emitter reads back.
+        plugins.loadSource("b.js",
+                "commands.register('fire', function(p, a) {\n"
+              + "  var r = events.emit('score', { n: 0 });\n"
+              + "  p.sendMessage('n=' + r.getData().n + ' cancelled=' + r.isCancelled());\n"
+              + "});", 1L);
+
+        CapturingConnection conn = new CapturingConnection();
+        CorePlayer player = new CorePlayer(UUID.randomUUID(), "T", conn,
+                world, world.getSpawnLocation(), GameMode.SURVIVAL);
+        cm.dispatch(player, "/fire");
+        assertEquals("n=11 cancelled=true", conn.lastMessage,
+                "both listeners ran in order over shared data, and the cancel was read back");
+
+        // Unloading the listener plugin tears its custom listeners down — the same emit now reaches nobody.
+        plugins.unload("a.js");
+        cm.dispatch(player, "/fire");
+        assertEquals("n=0 cancelled=false", conn.lastMessage, "custom listeners were removed with their plugin");
+    }
+
+    @Test
+    void emittingABuiltinEventNameIsRejected(@TempDir Path dir) {
+        PluginManager plugins = manager(new EventBus(), dir);
+        // events.emit on a built-in name throws (the core fires those) — so this script fails to load.
+        plugins.loadSource("bad.js", "events.emit('PlayerChat', { x: 1 });", 1L);
+        assertTrue(plugins.pluginNames().isEmpty(), "emitting a built-in name is refused");
     }
 
     @Test

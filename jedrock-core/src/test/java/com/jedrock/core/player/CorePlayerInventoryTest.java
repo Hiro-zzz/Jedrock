@@ -1,5 +1,7 @@
 package com.jedrock.core.player;
 
+import com.jedrock.api.event.EventBus;
+import com.jedrock.api.event.player.PlayerKickEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
@@ -13,6 +15,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** The minimal survival inventory: stacking on give, decrement on take, and the sync it pushes. */
@@ -124,6 +127,39 @@ class CorePlayerInventoryTest {
     }
 
     @Test
+    void getAddressComesFromTheConnection() {
+        CorePlayer p = player(new NoopConnection());
+        assertEquals("test", p.getAddress(), "getAddress delegates to the connection");
+    }
+
+    @Test
+    void kickFiresACancellableRewritablePlayerKickEvent() {
+        EventBus bus = new EventBus();
+        CapturingConnection conn = new CapturingConnection();
+        CorePlayer p = new CorePlayer(UUID.randomUUID(), "T", conn,
+                world, world.getSpawnLocation(), GameMode.SURVIVAL, bus);
+
+        // A listener cancels the kick — the connection must not close.
+        EventBus.Subscription veto = bus.register(PlayerKickEvent.class, e -> e.setCancelled(true));
+        p.kick("bye");
+        assertNull(conn.closeReason, "a cancelled kick left the player connected");
+        veto.remove();
+
+        // A listener rewrites the reason before the disconnect.
+        bus.register(PlayerKickEvent.class, e -> e.setReason("rewritten"));
+        p.kick("original");
+        assertEquals("rewritten", conn.closeReason, "the kick reason was rewritten");
+    }
+
+    @Test
+    void kickWithoutABusClosesDirectly() {
+        CapturingConnection conn = new CapturingConnection();
+        CorePlayer p = player(conn); // 6-arg ctor: no event bus
+        p.kick("bye");
+        assertEquals("bye", conn.closeReason, "with no bus wired, kick closes straight away");
+    }
+
+    @Test
     void setHealthClampsAndSyncsToTheClient() {
         CapturingConnection conn = new CapturingConnection();
         CorePlayer p = player(conn);
@@ -207,6 +243,8 @@ class CorePlayerInventoryTest {
         int slotState;
         int slotCount;
         int health = -1;
+        String closeReason;
+        @Override public void close(String reason) { this.closeReason = reason; }
         @Override public void setInventory(int[] states, int[] counts) {
             this.states = states.clone();
             this.counts = counts.clone();
