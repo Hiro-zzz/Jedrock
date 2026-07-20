@@ -353,6 +353,28 @@ class PluginManagerTest {
     }
 
     @Test
+    void theRealExamplePluginLoadsUnderTheSandbox(@TempDir Path dir) throws IOException {
+        // Smoke-test the shipped plugins/example.js: it must parse and register cleanly under the sandbox —
+        // this validates the `Packages.com.jedrock…` enum access and that every global (events, scheduler,
+        // commands, packets, server) is in scope. Handler bodies don't run on load, only the registrations.
+        Path example = Path.of("plugins/example.js");
+        if (!Files.exists(example)) {
+            example = Path.of("../plugins/example.js"); // surefire runs from the module dir
+        }
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.exists(example), "plugins/example.js not found");
+
+        CommandManager cm = new CommandManager(null);
+        PacketTapRegistry taps = new PacketTapRegistry();
+        PluginManager plugins = new PluginManager(new EventBus(), null, new Scheduler(), cm, taps, dir);
+        plugins.loadSource("example.js", Files.readString(example), 1L);
+
+        assertEquals(1, plugins.pluginNames().size(), "example.js loaded without a sandbox/parse error");
+        assertNotNull(cm.get("test"), "it registered its /test command");
+        assertNotNull(cm.get("bc"), "and the /broadcast alias");
+        assertTrue(taps.hasTaps(), "and its packet taps");
+    }
+
+    @Test
     void aScriptPacketTapSeesAndCancelsInboundPackets(@TempDir Path dir) {
         PacketTapRegistry taps = new PacketTapRegistry();
         PluginManager plugins = manager(new EventBus(), dir, taps);
