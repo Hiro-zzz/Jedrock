@@ -493,6 +493,14 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
                 ByteBuf pk = batch.readSlice(len);
                 int id = ByteBufUtils.readVarInt(pk);
                 LOGGER.debug(() -> "[PE] inbound packet id=0x" + Integer.toHexString(id));
+                // Offer the raw packet to any tap; a cancel drops it before the session handles it.
+                if (listener != null && listener.hasPacketTaps()) {
+                    byte[] body = new byte[pk.readableBytes()];
+                    pk.getBytes(pk.readerIndex(), body); // absolute read — doesn't consume
+                    if (listener.onInboundPacket(this, id, body)) {
+                        continue; // cancelled — the slice is freed with the batch
+                    }
+                }
                 handleGamePacket(id, pk);
             }
         } catch (RuntimeException e) {
@@ -1230,6 +1238,9 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         if (second != null) {
             appendPacket(batch, scratch, second);
         }
+        if (batch.readableBytes() == 0) {
+            return; // every inner packet was cancelled by a tap — nothing to send
+        }
         byte[] compressed = McpeCompression.deflate(
                 batch.array(), batch.arrayOffset() + batch.readerIndex(), batch.readableBytes(), rawDeflate);
 
@@ -1240,11 +1251,35 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         session.send(out, RakNetReliability.RELIABLE_ORDERED);
     }
 
-    /** Encode one packet into {@code scratch}, then frame it (VarInt length + body) into {@code batch}. */
-    private static void appendPacket(ByteBuf batch, ByteBuf scratch, Consumer<ByteBuf> writer) {
+    /**
+     * Encode one packet into {@code scratch}, offer it to any outbound tap, then (unless cancelled) frame it
+     * (VarInt length + body) into {@code batch}. The tap peeks the leading VarInt id without consuming it.
+     */
+    private void appendPacket(ByteBuf batch, ByteBuf scratch, Consumer<ByteBuf> writer) {
         scratch.clear();
         writer.accept(scratch);
+        if (listener != null && listener.hasPacketTaps()) {
+            scratch.markReaderIndex();
+            int id = ByteBufUtils.readVarInt(scratch);
+            byte[] body = new byte[scratch.readableBytes()];
+            scratch.getBytes(scratch.readerIndex(), body);
+            scratch.resetReaderIndex();
+            if (listener.onOutboundPacket(this, id, body)) {
+                return; // cancelled — don't append it to the batch
+            }
+        }
         ByteBufUtils.writeVarInt(batch, scratch.readableBytes());
         batch.writeBytes(scratch);
+    }
+
+    @Override
+    public void sendRawPacket(int packetId, byte[] payload) {
+        // Frame as a normal game-batch packet ([VarInt id][payload]); it's tapped like any other send.
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, packetId);
+            if (payload != null) {
+                b.writeBytes(payload);
+            }
+        });
     }
 }

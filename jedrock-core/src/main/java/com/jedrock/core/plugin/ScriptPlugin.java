@@ -2,6 +2,7 @@ package com.jedrock.core.plugin;
 
 import com.jedrock.api.event.EventBus;
 import com.jedrock.core.command.Command;
+import com.jedrock.core.net.PacketTapRegistry;
 import com.jedrock.gameloop.Scheduler;
 import org.mozilla.javascript.Function;
 import org.mozilla.javascript.Scriptable;
@@ -23,6 +24,8 @@ final class ScriptPlugin {
     private final List<Scheduler.Task> tasks = new ArrayList<>();
     /** Commands this script registered; unregistered on teardown so a reload doesn't leave ghosts. */
     private final List<Command> commands = new ArrayList<>();
+    /** Packet taps this script registered; removed on teardown so a reload doesn't leave them tapping. */
+    private final List<PacketTapRegistry.Registration> packetTaps = new ArrayList<>();
     private final long lastModified;
     private volatile Function onDisable;
 
@@ -74,6 +77,15 @@ final class ScriptPlugin {
 
     List<Command> commands() {
         return commands;
+    }
+
+    /** Remember a packet-tap registration so it can be removed when the script is unloaded. */
+    void addPacketTap(PacketTapRegistry.Registration registration) {
+        packetTaps.add(registration);
+    }
+
+    List<PacketTapRegistry.Registration> packetTaps() {
+        return packetTaps;
     }
 
     Function onDisable() {

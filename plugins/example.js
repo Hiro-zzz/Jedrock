@@ -1,6 +1,6 @@
 // Example Jedrock plugin. Drop a .js file in this folder and it loads on start; save an edit and it
-// hot-reloads within a second — no restart. Five globals are in scope: `server`, `events`, `scheduler`,
-// `commands` and `console`.
+// hot-reloads within a second — no restart. Six globals are in scope: `server`, `events`, `scheduler`,
+// `commands`, `packets` and `console`.
 //
 // events.on(name, handler) subscribes to an event. The handler gets the real Java event object, so you
 // call its getters/setters directly. Cancellable events have setCancelled(true).
@@ -13,6 +13,11 @@
 // commands.register(name, handler) adds a /slash command; the handler gets (player, args). Or pass an
 // options object { name, aliases, description, usage, execute } to give it help text. Commands show up in
 // /help and are removed automatically on unload/reload.
+//
+// packets is the raw wire tap, across all four protocols. packets.onReceive(fn) / packets.onSend(fn) see
+// every packet as { getId(), getBytes(), getLength(), getProtocol(), getPlayer(), cancel() }; cancel() drops
+// it. packets.send(player, id, bytes) injects one. Powerful and low-level — a listener runs on the network
+// hot path, so keep it quick (and don't cancel packets you don't understand).
 
 console.log('example plugin loading');
 

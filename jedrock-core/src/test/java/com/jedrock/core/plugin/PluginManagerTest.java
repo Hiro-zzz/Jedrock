@@ -10,6 +10,9 @@ import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Dimension;
 import com.jedrock.core.command.Command;
 import com.jedrock.core.command.CommandManager;
+import com.jedrock.core.net.PacketDirection;
+import com.jedrock.core.net.PacketEvent;
+import com.jedrock.core.net.PacketTapRegistry;
 import com.jedrock.core.player.CorePlayer;
 import com.jedrock.core.world.CoreWorld;
 import com.jedrock.gameloop.Scheduler;
@@ -35,15 +38,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PluginManagerTest {
 
     private PluginManager manager(EventBus bus, Path dir) {
-        return new PluginManager(bus, null, new Scheduler(), new CommandManager(null), dir);
+        return new PluginManager(bus, null, new Scheduler(), new CommandManager(null),
+                new PacketTapRegistry(), dir);
     }
 
     private PluginManager manager(EventBus bus, Path dir, Scheduler scheduler) {
-        return new PluginManager(bus, null, scheduler, new CommandManager(null), dir);
+        return new PluginManager(bus, null, scheduler, new CommandManager(null),
+                new PacketTapRegistry(), dir);
     }
 
     private PluginManager manager(EventBus bus, Path dir, CommandManager commands) {
-        return new PluginManager(bus, null, new Scheduler(), commands, dir);
+        return new PluginManager(bus, null, new Scheduler(), commands, new PacketTapRegistry(), dir);
+    }
+
+    private PluginManager manager(EventBus bus, Path dir, PacketTapRegistry packetTaps) {
+        return new PluginManager(bus, null, new Scheduler(), new CommandManager(null), packetTaps, dir);
+    }
+
+    private static PacketEvent inbound(int id, byte[] payload) {
+        return new PacketEvent(ProtocolVersion.PE_1_1_5, PacketDirection.INBOUND, id, payload, null, null);
     }
 
     /** Drive a scheduler forward n ticks, as the game loop would. */
@@ -337,6 +350,44 @@ class PluginManagerTest {
         cm.dispatch(player, "/boom");
         assertTrue(conn.lastMessage != null && conn.lastMessage.contains("failed"),
                 "the sender was told the command failed, got: " + conn.lastMessage);
+    }
+
+    @Test
+    void aScriptPacketTapSeesAndCancelsInboundPackets(@TempDir Path dir) {
+        PacketTapRegistry taps = new PacketTapRegistry();
+        PluginManager plugins = manager(new EventBus(), dir, taps);
+        // The tap cancels only 0x05, and only after reading getId()/getLength() — so a cancel proves it saw
+        // the packet. A 2-byte 0x05 would otherwise be let through, so length is exercised too.
+        plugins.loadSource("tap.js",
+                "packets.onReceive(function(p) {\n"
+              + "  if (p.getId() === 0x05 && p.getLength() === 2) p.cancel();\n"
+              + "});", 1L);
+        assertTrue(taps.hasTaps(), "the script registered an inbound tap");
+
+        assertFalse(taps.dispatch(inbound(0x03, new byte[]{1, 2})), "0x03 passes through");
+        assertFalse(taps.dispatch(inbound(0x05, new byte[]{9})), "0x05 with the wrong length passes through");
+        assertTrue(taps.dispatch(inbound(0x05, new byte[]{1, 2})), "0x05 (len 2) was cancelled by the script");
+    }
+
+    @Test
+    void reloadAndUnloadRemoveAScriptsPacketTaps(@TempDir Path dir) {
+        PacketTapRegistry taps = new PacketTapRegistry();
+        PluginManager plugins = manager(new EventBus(), dir, taps);
+
+        plugins.loadSource("tap.js", "packets.onReceive(function(p) { p.cancel(); });", 1L);
+        assertTrue(taps.hasTaps(), "tap registered");
+        assertTrue(taps.dispatch(inbound(1, new byte[0])), "v1 cancels");
+
+        // Reload with no tap: the old tap must be gone.
+        plugins.loadSource("tap.js", "events.on('PlayerChat', function(e){});", 2L);
+        assertFalse(taps.hasTaps(), "reload removed the tap");
+        assertFalse(taps.dispatch(inbound(1, new byte[0])), "nothing cancels now");
+
+        // Register again, then unload entirely.
+        plugins.loadSource("tap2.js", "packets.onSend(function(p) { p.cancel(); });", 1L);
+        assertTrue(taps.hasTaps());
+        plugins.unload("tap2.js");
+        assertFalse(taps.hasTaps(), "unload removed the outbound tap");
     }
 
     /** Captures the last message pushed to the connection (for the command-error test). */

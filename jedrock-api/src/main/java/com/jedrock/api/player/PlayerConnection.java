@@ -31,6 +31,15 @@ public interface PlayerConnection {
     void sendPacket(Object packet); // Object to keep API completely protocol agnostic
 
     /**
+     * Inject a raw packet at this connection — a numeric {@code packetId} and its {@code payload} (every byte
+     * after the id) — framed for this connection's edition (JE VarInt id, PE game-batch, 0.14 wrapper). The
+     * escape hatch behind the scripting {@code packets.send(...)}: it lets a plugin speak the wire directly.
+     * Fires the outbound packet taps like any other send. Default: a no-op (a connection double that doesn't
+     * model the wire simply ignores it).
+     */
+    default void sendRawPacket(int packetId, byte[] payload) {}
+
+    /**
      * Send a system/chat message to the client.
      * Protocol-agnostic on purpose: the implementation decides how to encode it,
      * so higher layers (e.g. the core player) never touch concrete packets.

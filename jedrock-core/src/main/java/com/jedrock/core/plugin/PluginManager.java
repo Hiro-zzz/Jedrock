@@ -4,6 +4,8 @@ import com.jedrock.api.Server;
 import com.jedrock.api.event.EventBus;
 import com.jedrock.core.command.Command;
 import com.jedrock.core.command.CommandManager;
+import com.jedrock.core.net.PacketEvent;
+import com.jedrock.core.net.PacketTapRegistry;
 import com.jedrock.core.player.CorePlayer;
 import com.jedrock.gameloop.Scheduler;
 import com.jedrock.utils.JLogger;
@@ -85,15 +87,17 @@ public final class PluginManager {
     private final Server server;
     private final Scheduler scheduler;
     private final CommandManager commandManager;
+    private final PacketTapRegistry packetTaps;
     private final Path pluginsDir;
     private volatile Thread watcher;
 
     public PluginManager(EventBus eventBus, Server server, Scheduler scheduler, CommandManager commandManager,
-                         Path pluginsDir) {
+                         PacketTapRegistry packetTaps, Path pluginsDir) {
         this.eventBus = eventBus;
         this.server = server;
         this.scheduler = scheduler;
         this.commandManager = commandManager;
+        this.packetTaps = packetTaps;
         this.pluginsDir = pluginsDir;
     }
 
@@ -107,6 +111,10 @@ public final class PluginManager {
 
     CommandManager commandManager() {
         return commandManager;
+    }
+
+    PacketTapRegistry packetTaps() {
+        return packetTaps;
     }
 
     /**
@@ -193,6 +201,8 @@ public final class PluginManager {
                         Context.javaToJS(new ScriptScheduler(this, plugin), scope));
                 ScriptableObject.putProperty(scope, "commands",
                         Context.javaToJS(new ScriptCommands(this, plugin), scope));
+                ScriptableObject.putProperty(scope, "packets",
+                        Context.javaToJS(new ScriptPackets(this, plugin), scope));
                 ScriptableObject.putProperty(scope, "console",
                         Context.javaToJS(new ScriptConsole(name), scope));
 
@@ -370,8 +380,30 @@ public final class PluginManager {
     }
 
     /**
-     * Call a plugin's onDisable (if any), cancel its scheduled tasks, unregister its commands and drop its
-     * subscriptions. Caller holds the script lock.
+     * Run a script packet tap with the {@link PacketEvent}. Serialized under the script lock in a Rhino
+     * context like every other script call; a throwing tap is swallowed and logged (it must never break the
+     * wire — and a tap that throws does not cancel the packet). The tap may call {@code event.cancel()}.
+     */
+    void callPacketTap(ScriptPlugin plugin, Function handler, PacketEvent event) {
+        scriptLock.lock();
+        try {
+            Context cx = contextFactory.enterContext();
+            try {
+                Scriptable scope = plugin.scope();
+                handler.call(cx, scope, scope, new Object[]{Context.javaToJS(event, scope)});
+            } finally {
+                Context.exit();
+            }
+        } catch (RuntimeException e) {
+            LOGGER.error("Plugin " + plugin.name() + " packet tap threw: " + e.getMessage());
+        } finally {
+            scriptLock.unlock();
+        }
+    }
+
+    /**
+     * Call a plugin's onDisable (if any), cancel its scheduled tasks, unregister its commands, remove its
+     * packet taps and drop its subscriptions. Caller holds the script lock.
      */
     private void teardown(ScriptPlugin plugin) {
         Function onDisable = plugin.onDisable();
@@ -390,6 +422,9 @@ public final class PluginManager {
         }
         for (Command command : plugin.commands()) {
             commandManager.unregister(command);
+        }
+        for (PacketTapRegistry.Registration registration : plugin.packetTaps()) {
+            registration.remove();
         }
         for (EventBus.Subscription subscription : plugin.subscriptions()) {
             subscription.remove();
