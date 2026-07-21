@@ -10,6 +10,8 @@ import com.jedrock.api.world.World;
 import com.jedrock.core.entity.EntityIds;
 import com.jedrock.core.inventory.Container;
 import com.jedrock.core.inventory.Cursor;
+import com.jedrock.core.permission.OpList;
+import com.jedrock.core.permission.PermissionManager;
 import com.jedrock.core.world.CoreWorld;
 import com.jedrock.utils.text.ChatText;
 
@@ -359,6 +361,41 @@ public final class CorePlayer implements Player {
     @Override
     public boolean isOnline() {
         return connection.isActive();
+    }
+
+    // ===== Permissions =====
+
+    /** The server op list + group permissions, injected after construction (null in tests → no perms). */
+    private volatile OpList opList;
+    private volatile PermissionManager permissions;
+
+    /** Wire this player to the server op list and group permissions so isOp/hasPermission/getPrefix resolve. */
+    public void setPermissions(OpList opList, PermissionManager permissions) {
+        this.opList = opList;
+        this.permissions = permissions;
+    }
+
+    @Override
+    public boolean isOp() {
+        OpList ops = opList;
+        return ops != null && ops.isOp(name);
+    }
+
+    @Override
+    public boolean hasPermission(String permission) {
+        // An unguarded (null/blank) node is always granted; an op holds every node; otherwise the group
+        // system decides (wildcards + explicit deny).
+        if (permission == null || permission.isBlank() || isOp()) {
+            return true;
+        }
+        PermissionManager perms = permissions;
+        return perms != null && perms.has(name, permission);
+    }
+
+    @Override
+    public String getPrefix() {
+        PermissionManager perms = permissions;
+        return perms == null ? "" : perms.prefixOf(name);
     }
 
     @Override

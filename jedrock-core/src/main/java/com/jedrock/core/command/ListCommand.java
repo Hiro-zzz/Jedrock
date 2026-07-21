@@ -1,8 +1,8 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.api.player.Player;
 import com.jedrock.core.JedrockServer;
-import com.jedrock.core.player.CorePlayer;
 import com.jedrock.utils.text.ChatText;
 
 import java.util.Collection;
@@ -36,7 +36,7 @@ public final class ListCommand implements Command {
     }
 
     @Override
-    public void execute(JedrockServer server, CorePlayer sender, String[] args) {
+    public void execute(JedrockServer server, CommandSender sender, String[] args) {
         Collection<Player> players = server.getPlayers();
         sender.sendMessage("{gold}{bold}Online ({white}" + players.size() + "{gold}):");
         for (Player p : players) {

@@ -1,7 +1,8 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.command.CommandSender;
+import com.jedrock.api.player.Player;
 import com.jedrock.core.JedrockServer;
-import com.jedrock.core.player.CorePlayer;
 import com.jedrock.utils.JLogger;
 import com.jedrock.utils.text.ChatText;
 
@@ -68,7 +69,7 @@ public final class CommandManager {
      * the command and runs it, reporting an unknown command or a thrown error back to the sender. A
      * command never reaches the public chat.
      */
-    public void dispatch(CorePlayer sender, String rawLine) {
+    public void dispatch(CommandSender sender, String rawLine) {
         String line = rawLine.substring(1).strip(); // drop the leading '/'
         if (line.isEmpty()) {
             return; // a lone "/" — nothing to do
@@ -79,6 +80,15 @@ public final class CommandManager {
         if (command == null) {
             sender.sendMessage("{red}Unknown command: {white}/" + ChatText.escape(label)
                     + "{red}. Try {white}/help{red}.");
+            return;
+        }
+        // Gate on permission, then on player-only, before running — a clear message for each.
+        if (command.permission() != null && !sender.hasPermission(command.permission())) {
+            sender.sendMessage("{red}You don't have permission to use {white}/" + ChatText.escape(label));
+            return;
+        }
+        if (command.playerOnly() && !(sender instanceof Player)) {
+            sender.sendMessage("{red}/" + ChatText.escape(label) + " can only be run by a player.");
             return;
         }
         String[] args = Arrays.copyOfRange(parts, 1, parts.length);

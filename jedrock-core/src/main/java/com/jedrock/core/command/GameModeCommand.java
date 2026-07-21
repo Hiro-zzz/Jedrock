@@ -1,5 +1,6 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
 import com.jedrock.core.JedrockServer;
@@ -38,7 +39,12 @@ public final class GameModeCommand implements Command {
     }
 
     @Override
-    public void execute(JedrockServer server, CorePlayer sender, String[] args) {
+    public String permission() {
+        return "jedrock.command.gamemode";
+    }
+
+    @Override
+    public void execute(JedrockServer server, CommandSender sender, String[] args) {
         if (args.length == 0) {
             sender.sendMessage("{red}Usage: " + usage());
             return;
@@ -49,7 +55,7 @@ public final class GameModeCommand implements Command {
             return;
         }
 
-        CorePlayer target = sender;
+        CorePlayer target;
         if (args.length >= 2) {
             Optional<Player> found = server.getPlayer(args[1]);
             if (found.isEmpty() || !(found.get() instanceof CorePlayer cp)) {
@@ -57,6 +63,11 @@ public final class GameModeCommand implements Command {
                 return;
             }
             target = cp;
+        } else if (sender instanceof CorePlayer self) {
+            target = self;
+        } else {
+            sender.sendMessage("{red}From the console, name a player: {white}" + usage());
+            return;
         }
 
         // persists the choice + pushes the live switch to the client; a listener may veto it.

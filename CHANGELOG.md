@@ -8,6 +8,36 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Native group permission system.** On top of operators sits a real permission system (`permissions.txt`):
+  named **groups** with inheritance, a **default group** new players fall into, and permission **nodes** with
+  `*` / `a.b.*` wildcards and `-node` **explicit deny** (deny wins over any grant). Each group carries an
+  optional chat **prefix** (`{red}[Admin] `), shown through the new `%prefix%` slot in the chat format. A
+  `/perm` command manages it all live — create/delete groups, grant or deny nodes, set inheritance, prefix
+  and the default group, assign players — and every change persists. `Player` gained `getPrefix()`; scripts
+  reach `player.isOp()` / `hasPermission(node)` / `getPrefix()` for free (Rhino reflection). Resolution is a
+  cycle-safe union of a player's groups (or the default) with wildcard + deny matching, op as a super-user
+  override. Unit-tested (`PermissionManagerTest`: wildcards, deny-beats-grant, inheritance + cycles, default
+  fallback, prefix, full persist/reload — which caught a trailing-space-in-prefix loss on load).
+
+- **A single command surface, unified console and operators.** Commands are now written against a
+  `CommandSender` (a player *or* the console), so the same command runs from chat and from stdin: the console
+  runs any `/`-command as an **operator** (`op alice`, `gamemode creative bob`), and a player-only command
+  (`/spawn`, `/tp`) is refused there with a clear message. **Operators** persist to `ops.txt` — an op holds
+  every permission, and the console is always an op, so the first `/op` is granted from the console. Commands
+  can declare a `permission()` node and `playerOnly()`; the manager gates on both, and `/help` hides what the
+  sender can't run. New `/op`, `/deop` commands (work on offline names). All 15 built-ins moved onto the new
+  sender; script commands run from the console too. Tested in `OpListTest` and `CommandTest`.
+
+- **Scripting API grew four capabilities** (each hot-reload-safe, tracked per plugin): a **scheduler**
+  (`scheduler.runLater` / `runTimer`, plus `setTimeout` / `setInterval` in ms) so a script defers work
+  without counting ticks; **script commands** (`commands.register`) that show up in `/help` with a handler
+  getting `(sender, args)`; a **raw packet API** (`packets.onReceive` / `onSend` / `send`) that taps and
+  injects packets on all four protocols with cancel + inject (no byte rewrite); and **custom events**
+  (`events.emit(name, data)` + `events.on(anyName, …)`) alongside the built-ins, now 25. Two more built-in
+  events landed too — `InventoryClickEvent` and `PlayerKickEvent` — plus `Server.dispatchCommand` and
+  `Player.getAddress`. The script globals are now six: `server` / `events` / `scheduler` / `commands` /
+  `packets` / `console`.
+
 - **Script plugins — the scripting layer lands (Rhino).** The platform's whole point: custom gameplay now
   lives in hot-reloadable JavaScript, not the compiled core. Drop a `.js` in `plugins/` and it loads on
   start; save an edit and it reloads within a second, no restart. A script gets three globals — `server`,
@@ -85,6 +115,20 @@ unstable — anything may change between entries.
   ViaVersion (pinned per version) and PocketMine-MP at both PE eras.
 
 ### Fixed
+
+- **PE 1.1.5 block-interaction "hallucinations" (ghost blocks and holes).** The retail protocol-113 client
+  draws its own edits optimistically and, unlike 0.14, double-fires and desyncs, so a single click could
+  leave a phantom second block or hole. Three parts, all client-verified: (1) a **debounce** collapses the
+  real double-fire — placement's distinct-cell "staircase" and a creative break's `START` + `CONTINUE`
+  stream on the same cell (`PeEditDebounce`, with tests). (2) Ground-truthed from a live debug log that the
+  server actually applies just one edit — the extra block is a **client-only ghost**, and the client
+  **ignores a standalone `UpdateBlock`** that contradicts one of its own cells (even with the PRIORITY flag),
+  the same "trusts chunk data over standalone packets" trait that makes chests need a chunk tile. So the
+  correction re-sends the affected **chunk**, and **trailing-edge** (one flush ~180 ms after edits settle,
+  on the session event loop) — a mid-burst resend carried a stale state that resurrected a just-broken block
+  and made breaking jerky. Covers server-rejected edits too, so ghost holes from spawn-protect / reach
+  cancels also clear. Not perfect (1.1.5 stays experimental), but tolerable. A debug-gated
+  `[PE] place/break gap=..ms` log — which pinned the diagnosis — stays for future tuning.
 
 - **PE 0.14 `AddEntity` wrote its fields in the wrong order**, so every 0.14 puppet was malformed on the wire:
   the entity-links short was written *before* the metadata block, where protocol 45 puts metadata first and

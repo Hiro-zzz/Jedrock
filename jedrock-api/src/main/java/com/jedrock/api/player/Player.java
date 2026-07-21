@@ -1,5 +1,6 @@
 package com.jedrock.api.player;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.api.entity.Entity;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
@@ -10,12 +11,22 @@ import java.util.UUID;
  * Absolute abstraction over a connected player.
  * Implementations should be extremely thin wrappers.
  * No direct access to packets or network inside this interface.
+ *
+ * <p>A player is also a {@link CommandSender} (it {@code getName()}s, {@code sendMessage()}s and carries
+ * op/permission state), so a command can accept either a player or the console.
  */
-public interface Player extends Entity {
+public interface Player extends Entity, CommandSender {
 
     UUID getUniqueId();
 
+    @Override
     String getName();
+
+    /**
+     * The player's chat prefix from their highest permission group (may carry {@code {color}} markup), or an
+     * empty string if none. Substituted into the chat format as {@code %prefix%}.
+     */
+    String getPrefix();
 
     /**
      * The world the player is currently in.

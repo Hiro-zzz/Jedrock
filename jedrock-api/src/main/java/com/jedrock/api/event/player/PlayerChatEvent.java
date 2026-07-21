@@ -7,13 +7,14 @@ import com.jedrock.api.player.Player;
  * here). <b>Cancellable</b>: cancelling suppresses the broadcast entirely.
  *
  * <p>Both the raw {@link #getMessage() message} and the {@link #getFormat() format} it's wrapped in are
- * mutable, so a listener can edit what was said or restyle how it's shown. The format is a template with a
- * single {@code %s} where the message goes; both are authored in the unified chat markup.
+ * mutable, so a listener can edit what was said or restyle how it's shown. The format is a template with
+ * {@code %s} where the message goes, {@code %name%} for the (escaped) player name, and {@code %prefix%} for
+ * the player's permission-group prefix (empty if none); all authored in the unified chat markup.
  */
 public class PlayerChatEvent extends CancellablePlayerEvent {
 
-    /** The default chat layout: {@code <name> message}. A listener may replace it wholesale. */
-    public static final String DEFAULT_FORMAT = "{gray}<{aqua}%name%{gray}>{reset} %s";
+    /** The default chat layout: {@code [prefix]<name> message}. A listener may replace it wholesale. */
+    public static final String DEFAULT_FORMAT = "%prefix%{gray}<{aqua}%name%{gray}>{reset} %s";
 
     private String message;
     private String format = DEFAULT_FORMAT;

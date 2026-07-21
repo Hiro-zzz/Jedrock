@@ -1,8 +1,8 @@
 package com.jedrock.core.plugin;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.core.JedrockServer;
 import com.jedrock.core.command.Command;
-import com.jedrock.core.player.CorePlayer;
 import org.mozilla.javascript.Function;
 
 import java.util.List;
@@ -57,7 +57,7 @@ final class ScriptCommand implements Command {
     }
 
     @Override
-    public void execute(JedrockServer server, CorePlayer sender, String[] args) {
+    public void execute(JedrockServer server, CommandSender sender, String[] args) {
         manager.callCommand(plugin, handler, sender, args);
     }
 }

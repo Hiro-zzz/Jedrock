@@ -43,3 +43,6 @@ build/
 /jedrock.properties
 # Saved world data (level file + future region files), written at runtime.
 /world/
+# Server operator list and group permissions, written at runtime.
+/ops.txt
+/permissions.txt

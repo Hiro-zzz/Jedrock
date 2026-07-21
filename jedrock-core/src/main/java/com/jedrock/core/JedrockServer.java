@@ -50,6 +50,9 @@ import com.jedrock.core.command.KillCommand;
 import com.jedrock.core.command.ListCommand;
 import com.jedrock.core.command.MeCommand;
 import com.jedrock.core.command.MsgCommand;
+import com.jedrock.core.command.OpCommand;
+import com.jedrock.core.command.DeopCommand;
+import com.jedrock.core.command.PermCommand;
 import com.jedrock.core.command.SayCommand;
 import com.jedrock.core.command.SpawnCommand;
 import com.jedrock.core.command.TeleportCommand;
@@ -63,6 +66,8 @@ import com.jedrock.core.entity.CoreHologram;
 import com.jedrock.core.entity.CorePuppet;
 import com.jedrock.core.entity.PuppetRegistry;
 import com.jedrock.core.inventory.Container;
+import com.jedrock.core.permission.OpList;
+import com.jedrock.core.permission.PermissionManager;
 import com.jedrock.core.plugin.PluginManager;
 import com.jedrock.core.inventory.Cursor;
 import com.jedrock.core.inventory.InventoryClick;
@@ -113,6 +118,10 @@ public class JedrockServer implements Server, ConnectionListener {
     private final GameLoop gameLoop = new GameLoop();
     private final Scheduler scheduler = new Scheduler();
     private final CommandManager commandManager = new CommandManager(this);
+    /** Server operators (name-based), persisted to {@code ops.txt}; an op holds every permission. */
+    private final OpList opList = new OpList(Path.of("ops.txt"));
+    /** Group-based permissions (wildcards, deny, inheritance, prefixes), persisted to {@code permissions.txt}. */
+    private final PermissionManager permissions = new PermissionManager(Path.of("permissions.txt"));
     /** Raw packet taps (the {@code packets} scripting hook); consulted by the network layer via this listener. */
     private final PacketTapRegistry packetTaps = new PacketTapRegistry();
     private final NetworkServer networkServer;
@@ -175,11 +184,24 @@ public class JedrockServer implements Server, ConnectionListener {
         commandManager.register(new ClearCommand());
         commandManager.register(new PuppetCommand());
         commandManager.register(new HologramCommand());
+        commandManager.register(new OpCommand());
+        commandManager.register(new DeopCommand());
+        commandManager.register(new PermCommand());
     }
 
     /** The in-game command registry — used by commands (e.g. {@code /help}) to introspect. */
     public CommandManager getCommandManager() {
         return commandManager;
+    }
+
+    /** The server operator list — used by {@code /op} / {@code /deop} and permission checks. */
+    public OpList getOpList() {
+        return opList;
+    }
+
+    /** The group-based permission system — used by {@code /perm} and by permission checks. */
+    public PermissionManager getPermissions() {
+        return permissions;
     }
 
     @Override
@@ -759,6 +781,7 @@ public class JedrockServer implements Server, ConnectionListener {
         // remembered choice from earlier this run, or the config default for a first join.
         CorePlayer player = new CorePlayer(uuid, username, connection, defaultWorld, spawn,
                 gameModeFor(uuid), eventBus);
+        player.setPermissions(opList, permissions); // isOp/hasPermission/getPrefix resolve against these
 
         playerRegistry.add(player);
         defaultWorld.addPlayer(player);
@@ -1532,7 +1555,8 @@ public class JedrockServer implements Server, ConnectionListener {
         // The name is escaped so an untrusted username (a 0.14 client picks its own; a '_' would
         // otherwise italicise) can't inject markup. The message body is intentionally left raw —
         // rendering it is the documented "players can use {color} / Markdown in chat" feature.
-        String line = format.replace("%name%", ChatText.escape(sender.getName())).replace("%s", body);
+        String line = format.replace("%prefix%", sender.getPrefix())
+                .replace("%name%", ChatText.escape(sender.getName())).replace("%s", body);
         LOGGER.info("[chat] <" + sender.getName() + "> " + body);
         broadcast(line, null); // relay to everyone, including the sender
     }

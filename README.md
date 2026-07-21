@@ -141,11 +141,22 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   ever changes). **In-game commands** work cross-edition — Java sends `/…` straight through as chat, and
   Bedrock is handed an `AvailableCommands` manifest so its client parses the line and sends it back. The
   built-in set: `/help [cmd]`, `/list`, `/tps`, `/say`, `/me`, `/msg`, `/gamemode`, `/tp`, `/tphere`,
-  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`. A deliberately minimal **survival inventory** (36 slots)
+  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/op`, `/deop`, `/perm`. A deliberately minimal **survival inventory** (36 slots)
   tracks only what a survival player mines and places: mining a block drops it into the hotbar, placing
   consumes it, and the changed slot is pushed live so the HUD refreshes. On PE 1.1.5 the player window is
   serialized PMMP-exact (45 slots + a 9-entry hotbar-link array), without which mined items filled storage
   but the on-screen hotbar stayed empty.
+- ✅ **One command surface, unified console and permissions.** A command is written against a
+  `CommandSender` — a player *or* the server console — so the same command runs from chat and from stdin:
+  type `op alice` or `gamemode creative bob` straight into the console (it acts as an operator), and a
+  player-only command like `/spawn` is refused there with a clear message. **Operators** persist to
+  `ops.txt` (an op holds every permission; the console is always an op, so the first `/op` is granted from
+  the console). On top sits a **native group permission system** (`permissions.txt`): named groups with
+  inheritance, a default group new players fall into, and permission nodes supporting `*` / `a.b.*`
+  wildcards and `-node` explicit deny (deny wins). Each group can carry a chat **prefix** (`{red}[Admin] `)
+  shown via the `%prefix%` slot in the chat format. Manage it live with `/perm` (create/delete groups, grant
+  or deny nodes, set inheritance, prefix and the default group, assign players) — every change persists.
+  Guarded commands are gated on their node, and `/help` hides what the sender can't run.
 - ✅ **Damage — fall, void and PvP, cross-edition.** Survival players take damage, all funnelled through one
   server-authoritative path. **Fall damage** works on every edition: Java and PE 0.14 have no client
   fall-report packet, so the server tracks the descent and applies it on landing; PE 1.1.5 reports its own
@@ -179,10 +190,14 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   comes with the scripting API.
 
 - ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
-  backend, not the compiled core: a script gets `server` / `events` / `console` and wires behaviour with
-  `events.on('PlayerJoin', e => …)`, the handler receiving the real event to read and cancel. Every one of
-  the events above is scriptable by name; a saved edit reloads within a second. Rhino (~1.5 MB, pure Java,
-  zero transitive deps) was chosen over GraalJS for weight; it lives only in `core`. See `plugins/example.js`.
+  backend, not the compiled core: a script gets six globals — `server` / `events` / `scheduler` /
+  `commands` / `packets` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`, the
+  handler receiving the real event to read and cancel. Every one of the events above is scriptable by name;
+  scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule work
+  (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too —
+  `player.isOp()`, `player.hasPermission('node')`, `player.getPrefix()`. A saved edit reloads within a
+  second. Rhino (~1.5 MB, pure Java, zero transitive deps) was chosen over GraalJS for weight; it lives only
+  in `core`. See `plugins/example.js`.
 
 Not yet: a real chest <em>window</em> on Bedrock 1.1.5 (click-transfer is the interim), cross-edition skin
 fidelity (a signed-texture limit, see above), knockback (deliberately — the server simulates no physics).
@@ -395,6 +410,10 @@ Once running, the server reads commands on stdin (headless-safe — it runs fine
 | `gc` | request a GC, then print status |
 | `stop` | graceful shutdown |
 
+Anything the console doesn't recognise is run as an **operator** through the in-game command registry, so
+every `/`-command works from stdin too — e.g. `op alice`, `gamemode creative bob`, `perm user alice add mod`
+(a player-only command like `spawn` is refused with a clear message).
+
 Extended debug is **off by default** — the `LOGGER.debug(...)` calls never invoke their message
 supplier, so they cost nothing. Turn it on at startup with `-Djedrock.debug=all` (or scoped, e.g.
 `-Djedrock.debug=pe,chunk`), or at runtime with the `debug` command. A periodic status line can be
@@ -455,7 +474,8 @@ simulation stays out (see non-goals).
   still wants a nudge against a live client.)
 - **Final touch-ups.** Smaller polish, mostly unlocked by the API: **held-item / equipment relay** (show
   what a player holds and wears, rendering the specific item-use animation); a fuller **command framework**
-  (typed args, tab-completion, permissions — the 14 built-ins already prove the cross-edition path); the
+  (typed args and tab-completion — a `CommandSender` abstraction, a unified console and an op + group
+  **permission system** already landed); the
   **illusion toolkit** (titles / action bars, scoreboards, boss bars, particles, sounds, Bedrock forms);
   and a **sharper judge** (per-axis limits, interaction ray-casts).
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no

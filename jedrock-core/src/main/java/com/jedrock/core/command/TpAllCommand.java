@@ -1,5 +1,6 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.world.Location;
 import com.jedrock.core.JedrockServer;
@@ -28,11 +29,22 @@ public final class TpAllCommand implements Command {
     }
 
     @Override
-    public void execute(JedrockServer server, CorePlayer sender, String[] args) {
-        Location here = sender.getLocation();
+    public boolean playerOnly() {
+        return true;
+    }
+
+    @Override
+    public String permission() {
+        return "jedrock.command.tpall";
+    }
+
+    @Override
+    public void execute(JedrockServer server, CommandSender sender, String[] args) {
+        CorePlayer self = (CorePlayer) sender; // playerOnly() guarantees a player
+        Location here = self.getLocation();
         int moved = 0;
         for (Player p : server.getPlayers()) {
-            if (p == sender || !(p instanceof CorePlayer target)) {
+            if (p == self || !(p instanceof CorePlayer target)) {
                 continue;
             }
             Location facing = target.getLocation();

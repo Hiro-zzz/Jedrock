@@ -1,7 +1,7 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.core.JedrockServer;
-import com.jedrock.core.player.CorePlayer;
 
 import java.util.List;
 
@@ -28,7 +28,12 @@ public final class SayCommand implements Command {
     }
 
     @Override
-    public void execute(JedrockServer server, CorePlayer sender, String[] args) {
+    public String permission() {
+        return "jedrock.command.say";
+    }
+
+    @Override
+    public void execute(JedrockServer server, CommandSender sender, String[] args) {
         if (args.length == 0) {
             sender.sendMessage("{red}Usage: " + usage());
             return;

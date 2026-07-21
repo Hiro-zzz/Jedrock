@@ -1,5 +1,6 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.api.entity.EntityType;
 import com.jedrock.api.entity.PuppetEntity;
 import com.jedrock.api.entity.PuppetFlag;
@@ -36,21 +37,32 @@ public final class PuppetCommand implements Command {
     }
 
     @Override
-    public void execute(JedrockServer server, CorePlayer sender, String[] args) {
+    public boolean playerOnly() {
+        return true;
+    }
+
+    @Override
+    public String permission() {
+        return "jedrock.command.puppet";
+    }
+
+    @Override
+    public void execute(JedrockServer server, CommandSender sender, String[] args) {
+        CorePlayer self = (CorePlayer) sender; // playerOnly() guarantees a player
         if (args.length == 0) {
             sender.sendMessage("{red}Usage: " + usage());
             return;
         }
         switch (args[0].toLowerCase(java.util.Locale.ROOT)) {
-            case "spawn" -> spawn(server, sender, args);
-            case "move" -> move(server, sender, args);
-            case "look" -> look(server, sender, args);
-            case "name" -> name(server, sender, args);
-            case "flag" -> flag(server, sender, args);
-            case "swing" -> animate(server, sender, args, false);
-            case "hurt" -> animate(server, sender, args, true);
-            case "remove", "kill" -> remove(server, sender, args);
-            case "list" -> list(server, sender);
+            case "spawn" -> spawn(server, self, args);
+            case "move" -> move(server, self, args);
+            case "look" -> look(server, self, args);
+            case "name" -> name(server, self, args);
+            case "flag" -> flag(server, self, args);
+            case "swing" -> animate(server, self, args, false);
+            case "hurt" -> animate(server, self, args, true);
+            case "remove", "kill" -> remove(server, self, args);
+            case "list" -> list(server, self);
             default -> sender.sendMessage("{red}Usage: " + usage());
         }
     }
