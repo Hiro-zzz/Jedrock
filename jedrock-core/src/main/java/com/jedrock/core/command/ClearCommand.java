@@ -1,5 +1,6 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
 import com.jedrock.core.JedrockServer;
@@ -32,8 +33,13 @@ public final class ClearCommand implements Command {
     }
 
     @Override
-    public void execute(JedrockServer server, CorePlayer sender, String[] args) {
-        CorePlayer target = sender;
+    public String permission() {
+        return "jedrock.command.clear";
+    }
+
+    @Override
+    public void execute(JedrockServer server, CommandSender sender, String[] args) {
+        CorePlayer target;
         if (args.length >= 1) {
             Optional<Player> found = server.getPlayer(args[0]);
             if (found.isEmpty() || !(found.get() instanceof CorePlayer cp)) {
@@ -41,6 +47,11 @@ public final class ClearCommand implements Command {
                 return;
             }
             target = cp;
+        } else if (sender instanceof CorePlayer self) {
+            target = self;
+        } else {
+            sender.sendMessage("{red}From the console, name a player: {white}" + usage());
+            return;
         }
         if (target.getGameMode() != GameMode.SURVIVAL) {
             sender.sendMessage("{red}Only a survival inventory can be cleared.");

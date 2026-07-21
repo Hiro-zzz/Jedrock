@@ -1,5 +1,6 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.world.Location;
 import com.jedrock.core.JedrockServer;
@@ -37,8 +38,19 @@ public final class TeleportCommand implements Command {
     }
 
     @Override
-    public void execute(JedrockServer server, CorePlayer sender, String[] args) {
-        Location here = sender.getLocation();
+    public boolean playerOnly() {
+        return true;
+    }
+
+    @Override
+    public String permission() {
+        return "jedrock.command.tp";
+    }
+
+    @Override
+    public void execute(JedrockServer server, CommandSender sender, String[] args) {
+        CorePlayer self = (CorePlayer) sender; // playerOnly() guarantees a player
+        Location here = self.getLocation();
         if (args.length == 1) {
             Optional<Player> found = server.getPlayer(args[0]);
             if (found.isEmpty()) {
@@ -46,7 +58,7 @@ public final class TeleportCommand implements Command {
                 return;
             }
             Location dest = found.get().getLocation();
-            server.teleport(sender, new Location(sender.getWorld(), dest.x(), dest.y(), dest.z(),
+            server.teleport(self, new Location(self.getWorld(), dest.x(), dest.y(), dest.z(),
                     here.yaw(), here.pitch()));
             sender.sendMessage("{green}Teleported to {white}" + ChatText.escape(found.get().getName()));
         } else if (args.length == 3) {
@@ -59,7 +71,7 @@ public final class TeleportCommand implements Command {
                 sender.sendMessage("{red}Coordinates must be numbers: " + usage());
                 return;
             }
-            server.teleport(sender, new Location(sender.getWorld(), x, y, z, here.yaw(), here.pitch()));
+            server.teleport(self, new Location(self.getWorld(), x, y, z, here.yaw(), here.pitch()));
             sender.sendMessage("{green}Teleported to {white}" + fmt(x) + " " + fmt(y) + " " + fmt(z));
         } else {
             sender.sendMessage("{red}Usage: " + usage());

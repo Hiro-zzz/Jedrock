@@ -1,5 +1,6 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.world.Location;
 import com.jedrock.core.JedrockServer;
@@ -31,7 +32,18 @@ public final class TpHereCommand implements Command {
     }
 
     @Override
-    public void execute(JedrockServer server, CorePlayer sender, String[] args) {
+    public boolean playerOnly() {
+        return true;
+    }
+
+    @Override
+    public String permission() {
+        return "jedrock.command.tphere";
+    }
+
+    @Override
+    public void execute(JedrockServer server, CommandSender sender, String[] args) {
+        CorePlayer self = (CorePlayer) sender; // playerOnly() guarantees a player
         if (args.length != 1) {
             sender.sendMessage("{red}Usage: " + usage());
             return;
@@ -41,11 +53,11 @@ public final class TpHereCommand implements Command {
             sender.sendMessage("{red}Player not found: {white}" + ChatText.escape(args[0]));
             return;
         }
-        if (target == sender) {
+        if (target == self) {
             sender.sendMessage("{red}You can't teleport yourself to yourself.");
             return;
         }
-        Location here = sender.getLocation();
+        Location here = self.getLocation();
         Location targetFacing = target.getLocation();
         server.teleport(target, new Location(target.getWorld(), here.x(), here.y(), here.z(),
                 targetFacing.yaw(), targetFacing.pitch()));

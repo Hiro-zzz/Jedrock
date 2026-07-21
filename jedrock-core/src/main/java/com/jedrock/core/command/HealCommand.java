@@ -1,5 +1,6 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.api.player.Player;
 import com.jedrock.core.JedrockServer;
 import com.jedrock.core.player.CorePlayer;
@@ -29,8 +30,13 @@ public final class HealCommand implements Command {
     }
 
     @Override
-    public void execute(JedrockServer server, CorePlayer sender, String[] args) {
-        CorePlayer target = sender;
+    public String permission() {
+        return "jedrock.command.heal";
+    }
+
+    @Override
+    public void execute(JedrockServer server, CommandSender sender, String[] args) {
+        CorePlayer target;
         if (args.length >= 1) {
             Optional<Player> found = server.getPlayer(args[0]);
             if (found.isEmpty() || !(found.get() instanceof CorePlayer cp)) {
@@ -38,6 +44,11 @@ public final class HealCommand implements Command {
                 return;
             }
             target = cp;
+        } else if (sender instanceof CorePlayer self) {
+            target = self;
+        } else {
+            sender.sendMessage("{red}From the console, name a player: {white}" + usage());
+            return;
         }
         if (!server.heal(target)) {
             sender.sendMessage("{red}" + (target == sender ? "You have" : ChatText.escape(target.getName())

@@ -1,5 +1,6 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.api.world.Location;
 import com.jedrock.core.JedrockServer;
 import com.jedrock.core.player.CorePlayer;
@@ -23,9 +24,15 @@ public final class SpawnCommand implements Command {
     }
 
     @Override
-    public void execute(JedrockServer server, CorePlayer sender, String[] args) {
-        Location spawn = sender.getWorld().getSpawnLocation();
-        server.teleport(sender, spawn);
-        sender.sendMessage("{green}Teleported to spawn.");
+    public boolean playerOnly() {
+        return true;
+    }
+
+    @Override
+    public void execute(JedrockServer server, CommandSender sender, String[] args) {
+        CorePlayer self = (CorePlayer) sender; // playerOnly() guarantees a player
+        Location spawn = self.getWorld().getSpawnLocation();
+        server.teleport(self, spawn);
+        self.sendMessage("{green}Teleported to spawn.");
     }
 }

@@ -174,6 +174,9 @@ commands.register('test', function (player, args) {
         + '{gray} gamemode={white}' + player.getGameMode().name());
     player.sendMessage(' pose: sneak={white}' + player.isSneaking()
         + '{gray} sprint={white}' + player.isSprinting() + '{gray} useItem={white}' + player.isUsingItem());
+    player.sendMessage(' op={white}' + player.isOp()
+        + '{gray} prefix={white}"' + player.getPrefix() + '"'
+        + '{gray} canTp={white}' + player.hasPermission('jedrock.command.tp'));
 
     player.sendMessage('{gold}== Location ==');
     player.sendMessage(' at {white}' + loc.getBlockX() + ',' + loc.getBlockY() + ',' + loc.getBlockZ()
@@ -225,6 +228,17 @@ commands.register('testspawn', function (player, args) {
 commands.register('run', function (player, args) {
     if (args.length === 0) { player.sendMessage('{red}Usage: /run <command>'); return; }
     server.dispatchCommand(player, args.join(' '));   // e.g. /run test
+});
+
+// /whoami — report permission state, and self-gate a "secret" on a custom node. Scripts can't declare a
+// permission on the command itself yet, but a handler can check any node with player.hasPermission(...);
+// grant it with:  /perm group <g> add example.secret   (or op the player, since an op holds every node).
+commands.register('whoami', function (player, args) {
+    player.sendMessage('{gold}' + player.getPrefix() + '{white}' + player.getName()
+        + '{gray} — op={white}' + player.isOp());
+    player.sendMessage(player.hasPermission('example.secret')
+        ? '{green}You have {white}example.secret{green} — here is the secret: {white}42'
+        : '{red}You lack {white}example.secret{red} (try {white}/perm group default add example.secret{red}).');
 });
 
 // /testtimer — one-shot + repeating scheduler + a setTimeout (ms) demo.

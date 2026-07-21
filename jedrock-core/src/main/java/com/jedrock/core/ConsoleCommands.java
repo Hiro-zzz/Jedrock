@@ -1,6 +1,7 @@
 package com.jedrock.core;
 
 import com.jedrock.api.player.Player;
+import com.jedrock.core.command.ConsoleSender;
 import com.jedrock.core.player.CorePlayer;
 import com.jedrock.utils.Debug;
 import com.jedrock.utils.JLogger;
@@ -77,15 +78,19 @@ final class ConsoleCommands implements Runnable {
             case "kill" -> affect(args, "kill", server::kill, "killed", "is in creative (no damage)");
             case "heal" -> affect(args, "heal", server::heal, "healed", "is in creative (no health)");
             case "plugins", "pl" -> plugins(args);
-            case "help", "?" -> LOGGER.info("commands: status | players | say <msg> | "
+            case "help", "?" -> LOGGER.info("console: status | players | say <msg> | "
                     + "kick <player> [reason] | kill <player> | heal <player> | "
-                    + "plugins [reload] | debug [all|off|<tags>] | gc | stop | help");
+                    + "plugins [reload] | debug [all|off|<tags>] | gc | stop | help  "
+                    + "(plus every in-game command, e.g. op / gamemode / tp — run as an operator)");
             case "stop", "shutdown", "exit" -> {
                 LOGGER.info("stopping...");
                 server.shutdown();
                 System.exit(0);
             }
-            default -> LOGGER.info("unknown command '" + cmd + "' — try 'help'");
+            // Not a console-native command — run it through the in-game registry as the console, which is
+            // always an operator. So op / deop / gamemode / spawn / … work from stdin too (a player-only
+            // command like /spawn is rejected with a clear message).
+            default -> server.getCommandManager().dispatch(ConsoleSender.INSTANCE, "/" + line);
         }
     }
 

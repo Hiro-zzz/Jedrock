@@ -1,13 +1,17 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Dimension;
+import com.jedrock.core.permission.OpList;
 import com.jedrock.core.player.CorePlayer;
 import com.jedrock.core.world.CoreWorld;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -22,6 +26,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * command uses it only when a second argument names another player).
  */
 class CommandTest {
+
+    @TempDir
+    Path dir;
 
     private final CoreWorld world = new CoreWorld("world", Dimension.OVERWORLD);
 
@@ -122,6 +129,51 @@ class CommandTest {
         assertTrue(conn.messages.get(0).toLowerCase().contains("survival"), conn.messages.get(0));
     }
 
+    @Test
+    void permissionGuardBlocksNonOpButAllowsConsole() {
+        CommandManager cm = new CommandManager(null);
+        GuardedCommand guarded = new GuardedCommand("secret", "jedrock.command.secret", false);
+        cm.register(guarded);
+
+        RecordingConnection conn = new RecordingConnection();
+        cm.dispatch(player(conn), "/secret");          // a plain player is not an op
+        assertEquals(0, guarded.calls, "a non-op must be blocked");
+        assertTrue(conn.messages.get(0).toLowerCase().contains("permission"), conn.messages.get(0));
+
+        cm.dispatch(ConsoleSender.INSTANCE, "/secret"); // the console is always an op
+        assertEquals(1, guarded.calls, "the console runs the guarded command");
+    }
+
+    @Test
+    void opPlayerPassesPermissionGuard() {
+        CommandManager cm = new CommandManager(null);
+        GuardedCommand guarded = new GuardedCommand("secret", "jedrock.command.secret", false);
+        cm.register(guarded);
+
+        RecordingConnection conn = new RecordingConnection();
+        CorePlayer op = player(conn);
+        OpList ops = new OpList(dir.resolve("ops.txt"));
+        ops.add("Tester");                              // the player() helper names everyone "Tester"
+        op.setPermissions(ops, null); // op bypasses group checks, so a null manager is fine here
+
+        cm.dispatch(op, "/secret");
+        assertEquals(1, guarded.calls, "an op passes the guard");
+    }
+
+    @Test
+    void playerOnlyCommandRejectsConsole() {
+        CommandManager cm = new CommandManager(null);
+        GuardedCommand playerCmd = new GuardedCommand("here", null, true);
+        cm.register(playerCmd);
+
+        cm.dispatch(ConsoleSender.INSTANCE, "/here");
+        assertEquals(0, playerCmd.calls, "the console can't run a player-only command");
+
+        RecordingConnection conn = new RecordingConnection();
+        cm.dispatch(player(conn), "/here");
+        assertEquals(1, playerCmd.calls, "a player can");
+    }
+
     // ===== Test doubles =====
 
     /** A command that records how it was invoked. */
@@ -140,9 +192,34 @@ class CommandTest {
         @Override public List<String> aliases() { return aliases; }
         @Override public String description() { return "test"; }
         @Override public String usage() { return "/" + name; }
-        @Override public void execute(com.jedrock.core.JedrockServer server, CorePlayer sender, String[] args) {
+        @Override public void execute(com.jedrock.core.JedrockServer server,
+                                      CommandSender sender, String[] args) {
             calls++;
             lastArgs = args;
+        }
+    }
+
+    /** A command with a configurable permission node and player-only flag, to exercise the manager's gates. */
+    private static final class GuardedCommand implements Command {
+        final String name;
+        final String permission;
+        final boolean playerOnly;
+        int calls;
+
+        GuardedCommand(String name, String permission, boolean playerOnly) {
+            this.name = name;
+            this.permission = permission;
+            this.playerOnly = playerOnly;
+        }
+
+        @Override public String name() { return name; }
+        @Override public String description() { return "test"; }
+        @Override public String usage() { return "/" + name; }
+        @Override public String permission() { return permission; }
+        @Override public boolean playerOnly() { return playerOnly; }
+        @Override public void execute(com.jedrock.core.JedrockServer server,
+                                      CommandSender sender, String[] args) {
+            calls++;
         }
     }
 

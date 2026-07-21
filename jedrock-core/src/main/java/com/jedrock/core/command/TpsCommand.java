@@ -1,7 +1,7 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.core.JedrockServer;
-import com.jedrock.core.player.CorePlayer;
 
 import java.util.List;
 
@@ -32,7 +32,7 @@ public final class TpsCommand implements Command {
     }
 
     @Override
-    public void execute(JedrockServer server, CorePlayer sender, String[] args) {
+    public void execute(JedrockServer server, CommandSender sender, String[] args) {
         sender.sendMessage("{gray}" + server.getStatus().summary());
     }
 }

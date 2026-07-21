@@ -1,7 +1,7 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.core.JedrockServer;
-import com.jedrock.core.player.CorePlayer;
 import com.jedrock.utils.text.ChatText;
 
 /**
@@ -26,19 +26,23 @@ public final class HelpCommand implements Command {
     }
 
     @Override
-    public void execute(JedrockServer server, CorePlayer sender, String[] args) {
+    public void execute(JedrockServer server, CommandSender sender, String[] args) {
         if (args.length >= 1) {
             detail(server, sender, args[0]);
             return;
         }
         sender.sendMessage("{gold}{bold}Jedrock commands:");
         for (Command command : server.getCommandManager().commands()) {
+            // Hide commands the sender can't run, so /help reflects what's actually available to them.
+            if (command.permission() != null && !sender.hasPermission(command.permission())) {
+                continue;
+            }
             sender.sendMessage("{yellow}" + command.usage() + " {gray}— " + command.description());
         }
     }
 
     /** Show one command's usage, description and aliases, or an error if the label is unknown. */
-    private void detail(JedrockServer server, CorePlayer sender, String label) {
+    private void detail(JedrockServer server, CommandSender sender, String label) {
         Command command = server.getCommandManager().get(label);
         if (command == null) {
             sender.sendMessage("{red}Unknown command: {white}/" + ChatText.escape(label));

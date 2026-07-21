@@ -1,6 +1,7 @@
 package com.jedrock.core.plugin;
 
 import com.jedrock.api.Server;
+import com.jedrock.api.command.CommandSender;
 import com.jedrock.api.event.EventBus;
 import com.jedrock.core.command.Command;
 import com.jedrock.core.command.CommandManager;
@@ -361,7 +362,7 @@ public final class PluginManager {
      * {@link com.jedrock.core.command.CommandManager#dispatch}, which logs it and tells the sender the command
      * failed. That is the command contract, and it keeps errors visible to whoever ran the command.
      */
-    void callCommand(ScriptPlugin plugin, Function handler, CorePlayer sender, String[] args) {
+    void callCommand(ScriptPlugin plugin, Function handler, CommandSender sender, String[] args) {
         scriptLock.lock();
         try {
             Context cx = contextFactory.enterContext();
