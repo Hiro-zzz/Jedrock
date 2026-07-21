@@ -23,8 +23,12 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import static com.jedrock.network.pe.McpeProtocol.*;
@@ -311,19 +315,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
 
     @Override
     public void sendBlockChange(int x, int y, int z, int state) {
-        // Typed UpdateBlock (0x16): one block instead of re-sending the whole affected chunk. The
-        // client applies it if it has the chunk loaded and ignores it otherwise. Block position is
-        // x/z zigzag-varint and y unsigned-varint (same layout the inbound edit decoder reads); the
-        // canonical state splits into a legacy id and 4-bit meta, and the flags request a
-        // neighbour-aware re-render.
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_UPDATE_BLOCK);
-            ByteBufUtils.writeSignedVarInt(b, x);
-            ByteBufUtils.writeVarInt(b, y);
-            ByteBufUtils.writeSignedVarInt(b, z);
-            ByteBufUtils.writeVarInt(b, (state >> 4) & 0xFF);                            // legacy block id
-            ByteBufUtils.writeVarInt(b, (UPDATE_BLOCK_FLAG_ALL << 4) | (state & 0xF));   // (flags << 4) | meta
-        });
+        writeUpdateBlock(x, y, z, state);
         // A chest is a block-entity, and the retail 1.1.5 client materializes it ONLY from chunk data —
         // a standalone BlockEntityData won't do (verified: it still crashes on open). A freshly placed
         // chest isn't in the already-sent chunk, so re-send that whole column now that the world holds the
@@ -334,6 +326,24 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
                 && chunkView.isLoaded(x >> 4, z >> 4)) {
             sendChunk(x >> 4, z >> 4);
         }
+    }
+
+    /**
+     * Write one typed UpdateBlock (0x16): a single block instead of re-sending the whole chunk. Position is
+     * x/z zigzag-varint and y unsigned-varint (the layout the inbound edit decoder reads); the canonical
+     * state splits into a legacy id and 4-bit meta. Used for a normal (server-authored) edit the client has
+     * no opinion about — the retail 1.1.5 client honours those, but NOT a correction to a cell it edited
+     * itself (see {@link #resyncAround}, which re-sends the chunk instead).
+     */
+    private void writeUpdateBlock(int x, int y, int z, int state) {
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_UPDATE_BLOCK);
+            ByteBufUtils.writeSignedVarInt(b, x);
+            ByteBufUtils.writeVarInt(b, y);
+            ByteBufUtils.writeSignedVarInt(b, z);
+            ByteBufUtils.writeVarInt(b, (state >> 4) & 0xFF);                            // legacy block id
+            ByteBufUtils.writeVarInt(b, (UPDATE_BLOCK_FLAG_ALL << 4) | (state & 0xF));   // (flags << 4) | meta
+        });
     }
 
     @Override
@@ -579,13 +589,91 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         }
     }
 
-    // Placement debounce: a single click on the Win10 1.1.5 client emits SEVERAL UseItem placements (at
-    // different cells — 0.14 sends one, so this is purely the 1.1.5 client). Collapse a burst to its first
-    // block by resetting the timer on EVERY attempt: as long as the shots keep arriving within the window,
-    // they're all treated as one click. A genuinely new click (after a gap) places again. Tunable.
-    private long lastPlaceAttemptNanos;
-    private static final long PLACE_DEBOUNCE_NANOS =
-            Long.getLong("jedrock.pe.placeDebounceMs", 300L) * 1_000_000L;
+    /**
+     * Break a block for a creative instant-mine, debounced. The 1.1.5 client fires START_BREAK then a
+     * stream of CONTINUE_BREAK on the same cell; without this each would post its own onBlockChange —
+     * spamming BlockBreakEvent (and, near a protected region, a flood of "cancel" corrections that fight
+     * the client's optimistic view and leave it desynced). breakDebounce collapses the burst to one edit.
+     */
+    private void breakBlock(int x, int y, int z) {
+        long now = System.nanoTime();
+        long gapMs = (now - lastEditLogNanos) / 1_000_000L;
+        lastEditLogNanos = now;
+        boolean applied = breakDebounce.accept(x, y, z, now);
+        LOGGER.debug(() -> String.format("[PE] break target=%d,%d,%d gap=%dms %s",
+                x, y, z, gapMs, applied ? "APPLIED" : "dropped"));
+        if (applied) {
+            listener.onBlockChange(this, x, y, z, Blocks.AIR);
+            // The instant-break client also optimistically breaks the block the ray continues onto (a
+            // neighbour it never told the server about). Re-assert the real neighbourhood so that ghost
+            // is restored and one break leaves one hole. (1.1.5 only; runs after the world is updated.)
+            resyncAround(x, y, z);
+        }
+    }
+
+    // Ghost correction: chunks touched by this editor's edits, pending a re-send, plus the armed
+    // trailing-edge flush. See resyncAround for why a chunk re-send (not an UpdateBlock) and why trailing.
+    private final Set<Long> dirtyResyncChunks = new HashSet<>();
+    private ScheduledFuture<?> resyncFlush;
+    private static final long RESYNC_DELAY_MS = Long.getLong("jedrock.pe.resyncDelayMs", 180L);
+
+    /**
+     * Schedule a correction of any optimistic ghost this editor drew near {@code x,y,z} by re-sending the
+     * affected chunk — but only once the edits settle.
+     *
+     * <p>The retail 1.1.5 client draws its own edits optimistically before the server replies — the
+     * "staircase" second block of a placement, the block behind an instant-break, a break the server
+     * rejected (spawn-protected / out of reach) — and it does <b>not</b> honour a standalone
+     * {@code UpdateBlock} that contradicts one of its own edited cells, not even with the PRIORITY flag
+     * (client-verified). The one thing it always trusts is <b>chunk data</b> (the same trait that makes
+     * chests need a chunk tile), so the only reliable correction is to re-send the whole column.
+     *
+     * <p>Crucially the re-send must be <b>trailing-edge</b>: sending mid-burst carries a world state
+     * <em>older</em> than the client's own in-flight optimistic edits (which the server hasn't received
+     * yet), so a just-broken block would reappear. Instead we mark the chunk dirty and (re)arm one flush
+     * that fires only after {@code RESYNC_DELAY_MS} of quiet — by then the server has caught up, so the
+     * chunk reflects the final state, and a whole burst costs a single re-send. Runs on the session's
+     * event loop (same thread as inbound), so the dirty set needs no locking. (1.1.5 only.)
+     */
+    private void resyncAround(int x, int y, int z) {
+        int cx = x >> 4, cz = z >> 4;
+        if (chunkView == null || !chunkView.isLoaded(cx, cz)) {
+            return; // the client isn't showing this chunk — nothing to correct
+        }
+        dirtyResyncChunks.add(((long) cx << 32) | (cz & 0xFFFFFFFFL));
+        if (resyncFlush != null) {
+            resyncFlush.cancel(false); // push the flush out to the trailing edge of the burst
+        }
+        resyncFlush = session.getEventLoop().schedule(this::flushResync, RESYNC_DELAY_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /** Re-send every chunk this editor touched since the last flush, now that its edits have settled. */
+    private void flushResync() {
+        resyncFlush = null;
+        if (!loggedIn || chunkView == null) {
+            dirtyResyncChunks.clear();
+            return;
+        }
+        for (long key : dirtyResyncChunks) {
+            int cx = (int) (key >> 32), cz = (int) key;
+            if (chunkView.isLoaded(cx, cz)) {
+                sendChunk(cx, cz);
+            }
+        }
+        dirtyResyncChunks.clear();
+    }
+
+    // Edit debounce: a single action on the Win10 1.1.5 client emits SEVERAL packets (0.14 sends one, so
+    // this is purely the 1.1.5 client). PeEditDebounce collapses each burst to one edit while letting a
+    // steady stream of deliberate edits through. Placement double-fires as a "staircase" of distinct cells
+    // (burst rule); a creative break double-fires as START + a CONTINUE stream on the same cell (same-cell
+    // rule only, so fast-mining distinct blocks isn't dropped). Tunable via -Djedrock.pe.*Ms.
+    private final PeEditDebounce placeDebounce = new PeEditDebounce();
+    private final PeEditDebounce breakDebounce = PeEditDebounce.forBreak();
+
+    // Diagnostics: wall-clock of the last inbound edit, so the debug log can show the inter-arrival gap
+    // (the tell for whether the 1.1.5 double-fire is a tight burst or spaced-out taps). -Djedrock.debug=pe.
+    private long lastEditLogNanos;
 
     /** The player's currently selected hotbar slot (0-8), tracked from MobEquipment — the "held" item for
      *  the 1.1.5 click-transfer chest deposit. */
@@ -606,20 +694,24 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             return; // a chest — click-transfer handled, no placement
         }
         PeBlockEditDecoder.BlockEdit placement = use.placement();
-        if (placement != null) {
-            long now = System.nanoTime();
-            long sinceMs = (now - lastPlaceAttemptNanos) / 1_000_000L;
-            boolean withinBurst = now - lastPlaceAttemptNanos < PLACE_DEBOUNCE_NANOS;
-            lastPlaceAttemptNanos = now; // reset on every attempt, so a whole burst collapses to its first
-            if (withinBurst) {
-                LOGGER.debug(() -> "[PE] placement debounced (+" + sinceMs + "ms) @ "
-                        + placement.x() + "," + placement.y() + "," + placement.z());
-                return; // still inside the click's burst — only the first shot places
-            }
-            LOGGER.debug(() -> "[PE] placement (+" + sinceMs + "ms) @ "
-                    + placement.x() + "," + placement.y() + "," + placement.z());
+        if (placement == null) {
+            return; // not a placeable block (e.g. a right-click with a tool) — nothing was drawn
         }
-        applyEdit(placement);
+        long now = System.nanoTime();
+        long gapMs = (now - lastEditLogNanos) / 1_000_000L;
+        lastEditLogNanos = now;
+        boolean applied = placeDebounce.accept(placement.x(), placement.y(), placement.z(), now);
+        LOGGER.debug(() -> String.format(
+                "[PE] place clicked=%d,%d,%d target=%d,%d,%d gap=%dms %s",
+                use.x(), use.y(), use.z(), placement.x(), placement.y(), placement.z(),
+                gapMs, applied ? "APPLIED" : "dropped"));
+        if (applied) {
+            applyEdit(placement);
+        }
+        // Either way, correct the client's optimistic view: a dropped shot is the "staircase" ghost block
+        // the client already drew, and even an applied one leaves its next-cell prediction as a ghost. The
+        // resync re-asserts the real neighbourhood so a single click leaves a single block. (1.1.5 only.)
+        resyncAround(placement.x(), placement.y(), placement.z());
     }
 
     /**
@@ -704,21 +796,22 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         switch (a.action()) {
             case ACTION_START_BREAK -> {
                 if (instantBreak) {
-                    listener.onBlockChange(this, a.x(), a.y(), a.z(), Blocks.AIR);
+                    breakBlock(a.x(), a.y(), a.z());
                 } else {
                     pendingBreak = packBlock(a.x(), a.y(), a.z()); // remember; break when mining finishes
                 }
             }
             case ACTION_CONTINUE_BREAK -> {
                 if (instantBreak) {
-                    listener.onBlockChange(this, a.x(), a.y(), a.z(), Blocks.AIR);
+                    breakBlock(a.x(), a.y(), a.z());
                 }
             }
             case ACTION_STOP_BREAK -> {
                 if (!instantBreak && pendingBreak != NO_BREAK) {
-                    listener.onBlockChange(this, unpackX(pendingBreak), unpackY(pendingBreak),
-                            unpackZ(pendingBreak), Blocks.AIR);
+                    int bx = unpackX(pendingBreak), by = unpackY(pendingBreak), bz = unpackZ(pendingBreak);
+                    listener.onBlockChange(this, bx, by, bz, Blocks.AIR);
                     pendingBreak = NO_BREAK;
+                    resyncAround(bx, by, bz); // erase any optimistic ghost on the neighbouring block
                 }
             }
             case ACTION_ABORT_BREAK -> pendingBreak = NO_BREAK; // mining cancelled — leave the block
