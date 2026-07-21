@@ -249,6 +249,25 @@ commands.register('title', function (player, args) {
     player.sendActionBar('{aqua}action bar: {white}' + player.getName());
 });
 
+// /inv — exercise the scripting inventory API (survival: give / set / count / remove / clear).
+commands.register('inv', function (player, args) {
+    var stone = Blocks.state(Blocks.STONE, 0);
+    var glass = Blocks.state(Blocks.GLASS, 0);
+    var gaveStone = player.giveItem(stone, 32);          // give 32 stone (returns how many fit)
+    player.setItem(8, glass, 5);                         // put 5 glass in the last hotbar slot
+    player.sendMessage('{gold}Inventory API:');
+    player.sendMessage(' gave {white}' + gaveStone + '{gray} stone; slot 8 = {white}'
+        + player.getItem(8) + '{gray}×{white}' + player.getItemCount(8));
+    player.sendMessage(' stone count: {white}' + player.countItem(stone)
+        + '{gray}; hasGlass={white}' + player.hasItem(glass));
+    if (args[0] === 'clear') {
+        player.clearInventory();
+        player.sendMessage('{green}Inventory cleared.');
+    } else {
+        player.sendMessage('{gray}(run {white}/inv clear{gray} to empty it)');
+    }
+});
+
 // /testtimer — one-shot + repeating scheduler + a setTimeout (ms) demo.
 commands.register('testtimer', function (player, args) {
     player.sendMessage('{gray}now; +1s (setTimeout); then 3 ticks of a timer…');

@@ -167,6 +167,81 @@ public final class CorePlayer implements Player {
         connection.setInventory(inventory.states(), inventory.counts());
     }
 
+    // ===== Inventory API (scripting-facing; operates on the 36 storage slots 0-35) =====
+
+    @Override
+    public int getInventorySize() {
+        return STORAGE_SLOTS;
+    }
+
+    @Override
+    public int getItem(int slot) {
+        return (slot >= 0 && slot < STORAGE_SLOTS) ? inventory.stateAt(slot) : 0;
+    }
+
+    @Override
+    public int getItemCount(int slot) {
+        return (slot >= 0 && slot < STORAGE_SLOTS) ? inventory.countAt(slot) : 0;
+    }
+
+    @Override
+    public void setItem(int slot, int state, int count) {
+        if (slot < 0 || slot >= STORAGE_SLOTS) {
+            return;
+        }
+        inventory.set(slot, state, count);
+        syncSlot(slot);
+    }
+
+    @Override
+    public int giveItem(int state, int count) {
+        if (state <= 0 || count <= 0) {
+            return 0;
+        }
+        int fit = 0;
+        while (fit < count && addToInventory(state) >= 0) {
+            fit++;
+        }
+        if (fit > 0) {
+            syncInventory();
+        }
+        return fit;
+    }
+
+    @Override
+    public int removeItem(int state, int count) {
+        if (state <= 0 || count <= 0) {
+            return 0;
+        }
+        int removed = 0;
+        while (removed < count && takeItem(state) >= 0) {
+            removed++;
+        }
+        if (removed > 0) {
+            syncInventory();
+        }
+        return removed;
+    }
+
+    @Override
+    public int countItem(int state) {
+        int total = 0;
+        for (int slot = 0; slot < STORAGE_SLOTS; slot++) {
+            if (inventory.stateAt(slot) == state) {
+                total += inventory.countAt(slot);
+            }
+        }
+        return total;
+    }
+
+    @Override
+    public void clearInventory() {
+        for (int slot = 0; slot < STORAGE_SLOTS; slot++) {
+            inventory.clear(slot);
+        }
+        syncInventory();
+    }
+
     // ===== Health (server-authoritative; the client only reports damage events) =====
 
     /** Full health in half-heart points (20 = 10 hearts). */

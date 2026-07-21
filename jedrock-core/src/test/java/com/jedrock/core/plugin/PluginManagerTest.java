@@ -310,6 +310,23 @@ class PluginManagerTest {
     }
 
     @Test
+    void commandArgsArePrimitiveStringsSoStrictEqualityWorks(@TempDir Path dir) {
+        CommandManager cm = new CommandManager(null);
+        PluginManager plugins = manager(new EventBus(), dir, cm);
+        // args[0] must be a JS primitive string so `=== 'clear'` matches — not a String wrapper object
+        // (which would make === fail and silently skip the branch — the /inv clear bug).
+        plugins.loadSource("eq.js",
+                "commands.register('eq', function(player, args) {\n"
+              + "  if (args[0] === 'clear') player.setHealth(3);\n"
+              + "});", 1L);
+
+        CorePlayer player = newPlayer();
+        player.setHealth(20);
+        cm.dispatch(player, "/eq clear");
+        assertEquals(3, player.getHealth(), "args[0] === 'clear' matched a primitive string");
+    }
+
+    @Test
     void reloadUnregistersOldCommands(@TempDir Path dir) {
         CommandManager cm = new CommandManager(null);
         PluginManager plugins = manager(new EventBus(), dir, cm);

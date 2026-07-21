@@ -8,6 +8,14 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Scripting inventory API.** A script (or any `Player` caller) can now read and write the player's
+  inventory, not just `giveItem` one block: `getInventorySize()`, `getItem(slot)` / `getItemCount(slot)`,
+  `setItem(slot, state, count)`, `giveItem(state, count)` (returns how many fit), `removeItem(state, count)`
+  (returns how many went), `countItem(state)`, `hasItem(state)` and `clearInventory()`. Items are the
+  canonical `(id << 4) | meta` state used everywhere, over the 36 storage slots (0-8 hotbar, 9-35 main);
+  every change syncs to the client. Server-authoritative, so it's meaningful in survival (a creative client
+  manages its own inventory). `plugins/example.js` gained an `/inv` demo. Tested in `CorePlayerInventoryTest`.
+
 - **Player-facing UI — titles, subtitles and the action bar, cross-edition.** `player.sendTitle(title,
   subtitle[, fadeIn, stay, fadeOut])`, `sendActionBar(text)` and `clearTitle()` — a big centred title with a
   subtitle, or a line just above the hotbar, authored in the unified `{color}` markup and rendered per
@@ -131,6 +139,12 @@ unstable — anything may change between entries.
   ViaVersion (pinned per version) and PocketMine-MP at both PE eras.
 
 ### Fixed
+
+- **Script command args now compare with `===`.** A command handler's `args` elements were JS String
+  *objects* (`new String("clear")`), so a natural `args[0] === 'clear'` silently returned false (object vs
+  primitive) and the branch was skipped — e.g. `/inv clear` did nothing. Args are now JS *primitive* strings
+  (a `java.lang.String` is Rhino's primitive-string representation, copied into an `Object[]`), so
+  `args[0] === 'x'`, `parseInt(args[0])`, `.join(' ')` and every string method all work.
 
 - **PE 1.1.5 block-interaction "hallucinations" (ghost blocks and holes).** The retail protocol-113 client
   draws its own edits optimistically and, unlike 0.14, double-fires and desyncs, so a single click could

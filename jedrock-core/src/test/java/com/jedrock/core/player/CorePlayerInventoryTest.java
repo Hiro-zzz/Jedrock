@@ -246,6 +246,54 @@ class CorePlayerInventoryTest {
         assertTrue(conn.titleCleared);
     }
 
+    // ===== Scripting inventory API =====
+
+    @Test
+    void setAndGetItemRoundTrips() {
+        CorePlayer p = player(new CapturingConnection());
+        int stone = Blocks.state(Blocks.STONE, 0);
+        p.setItem(5, stone, 12);
+        assertEquals(stone, p.getItem(5));
+        assertEquals(12, p.getItemCount(5));
+        assertEquals(36, p.getInventorySize());
+        assertEquals(0, p.getItem(-1), "out of range reads empty");
+        assertEquals(0, p.getItem(100), "out of range reads empty");
+    }
+
+    @Test
+    void giveByCountStacksAndReportsWhatFit() {
+        CorePlayer p = player(new NoopConnection());
+        int stone = Blocks.state(Blocks.STONE, 0);
+        assertEquals(10, p.giveItem(stone, 10));
+        assertEquals(10, p.countItem(stone));
+        assertTrue(p.hasItem(stone));
+        int fit = p.giveItem(stone, 100000);           // more than the inventory can hold
+        assertTrue(fit > 0 && fit < 100000, "some fit, then it filled up (fit=" + fit + ")");
+    }
+
+    @Test
+    void removeCountAndClear() {
+        CorePlayer p = player(new NoopConnection());
+        int dirt = Blocks.state(Blocks.DIRT, 0);
+        p.giveItem(dirt, 30);
+        assertEquals(20, p.removeItem(dirt, 20));
+        assertEquals(10, p.countItem(dirt));
+        assertEquals(10, p.removeItem(dirt, 999), "removes only what's left");
+        assertFalse(p.hasItem(dirt));
+        p.giveItem(dirt, 5);
+        p.clearInventory();
+        assertEquals(0, p.countItem(dirt), "clear empties everything");
+    }
+
+    @Test
+    void giveAndRemoveRejectAirAndNonPositive() {
+        CorePlayer p = player(new NoopConnection());
+        int stone = Blocks.state(Blocks.STONE, 0);
+        assertEquals(0, p.giveItem(0, 10), "air is never given");
+        assertEquals(0, p.giveItem(stone, 0), "zero count gives nothing");
+        assertEquals(0, p.removeItem(stone, -5), "negative count removes nothing");
+    }
+
     private static class NoopConnection implements PlayerConnection {
         @Override public ProtocolVersion getProtocolVersion() { return ProtocolVersion.PE_1_1_5; }
         @Override public String getAddress() { return "test"; }
