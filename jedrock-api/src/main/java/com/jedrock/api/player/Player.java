@@ -88,6 +88,40 @@ public interface Player extends Entity, CommandSender {
      */
     boolean giveItem(int state);
 
+    // ===== Inventory (the 36 storage slots: 0-8 hotbar, 9-35 main) =====
+    // Items are the canonical (id << 4) | meta state used everywhere (0 = empty), with a parallel count.
+    // These operate on the server-side inventory and push the change to the client, so they are meaningful
+    // in survival; a creative client manages its own inventory, so effects there are limited.
+
+    /** Number of addressable inventory slots (36: 0-8 hotbar, 9-35 main). */
+    int getInventorySize();
+
+    /** Canonical {@code (id << 4) | meta} state at {@code slot} (0 = empty, or out of range). */
+    int getItem(int slot);
+
+    /** Stack count at {@code slot} (0 = empty, or out of range). */
+    int getItemCount(int slot);
+
+    /** Set {@code slot} to {@code state} + {@code count} ({@code state 0} or {@code count <= 0} clears it) and sync it. */
+    void setItem(int slot, int state, int count);
+
+    /** Give {@code count} items of {@code state}, stacking, then sync. @return how many actually fit. */
+    int giveItem(int state, int count);
+
+    /** Remove up to {@code count} items of {@code state} from anywhere in the inventory, then sync. @return how many were removed. */
+    int removeItem(int state, int count);
+
+    /** Total number of {@code state} items across the inventory. */
+    int countItem(int state);
+
+    /** {@code true} if the inventory holds at least one {@code state}. */
+    default boolean hasItem(int state) {
+        return countItem(state) > 0;
+    }
+
+    /** Empty every inventory slot and sync. */
+    void clearInventory();
+
     /**
      * The player's remote network address (IP:port or an edition-specific string). A convenience over
      * {@code getConnection().getAddress()}.

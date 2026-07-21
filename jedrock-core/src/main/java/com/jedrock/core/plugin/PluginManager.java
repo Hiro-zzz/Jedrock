@@ -368,13 +368,13 @@ public final class PluginManager {
             Context cx = contextFactory.enterContext();
             try {
                 Scriptable scope = plugin.scope();
-                // Build a real JS string array so scripts get the familiar element access and array methods
-                // (args.length, args[0], args.join(' ')). newArray of raw Java strings hands elements back as
-                // Java objects (parseInt etc. then misbehave), so wrap each as a JS string first.
+                // Build a JS array of PRIMITIVE strings. A java.lang.String IS Rhino's representation of a JS
+                // primitive string, so putting the raw args into an Object[] gives `args.length`, `args[0]`,
+                // `args.join(' ')`, `parseInt(args[0])` AND strict `args[0] === 'x'` — all natural. (Passing a
+                // typed String[] instead wraps it as a Java array, handing elements back as Java objects;
+                // wrapping each as `new String()` makes a String OBJECT, which breaks `===` against a literal.)
                 Object[] jsElements = new Object[args.length];
-                for (int i = 0; i < args.length; i++) {
-                    jsElements[i] = cx.newObject(scope, "String", new Object[]{args[i]});
-                }
+                System.arraycopy(args, 0, jsElements, 0, args.length);
                 Scriptable jsArgs = cx.newArray(scope, jsElements);
                 handler.call(cx, scope, scope,
                         new Object[]{Context.javaToJS(sender, scope), jsArgs});

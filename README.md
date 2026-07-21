@@ -163,7 +163,9 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   on 1.12.2; action bar via chat position 2), and the native Bedrock **SetTitle** on 1.1.5 (byte-verified
   against PocketMine at protocol 113). PE 0.14 predates the packet and falls back to chat. Pure illusionist
   feedback — the server asks the client to draw text. Handy QoL came with it: `Server.getPlayer(UUID)`,
-  `Player.teleport(x, y, z[, yaw, pitch])`, `World.getHighestBlockY(x, z)`, `World.setSpawnLocation(...)`.
+  `Player.teleport(x, y, z[, yaw, pitch])`, `World.getHighestBlockY(x, z)`, `World.setSpawnLocation(...)`, and
+  a full **inventory API** for scripts — `getItem` / `setItem` / `giveItem(state, count)` / `removeItem` /
+  `countItem` / `clearInventory` over the 36 storage slots, each change synced to the client.
 - ✅ **Damage — fall, void and PvP, cross-edition.** Survival players take damage, all funnelled through one
   server-authoritative path. **Fall damage** works on every edition: Java and PE 0.14 have no client
   fall-report packet, so the server tracks the descent and applies it on landing; PE 1.1.5 reports its own
