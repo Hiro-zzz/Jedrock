@@ -46,6 +46,20 @@ public interface PlayerConnection {
      */
     void sendMessage(String message);
 
+    /**
+     * Show a title + subtitle on this client with fade-in / stay / fade-out timings (ticks). Strings arrive
+     * already rendered to the edition-agnostic legacy form. Each edition encodes it in its own way (JE Title
+     * packet, PE SetTitle); a connection with no title concept (MCPE 0.14) may fall back to a chat line.
+     * Default: a no-op.
+     */
+    default void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut) {}
+
+    /** Show a line above the hotbar (the action bar). Default: a no-op. */
+    default void sendActionBar(String text) {}
+
+    /** Clear any title / subtitle currently shown. Default: a no-op. */
+    default void clearTitle() {}
+
     /** Add a player entry to this client's tab / player list. */
     void addToTab(java.util.UUID uuid, String name);
 

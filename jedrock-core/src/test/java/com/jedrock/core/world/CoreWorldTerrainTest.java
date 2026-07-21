@@ -14,6 +14,25 @@ class CoreWorldTerrainTest {
     private final CoreWorld world = new CoreWorld("gen", Dimension.OVERWORLD, 42L);
 
     @Test
+    void highestBlockYFindsTheSurfaceAndPlacedBlocksAboveIt() {
+        int surface = world.surfaceHeight(6, 6);
+        assertEquals(surface, world.getHighestBlockY(6, 6), "the terrain surface with nothing placed");
+        world.setBlockId(6, surface + 4, 6, Blocks.state(Blocks.STONE, 0)); // a floating placed block
+        assertEquals(surface + 4, world.getHighestBlockY(6, 6), "a block placed above the surface wins");
+    }
+
+    @Test
+    void setSpawnLocationMovesTheSpawnBoundToThisWorld() {
+        CoreWorld other = new CoreWorld("other", Dimension.OVERWORLD, 1L);
+        world.setSpawnLocation(new Location(other, 12.5, 70, -8.5, 90f, 0f)); // input names a different world
+        Location spawn = world.getSpawnLocation();
+        assertEquals(12.5, spawn.x(), 1e-9);
+        assertEquals(70, spawn.y(), 1e-9);
+        assertEquals(-8.5, spawn.z(), 1e-9);
+        assertEquals(world, spawn.world(), "the stored spawn is re-bound to THIS world, not the input's");
+    }
+
+    @Test
     void sameSeedReproducesSameHeights() {
         TerrainGenerator a = new TerrainGenerator(42L);
         TerrainGenerator b = new TerrainGenerator(42L);

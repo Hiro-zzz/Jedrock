@@ -216,6 +216,36 @@ class CorePlayerInventoryTest {
         assertEquals(0.0, p.trackFall(65, 65), 1e-6, "reset fall is not billed on the next move");
     }
 
+    @Test
+    void titleRendersMarkupAndPassesTimingsToTheConnection() {
+        CapturingConnection conn = new CapturingConnection();
+        CorePlayer p = player(conn);
+
+        p.sendTitle("{red}Go", "{gray}subtitle", 5, 40, 5);
+        assertEquals("§cGo", conn.title, "markup rendered to legacy codes");
+        assertEquals("§7subtitle", conn.subtitle);
+        assertEquals(5, conn.fadeIn);
+        assertEquals(40, conn.stay);
+        assertEquals(5, conn.fadeOut);
+
+        p.sendTitle("{green}Hi", "");        // default-timing overload → 10/70/20
+        assertEquals(10, conn.fadeIn);
+        assertEquals(70, conn.stay);
+        assertEquals(20, conn.fadeOut);
+    }
+
+    @Test
+    void actionBarAndClearReachTheConnection() {
+        CapturingConnection conn = new CapturingConnection();
+        CorePlayer p = player(conn);
+
+        p.sendActionBar("{yellow}Wave");
+        assertEquals("§eWave", conn.actionBar);
+
+        p.clearTitle();
+        assertTrue(conn.titleCleared);
+    }
+
     private static class NoopConnection implements PlayerConnection {
         @Override public ProtocolVersion getProtocolVersion() { return ProtocolVersion.PE_1_1_5; }
         @Override public String getAddress() { return "test"; }
@@ -244,7 +274,16 @@ class CorePlayerInventoryTest {
         int slotCount;
         int health = -1;
         String closeReason;
+        String title, subtitle, actionBar;
+        int fadeIn, stay, fadeOut;
+        boolean titleCleared;
         @Override public void close(String reason) { this.closeReason = reason; }
+        @Override public void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut) {
+            this.title = title; this.subtitle = subtitle;
+            this.fadeIn = fadeIn; this.stay = stay; this.fadeOut = fadeOut;
+        }
+        @Override public void sendActionBar(String text) { this.actionBar = text; }
+        @Override public void clearTitle() { this.titleCleared = true; }
         @Override public void setInventory(int[] states, int[] counts) {
             this.states = states.clone();
             this.counts = counts.clone();

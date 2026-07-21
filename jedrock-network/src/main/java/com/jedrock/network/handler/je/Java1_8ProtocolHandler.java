@@ -251,6 +251,31 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     }
 
     @Override
+    public void sendActionBar(JedrockConnection c, String text) {
+        // 1.8 has no Title action-bar action — the action bar is a chat message at position 2.
+        send(c, CB_CHAT, b -> { ByteBufUtils.writeString(b, json(text)); b.writeByte(2); });
+    }
+
+    @Override
+    public void sendTitle(JedrockConnection c, String title, String subtitle, int fadeIn, int stay, int fadeOut) {
+        // 1.8 Title actions: 0 title, 1 subtitle, 2 times-and-display, 4 reset. Send times, then the
+        // subtitle, then the title (which triggers the display).
+        send(c, CB_TITLE, b -> { ByteBufUtils.writeVarInt(b, 2); b.writeInt(fadeIn); b.writeInt(stay); b.writeInt(fadeOut); });
+        send(c, CB_TITLE, b -> { ByteBufUtils.writeVarInt(b, 1); ByteBufUtils.writeString(b, json(subtitle)); });
+        send(c, CB_TITLE, b -> { ByteBufUtils.writeVarInt(b, 0); ByteBufUtils.writeString(b, json(title)); });
+    }
+
+    @Override
+    public void clearTitle(JedrockConnection c) {
+        send(c, CB_TITLE, b -> ByteBufUtils.writeVarInt(b, 4)); // 4 = reset
+    }
+
+    /** Wrap an already-rendered legacy (§) string as a JSON chat component (a title/subtitle/action-bar body). */
+    private static String json(String legacy) {
+        return "{\"text\":\"" + JsonText.escape(legacy == null ? "" : legacy) + "\"}";
+    }
+
+    @Override
     public void addToTab(JedrockConnection c, UUID uuid, String name) {
         send(c, CB_PLAYER_LIST_ITEM, b -> {
             ByteBufUtils.writeVarInt(b, 0);                  // action: add player

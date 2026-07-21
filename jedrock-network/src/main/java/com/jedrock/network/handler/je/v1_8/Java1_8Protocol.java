@@ -19,7 +19,8 @@ public final class Java1_8Protocol {
     // ===== PLAY (clientbound) =====
     public static final int CB_KEEP_ALIVE = 0x00;        // VarInt id (1.12.2 uses a Long)
     public static final int CB_JOIN_GAME = 0x01;
-    public static final int CB_CHAT = 0x02;
+    public static final int CB_CHAT = 0x02;             // chat/system; position byte 2 = action bar
+    public static final int CB_TITLE = 0x45;            // title/subtitle/times (actions 0/1/2, 3=hide, 4=reset)
     public static final int CB_CHANGE_GAME_STATE = 0x2B; // reason byte + float value (gamemode switch)
     public static final int CB_UPDATE_HEALTH = 0x06;     // float health + food varint + saturation float
     public static final int CB_SPAWN_POSITION = 0x05;

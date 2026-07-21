@@ -8,6 +8,7 @@ import com.jedrock.network.EntityTypeIds;
 import com.jedrock.network.JedrockConnection;
 import com.jedrock.network.je.packet.*;
 import com.jedrock.network.protocol.ProtocolState;
+import com.jedrock.utils.ByteBufUtils;
 import com.jedrock.utils.JLogger;
 import com.jedrock.utils.lazy.LazyPacket;
 import com.jedrock.utils.text.JsonText;
@@ -15,6 +16,7 @@ import io.netty.buffer.ByteBuf;
 
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * Java Edition 1.12.2 (protocol 340) — login, play and the clientbound wire encoding.
@@ -243,6 +245,43 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     @Override
     public void sendSystemMessage(JedrockConnection c, String message) {
         c.send(new ClientboundChatMessage("{\"text\":\"" + JsonText.escape(message) + "\"}"));
+    }
+
+    /** 1.12.2 Title packet (id 0x48 — NOT 0x4B, which is another packet): actions 0 title, 1 subtitle,
+     *  2 action-bar, 3 times, 4 hide, 5 reset. Verified against minecraft-data for protocol 340. */
+    private static final int CB_TITLE = 0x48;
+
+    @Override
+    public void sendActionBar(JedrockConnection c, String text) {
+        // Position 2 on the chat packet = the action bar (works the same on 1.8, kept parallel).
+        ClientboundChatMessage m = new ClientboundChatMessage(json(text));
+        m.position = 2;
+        c.send(m);
+    }
+
+    @Override
+    public void sendTitle(JedrockConnection c, String title, String subtitle, int fadeIn, int stay, int fadeOut) {
+        send(c, CB_TITLE, b -> { ByteBufUtils.writeVarInt(b, 3); b.writeInt(fadeIn); b.writeInt(stay); b.writeInt(fadeOut); });
+        send(c, CB_TITLE, b -> { ByteBufUtils.writeVarInt(b, 1); ByteBufUtils.writeString(b, json(subtitle)); });
+        send(c, CB_TITLE, b -> { ByteBufUtils.writeVarInt(b, 0); ByteBufUtils.writeString(b, json(title)); });
+    }
+
+    @Override
+    public void clearTitle(JedrockConnection c) {
+        send(c, CB_TITLE, b -> ByteBufUtils.writeVarInt(b, 5)); // 5 = reset
+    }
+
+    /** Wrap an already-rendered legacy (§) string as a JSON chat component. */
+    private static String json(String legacy) {
+        return "{\"text\":\"" + JsonText.escape(legacy == null ? "" : legacy) + "\"}";
+    }
+
+    /** Send a raw versioned packet — a numeric id + a body writer (mirrors the 1.8 handler's helper). */
+    private static void send(JedrockConnection c, int id, Consumer<ByteBuf> body) {
+        c.send(new ClientboundPacket() {
+            @Override public int getPacketId() { return id; }
+            @Override public void write(ByteBuf buf) { body.accept(buf); }
+        });
     }
 
     @Override

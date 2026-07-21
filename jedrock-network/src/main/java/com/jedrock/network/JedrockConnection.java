@@ -112,6 +112,21 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut) {
+        protocolHandler.sendTitle(this, title, subtitle, fadeIn, stay, fadeOut);
+    }
+
+    @Override
+    public void sendActionBar(String text) {
+        protocolHandler.sendActionBar(this, text);
+    }
+
+    @Override
+    public void clearTitle() {
+        protocolHandler.clearTitle(this);
+    }
+
+    @Override
     public void sendMessage(String message) {
         protocolHandler.sendSystemMessage(this, message);
     }

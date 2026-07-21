@@ -37,6 +37,14 @@ final class McpeProtocol {
     static final int ID_ENTITY_EVENT = 0x1C;      // outbound: one-shot entity event (hurt animation etc.)
     static final int ID_SET_ENTITY_DATA = 0x27;   // entity metadata (sneak pose etc.)
     static final int ID_ANIMATE = 0x2C;           // arm swing
+    static final int ID_SET_TITLE = 0x59;         // outbound: title / subtitle / action-bar / times (protocol 113)
+
+    // --- SetTitle types (protocol 113, PMMP SetTitlePacket) ---
+    static final int TITLE_TYPE_CLEAR = 0;
+    static final int TITLE_TYPE_TITLE = 2;
+    static final int TITLE_TYPE_SUBTITLE = 3;
+    static final int TITLE_TYPE_ACTIONBAR = 4;
+    static final int TITLE_TYPE_TIMES = 5;
     // MCPE 1.1 (protocol 113) uses ContainerSetContent (0x34) for inventory/creative content — NOT
     // the InventoryContent (0x31) of 1.2+. Its layout is: windowId, targetEid (entity id), slot count,
     // slots, then a hotbar-link count. Verified against PocketMine-MP at CURRENT_PROTOCOL = 113.

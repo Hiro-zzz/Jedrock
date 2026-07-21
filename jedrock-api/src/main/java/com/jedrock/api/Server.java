@@ -10,6 +10,7 @@ import com.jedrock.api.world.World;
 
 import java.util.Collection;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Absolute abstraction of the Minecraft server.
@@ -55,9 +56,14 @@ public interface Server {
     Collection<Player> getPlayers();
 
     /**
-     * Lookup a player by name or UUID (abstraction).
+     * Lookup a player by name (case-insensitive).
      */
     Optional<Player> getPlayer(String name);
+
+    /**
+     * Lookup a connected player by their unique id.
+     */
+    Optional<Player> getPlayer(UUID uuid);
 
     /**
      * Number of players currently online. Defaults to the size of {@link #getPlayers()}; an implementation

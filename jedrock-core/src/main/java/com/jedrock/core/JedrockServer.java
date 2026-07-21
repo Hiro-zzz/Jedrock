@@ -549,6 +549,11 @@ public class JedrockServer implements Server, ConnectionListener {
     }
 
     @Override
+    public Optional<Player> getPlayer(java.util.UUID uuid) {
+        return playerRegistry.getById(uuid);
+    }
+
+    @Override
     public Collection<World> getWorlds() {
         return List.of(defaultWorld);
     }

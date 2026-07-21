@@ -157,6 +157,13 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   shown via the `%prefix%` slot in the chat format. Manage it live with `/perm` (create/delete groups, grant
   or deny nodes, set inheritance, prefix and the default group, assign players) — every change persists.
   Guarded commands are gated on their node, and `/help` hides what the sender can't run.
+- ✅ **Player-facing UI — titles, subtitles and the action bar.** `player.sendTitle(title, subtitle[, fadeIn,
+  stay, fadeOut])`, `sendActionBar(text)` and `clearTitle()` show a large centred title or a line above the
+  hotbar, authored in the unified markup and rendered per edition: the JE Title packet (id 0x45 on 1.8, 0x48
+  on 1.12.2; action bar via chat position 2), and the native Bedrock **SetTitle** on 1.1.5 (byte-verified
+  against PocketMine at protocol 113). PE 0.14 predates the packet and falls back to chat. Pure illusionist
+  feedback — the server asks the client to draw text. Handy QoL came with it: `Server.getPlayer(UUID)`,
+  `Player.teleport(x, y, z[, yaw, pitch])`, `World.getHighestBlockY(x, z)`, `World.setSpawnLocation(...)`.
 - ✅ **Damage — fall, void and PvP, cross-edition.** Survival players take damage, all funnelled through one
   server-authoritative path. **Fall damage** works on every edition: Java and PE 0.14 have no client
   fall-report packet, so the server tracks the descent and applies it on landing; PE 1.1.5 reports its own

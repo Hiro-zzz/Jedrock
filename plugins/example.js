@@ -241,6 +241,14 @@ commands.register('whoami', function (player, args) {
         : '{red}You lack {white}example.secret{red} (try {white}/perm group default add example.secret{red}).');
 });
 
+// /title [text…] — show a title + subtitle and an action-bar line (cross-edition: JE Title packet,
+// PE 1.1.5 native SetTitle, PE 0.14 chat fallback). Verifies the player-facing UI additions.
+commands.register('title', function (player, args) {
+    var text = args.length ? args.join(' ') : 'Hello!';
+    player.sendTitle('{gold}' + text, '{gray}subtitle here', 5, 40, 10); // fadeIn/stay/fadeOut in ticks
+    player.sendActionBar('{aqua}action bar: {white}' + player.getName());
+});
+
 // /testtimer — one-shot + repeating scheduler + a setTimeout (ms) demo.
 commands.register('testtimer', function (player, args) {
     player.sendMessage('{gray}now; +1s (setTimeout); then 3 ticks of a timer…');
