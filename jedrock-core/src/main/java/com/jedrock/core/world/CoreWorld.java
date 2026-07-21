@@ -40,7 +40,7 @@ public final class CoreWorld implements World {
     private final UUID uniqueId;
     private final Dimension dimension;
     private final long seed;
-    private final Location spawnLocation;
+    private volatile Location spawnLocation;
     private final BlockStorage storage = new BlockStorage();
     private final BiomeStorage biomes = new BiomeStorage();
     private final TerrainGenerator terrain;
@@ -114,6 +114,13 @@ public final class CoreWorld implements World {
     @Override
     public Location getSpawnLocation() {
         return spawnLocation;
+    }
+
+    @Override
+    public void setSpawnLocation(Location location) {
+        // Re-bind to this world so getSpawnLocation always returns a point in this world.
+        this.spawnLocation = new Location(this, location.x(), location.y(), location.z(),
+                location.yaw(), location.pitch());
     }
 
     // ===== Fast, allocation-free canonical block access =====

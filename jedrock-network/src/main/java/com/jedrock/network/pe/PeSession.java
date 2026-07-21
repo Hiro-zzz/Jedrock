@@ -121,6 +121,42 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     }
 
     @Override
+    public void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut) {
+        // Native SetTitle (0x59), byte-verified against PMMP at protocol 113. Send the animation times, then
+        // the subtitle, then the title (the title packet triggers the on-screen display).
+        sendGameBatch(b -> writeSetTitle(b, TITLE_TYPE_TIMES, "", fadeIn, stay, fadeOut));
+        if (subtitle != null && !subtitle.isEmpty()) {
+            sendGameBatch(b -> writeSetTitle(b, TITLE_TYPE_SUBTITLE, subtitle, fadeIn, stay, fadeOut));
+        }
+        sendGameBatch(b -> writeSetTitle(b, TITLE_TYPE_TITLE, title == null ? "" : title, fadeIn, stay, fadeOut));
+    }
+
+    @Override
+    public void sendActionBar(String text) {
+        // The action bar is its own SetTitle type; give it modest fade/stay so it lingers ~1s per call.
+        sendGameBatch(b -> writeSetTitle(b, TITLE_TYPE_ACTIONBAR, text == null ? "" : text, 1, 20, 1));
+    }
+
+    @Override
+    public void clearTitle() {
+        sendGameBatch(b -> writeSetTitle(b, TITLE_TYPE_CLEAR, "", 0, 0, 0));
+    }
+
+    /**
+     * Write one SetTitle (0x59) packet. Layout, verbatim from PMMP {@code SetTitlePacket} at protocol 113:
+     * {@code type} (signed varint), {@code text} (string), then {@code fadeIn} / {@code stay} /
+     * {@code fadeOut} (signed varints, in ticks). {@code type} is one of the {@code TITLE_TYPE_*} values.
+     */
+    static void writeSetTitle(ByteBuf b, int type, String text, int fadeIn, int stay, int fadeOut) {
+        ByteBufUtils.writeVarInt(b, ID_SET_TITLE);
+        ByteBufUtils.writeSignedVarInt(b, type);
+        ByteBufUtils.writeString(b, text == null ? "" : text);
+        ByteBufUtils.writeSignedVarInt(b, fadeIn);
+        ByteBufUtils.writeSignedVarInt(b, stay);
+        ByteBufUtils.writeSignedVarInt(b, fadeOut);
+    }
+
+    @Override
     public void addToTab(UUID uuid, String name) {
         // The PE pause-menu list is fed by showPlayer's PlayerList entry (it needs an entity id +
         // skin, which this signature doesn't carry). No separate tab packet.

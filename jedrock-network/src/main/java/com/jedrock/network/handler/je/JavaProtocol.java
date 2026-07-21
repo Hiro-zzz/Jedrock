@@ -28,6 +28,16 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Send a system/chat line to the client. */
     void sendSystemMessage(JedrockConnection c, String message);
 
+    /** Show a title + subtitle with fade-in / stay / fade-out timings (ticks). Default: a no-op. */
+    default void sendTitle(JedrockConnection c, String title, String subtitle,
+                           int fadeIn, int stay, int fadeOut) {}
+
+    /** Show a line above the hotbar (the action bar). Default: a no-op. */
+    default void sendActionBar(JedrockConnection c, String text) {}
+
+    /** Clear any title / subtitle shown. Default: a no-op. */
+    default void clearTitle(JedrockConnection c) {}
+
     /** Add a player entry to the client's tab list. */
     void addToTab(JedrockConnection c, UUID uuid, String name);
 

@@ -359,6 +359,23 @@ public final class CorePlayer implements Player {
     }
 
     @Override
+    public void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut) {
+        // Render the markup once here (like sendMessage); the connection just frames the legacy strings.
+        connection.sendTitle(ChatText.toLegacy(title == null ? "" : title),
+                ChatText.toLegacy(subtitle == null ? "" : subtitle), fadeIn, stay, fadeOut);
+    }
+
+    @Override
+    public void sendActionBar(String text) {
+        connection.sendActionBar(ChatText.toLegacy(text == null ? "" : text));
+    }
+
+    @Override
+    public void clearTitle() {
+        connection.clearTitle();
+    }
+
+    @Override
     public boolean isOnline() {
         return connection.isActive();
     }

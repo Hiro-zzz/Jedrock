@@ -8,6 +8,22 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Player-facing UI — titles, subtitles and the action bar, cross-edition.** `player.sendTitle(title,
+  subtitle[, fadeIn, stay, fadeOut])`, `sendActionBar(text)` and `clearTitle()` — a big centred title with a
+  subtitle, or a line just above the hotbar, authored in the unified `{color}` markup and rendered per
+  edition. **JE** uses the Title packet (**1.8 id 0x45**, **1.12.2 id 0x48** — the first ship guessed 0x4B, a
+  different packet, which disconnected the client; the id is now ground-truthed against
+  PrismarineJS/minecraft-data) with the action bar via a chat message at position 2. **PE 1.1.5** uses the
+  native **SetTitle (0x59)**, byte-verified against PocketMine-MP at protocol 113 (type / text / fadeIn /
+  stay / fadeOut). **PE 0.14** predates the packet, so it falls back to chat lines. Fits the illusionist
+  model — the server just asks the client to draw text. Tested (`PeSetTitleEncodingTest`, and CorePlayer
+  render + timing delegation).
+
+- **QoL API surface.** `Server.getPlayer(UUID)`; `Player.teleport(x, y, z)` and
+  `teleport(x, y, z, yaw, pitch)` (keep or set facing, current world); `World.getHighestBlockY(x, z)` (the
+  topmost non-air block, handy for a safe drop-in); and `World.setSpawnLocation(...)` (a movable spawn,
+  re-bound to the world). Small, no-new-packet wins for scripts and commands.
+
 - **Native group permission system.** On top of operators sits a real permission system (`permissions.txt`):
   named **groups** with inheritance, a **default group** new players fall into, and permission **nodes** with
   `*` / `a.b.*` wildcards and `-node` **explicit deny** (deny wins over any grant). Each group carries an

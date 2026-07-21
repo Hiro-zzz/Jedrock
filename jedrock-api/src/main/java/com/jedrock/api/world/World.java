@@ -97,7 +97,27 @@ public interface World {
     }
 
     /**
+     * The Y of the highest non-air block in a column, or {@code -1} for an all-air column. The default
+     * scans down from the top with {@link #getBlockId}; a storage-backed world overrides it with its
+     * surface-height cache. Handy for placing something safely on top of the terrain.
+     */
+    default int getHighestBlockY(int x, int z) {
+        for (int y = 255; y >= 0; y--) {
+            if (getBlockId(x, y, z) != Blocks.AIR) {
+                return y;
+            }
+        }
+        return -1;
+    }
+
+    /**
      * Spawn location for this world.
      */
     Location getSpawnLocation();
+
+    /**
+     * Move this world's spawn point. Default is a no-op (a minimal / test world has a fixed spawn); a
+     * real world overrides it to store the new point (used for future joins and {@code /spawn}).
+     */
+    default void setSpawnLocation(Location location) {}
 }

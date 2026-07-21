@@ -78,6 +78,29 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         sendWrapped(b -> Mcpe014Packets.text(b, message));
     }
 
+    @Override
+    public void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut) {
+        // MCPE 0.14 (protocol 45) predates the SetTitle packet — fall back to chat lines.
+        if (title != null && !title.isEmpty()) {
+            sendMessage(title);
+        }
+        if (subtitle != null && !subtitle.isEmpty()) {
+            sendMessage(subtitle);
+        }
+    }
+
+    @Override
+    public void sendActionBar(String text) {
+        if (text != null && !text.isEmpty()) {
+            sendMessage(text);
+        }
+    }
+
+    @Override
+    public void clearTitle() {
+        // nothing to clear in the chat fallback
+    }
+
     @Override public void addToTab(UUID uuid, String name) { /* avatar carries the name via AddPlayer */ }
     @Override public void removeFromTab(UUID uuid) { /* see hidePlayer */ }
 
