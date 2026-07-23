@@ -240,8 +240,29 @@ public final class CoreWorld implements World {
         }
     }
 
+    /**
+     * Observes every committed block write — the server wires this to broadcast each edit to all
+     * online clients, cross-edition, so a script/API edit renders exactly like a player's.
+     */
+    @FunctionalInterface
+    public interface BlockChangeListener {
+        void blockChanged(int x, int y, int z, int state);
+    }
+
+    /** Registered by the server after bake/load, so the one-time bake never floods it. */
+    private volatile BlockChangeListener changeListener;
+
+    public void setChangeListener(BlockChangeListener listener) {
+        this.changeListener = listener;
+    }
+
     @Override
     public void setBlockId(int x, int y, int z, int state) {
+        // The finite world can't grow: a write outside the bounds (or the vertical range) is dropped
+        // here at the storage boundary, so no API or script path can allocate sections past the edge.
+        if (y < 0 || y > 255 || !isInsideBounds(x, z)) {
+            return;
+        }
         if (generated) {
             // Full world in storage: air genuinely clears the cell (there's no terrain to fall back to).
             storage.setId(x, y, z, state);
@@ -251,6 +272,10 @@ public final class CoreWorld implements World {
             storage.setId(x, y, z, state == Blocks.AIR ? REMOVED : state);
         }
         dirty = true;
+        BlockChangeListener listener = changeListener;
+        if (listener != null) {
+            listener.blockChanged(x, y, z, state);
+        }
     }
 
     // ===== Persistence =====
@@ -282,6 +307,7 @@ public final class CoreWorld implements World {
     }
 
     /** Whether a column {@code (x, z)} lies inside the finite world; outside is void (the edge wall). */
+    @Override
     public boolean isInsideBounds(double x, double z) {
         return x >= minBound() && x < maxBound() && z >= minBound() && z < maxBound();
     }

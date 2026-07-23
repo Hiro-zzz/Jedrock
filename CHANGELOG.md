@@ -8,6 +8,22 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **World-interaction API — programmatic edits that render live, cross-edition.** The world can now be
+  edited from code exactly like a player edits it: `CoreWorld` gained a **block-change listener** that the
+  server registers after bake/load, so **every** `setBlockId` write — a player's edit, a command, a script —
+  is pushed to each online client in its own protocol (JE Block Change / PE UpdateBlock). Player edits ride
+  the same path now (the manual broadcast loop in `onBlockChange` is gone — one broadcast path). The API
+  grew `Server.getDefaultWorld()`, `World.setBlock(x, y, z, id, meta)` (sugar over the packed state),
+  `World.fill(corner, corner, state)` (inclusive box, skips unchanged cells, returns the changed count) and
+  `World.isInsideBounds(x, z)` (default true — an unbounded world; `CoreWorld` overrides with the finite
+  edge). Scripts get a **`world` global**: `getBlock` / `getMeta` / `setBlock(x, y, z, id[, meta])` /
+  `fill(...)` / `getHighestY` / `getBiome` / `getSpawn` / `setSpawn` / `isInside`, with id-range validation.
+  Defensively, `CoreWorld.setBlockId` now **drops writes outside the finite bounds or the 0–255 Y range** at
+  the storage boundary (no listener fire, no dirty flag, no section allocation), so no API path can grow the
+  world past its edge. `plugins/example.js` gained `/deck` (glass platform via `fill`) and `/pillar` (wool
+  via `setBlock`). Tested in `WorldInteractionTest` (write+notify, air-not-sentinel on break, dropped
+  out-of-bounds writes, any-corner-order fill, refill-changes-nothing).
+
 - **Scripting inventory API.** A script (or any `Player` caller) can now read and write the player's
   inventory, not just `giveItem` one block: `getInventorySize()`, `getItem(slot)` / `getItemCount(slot)`,
   `setItem(slot, state, count)`, `giveItem(state, count)` (returns how many fit), `removeItem(state, count)`

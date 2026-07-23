@@ -44,6 +44,41 @@ public interface World {
     void setBlockId(int x, int y, int z, int blockId);
 
     /**
+     * Set a block from a bare id and 4-bit metadata (wool colour, wood type, …) — sugar over
+     * {@link #setBlockId} with the canonical packed state, so callers don't hand-roll the
+     * {@code (id << 4) | meta} arithmetic. On a live server world the edit reaches every online
+     * client, cross-edition, exactly like a player's edit.
+     */
+    default void setBlock(int x, int y, int z, int id, int meta) {
+        setBlockId(x, y, z, Blocks.state(id, meta));
+    }
+
+    /**
+     * Fill the axis-aligned box spanned by the two corners (inclusive, in any order) with one canonical
+     * {@code state}. Cells already holding {@code state} are skipped, so refilling a region doesn't
+     * re-broadcast unchanged blocks. Meant for modest script-driven structures (platforms, walls,
+     * clearing a site) — each changed cell is one block edit, so a huge box means that many packets
+     * per client. Returns the number of blocks actually changed.
+     */
+    default int fill(int x1, int y1, int z1, int x2, int y2, int z2, int state) {
+        int minX = Math.min(x1, x2), maxX = Math.max(x1, x2);
+        int minY = Math.max(0, Math.min(y1, y2)), maxY = Math.min(255, Math.max(y1, y2));
+        int minZ = Math.min(z1, z2), maxZ = Math.max(z1, z2);
+        int changed = 0;
+        for (int y = minY; y <= maxY; y++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                for (int x = minX; x <= maxX; x++) {
+                    if (getBlockId(x, y, z) != state) {
+                        setBlockId(x, y, z, state);
+                        changed++;
+                    }
+                }
+            }
+        }
+        return changed;
+    }
+
+    /**
      * Bulk-read one 16³ section into a caller-provided array — the chunk-serialization hot path,
      * built to avoid the per-block overhead (virtual call, height-cache boxing, one map lookup each)
      * of calling {@link #getBlockId} 4096 times.
@@ -108,6 +143,15 @@ public interface World {
             }
         }
         return -1;
+    }
+
+    /**
+     * Whether the column {@code (x, z)} lies inside this world's bounds. The default says yes — an
+     * unbounded world. A finite world overrides it; outside the bounds reads are air and writes are
+     * dropped, so callers can probe before building near the edge.
+     */
+    default boolean isInsideBounds(double x, double z) {
+        return true;
     }
 
     /**

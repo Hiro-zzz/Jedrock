@@ -210,6 +210,10 @@ public final class PluginManager {
                         Context.javaToJS(new ScriptCommands(this, plugin), scope));
                 ScriptableObject.putProperty(scope, "packets",
                         Context.javaToJS(new ScriptPackets(this, plugin), scope));
+                if (server != null) { // headless tests run without a server (and thus without a world)
+                    ScriptableObject.putProperty(scope, "world",
+                            Context.javaToJS(new ScriptWorld(server.getDefaultWorld()), scope));
+                }
                 ScriptableObject.putProperty(scope, "console",
                         Context.javaToJS(new ScriptConsole(name), scope));
 
