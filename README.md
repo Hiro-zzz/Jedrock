@@ -199,14 +199,24 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   comes with the scripting API.
 
 - ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
-  backend, not the compiled core: a script gets six globals — `server` / `events` / `scheduler` /
-  `commands` / `packets` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`, the
-  handler receiving the real event to read and cancel. Every one of the events above is scriptable by name;
-  scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule work
-  (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too —
-  `player.isOp()`, `player.hasPermission('node')`, `player.getPrefix()`. A saved edit reloads within a
+  backend, not the compiled core: a script gets seven globals — `server` / `events` / `scheduler` /
+  `commands` / `packets` / `world` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
+  the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
+  name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
+  work (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too
+  — `player.isOp()`, `player.hasPermission('node')`, `player.getPrefix()`. A saved edit reloads within a
   second. Rhino (~1.5 MB, pure Java, zero transitive deps) was chosen over GraalJS for weight; it lives only
   in `core`. See `plugins/example.js`.
+
+- ✅ **World-interaction API.** The shared world is editable from code exactly like a player edits it:
+  `CoreWorld` publishes every committed block write to a change listener the server wires to all online
+  connections, so a `setBlockId` from a script or command renders live on every client, cross-edition, and
+  persists through autosave. Scripts get the `world` global — `getBlock` / `getMeta` /
+  `setBlock(x, y, z, id[, meta])` / `fill(corner, corner, id[, meta])` (skips unchanged cells) /
+  `getHighestY` / `getBiome` / `getSpawn` / `setSpawn` / `isInside` — and the Java API gained
+  `Server.getDefaultWorld()`, `World.setBlock` / `fill` / `isInsideBounds`. Writes outside the finite bounds
+  (or the 0–255 Y range) are dropped at the storage boundary, so no API path can grow the world past its
+  edge. Try `/deck` and `/pillar` in `plugins/example.js`.
 
 Not yet: a real chest <em>window</em> on Bedrock 1.1.5 (click-transfer is the interim), cross-edition skin
 fidelity (a signed-texture limit, see above), knockback (deliberately — the server simulates no physics).

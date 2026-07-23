@@ -94,6 +94,14 @@ public interface Server {
     Optional<World> getWorld(String name);
 
     /**
+     * The world players join into — the one every current implementation runs exactly one of.
+     * Never {@code null}; the default returns the first of {@link #getWorlds()}.
+     */
+    default World getDefaultWorld() {
+        return getWorlds().iterator().next();
+    }
+
+    /**
      * Spawn a puppet — a server-controlled visual entity (the base for mobs / NPCs / holograms) — of the
      * given {@code type} at {@code at}, visible to every player cross-edition. Returns a handle to move,
      * remove or wire an interaction to it. The server never simulates it; behaviour is driven through the

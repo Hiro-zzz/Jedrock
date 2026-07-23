@@ -352,6 +352,15 @@ public class JedrockServer implements Server, ConnectionListener {
         // player sees the baked terrain and persisted edits rather than a half-built world.
         prepareWorld();
 
+        // From here on, every world write — a player's edit or a script/API call — is pushed to each
+        // online client in its own protocol, so World.setBlockId is all an edit needs to be visible.
+        // Registered after the bake so the one-time generation doesn't fire millions of callbacks.
+        defaultWorld.setChangeListener((x, y, z, state) -> {
+            for (Player p : playerRegistry.all()) {
+                p.getConnection().sendBlockChange(x, y, z, state);
+            }
+        });
+
         try {
             // Java Edition 1.12.2 (TCP) — the primary listener; a failure here is fatal.
             networkServer.bind(new InetSocketAddress(config.bindHost(), config.javaPort()), ProtocolVersion.JE_1_12_2);
@@ -561,6 +570,11 @@ public class JedrockServer implements Server, ConnectionListener {
     @Override
     public Optional<World> getWorld(String name) {
         return defaultWorld.getName().equalsIgnoreCase(name) ? Optional.of(defaultWorld) : Optional.empty();
+    }
+
+    @Override
+    public World getDefaultWorld() {
+        return defaultWorld;
     }
 
     // ===== Puppets (server-puppeteered visual entities) =====
@@ -981,16 +995,13 @@ public class JedrockServer implements Server, ConnectionListener {
         LOGGER.debug(() -> "[edit] APPLIED " + x + "," + y + "," + z + " state=" + state
                 + " → " + playerRegistry.size() + " clients");
 
-        // Apply to the shared world, then push the edit to every client (including the editor, so
-        // the server stays authoritative). {@code state} is the canonical (id << 4 | meta) value;
-        // each connection serializes it in its own protocol.
+        // Apply to the shared world; the world's change listener pushes the edit to every client
+        // (including the editor, so the server stays authoritative). {@code state} is the canonical
+        // (id << 4 | meta) value; each connection serializes it in its own protocol.
         defaultWorld.setBlockId(x, y, z, state);
         // A broken chest drops its container (contents lost — no item entities in the illusion).
         if (state == Blocks.AIR && Blocks.idOf(previous) == Blocks.CHEST) {
             defaultWorld.removeChestContainer(x, y, z);
-        }
-        for (Player p : playerRegistry.all()) {
-            p.getConnection().sendBlockChange(x, y, z, state);
         }
 
         // Minimal survival inventory: mining a block drops it straight into the inventory, placing one

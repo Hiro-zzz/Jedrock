@@ -300,6 +300,36 @@ commands.register('greet', function (player, args) {
 });
 
 // ============================================================================
+//  WORLD — block-level access to the shared world. Every edit below lands in
+//  storage (so it persists and autosaves) and is broadcast to every online
+//  client in its own protocol — both editions watch it appear live.
+// ============================================================================
+
+// /deck — build a 5×5 glass platform under your feet (setBlock/fill demo).
+commands.register('deck', function (player, args) {
+    var loc = player.getLocation();
+    var x = loc.getBlockX(), y = loc.getBlockY() - 1, z = loc.getBlockZ();
+    if (!world.isInside(x - 2, z - 2) || !world.isInside(x + 2, z + 2)) {
+        player.sendMessage('{red}Too close to the world edge.');
+        return;
+    }
+    var changed = world.fill(x - 2, y, z - 2, x + 2, y, z + 2, Blocks.GLASS);
+    player.sendMessage('{green}Deck built{gray} (' + changed + ' block(s) changed; '
+        + 'ground here is y={white}' + world.getHighestY(x, z) + '{gray}, biome '
+        + world.getBiome(x, z) + ').');
+});
+
+// /pillar [meta] — a coloured wool pillar in front of spawn (per-block setBlock demo).
+commands.register('pillar', function (player, args) {
+    var s = world.getSpawn();
+    var x = s.getBlockX() + 3, z = s.getBlockZ() + 3;
+    var base = world.getHighestY(x, z) + 1;
+    var meta = args.length > 0 ? parseInt(args[0], 10) || 0 : 14; // default red wool
+    for (var i = 0; i < 4; i++) world.setBlock(x, base + i, z, Blocks.WOOL, meta);
+    player.sendMessage('{green}Wool pillar at {white}' + x + ',' + base + ',' + z);
+});
+
+// ============================================================================
 //  PACKETS — raw cross-edition wire tap. Counted here; reported by /teststats.
 // ============================================================================
 
