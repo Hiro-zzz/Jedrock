@@ -531,7 +531,8 @@ simulation stays out (see non-goals).
   `PlayerChatEvent` and the line never sends; cancel `PlayerMoveEvent` and the player is snapped back. The
   set spans the player's whole arc — login gate / join / quit / chat / command / move / teleport / block
   break / place / right-click / interact-entity / item-pickup / damage / death / respawn / sneak / sprint /
-  use-item / game-mode — plus server lifecycle (start / stop / per-tick heartbeat) and world save, each
+  use-item / game-mode / armor-change / held-item-change — plus server lifecycle (start / stop / per-tick
+  heartbeat), world save and weather change, each
   honoured by the core (cancel a `PlayerLoginEvent` to reject a connection, a `PlayerDamageEvent` for
   invulnerability, redirect a `GameModeChangeEvent` or `PlayerRespawnEvent`, suppress a `PlayerDeathEvent`).
   `EventBus` gained priorities (LOWEST…MONITOR), `ignoreCancelled` listeners, precise removal handles, and a
@@ -544,8 +545,11 @@ simulation stays out (see non-goals).
   globals now (`server` / `events` / `scheduler` / `commands` / `packets` / `world` / `entities` /
   `console`), covering custom events, `/slash` commands, scheduling, raw packet taps, block editing,
   weather, sounds and particles, and **programmable entities** (see [What works today](#what-works-today)).
-  What it still wants: **persistent storage** for scripts (state dies with a restart today) and events for
-  the newer features (weather, equipment).
+  The event model has since caught up with the newer features: **weather** (`WeatherChange`, cancellable and
+  redirectable, posted by the world itself so `/weather`, a script and the api all pass through it) and
+  **equipment** (`PlayerArmorChange` and `PlayerHeldItemChange`, whatever the piece came from — a creative
+  drag, a survival window click, or `setArmor` from code). What it still wants: **persistent storage** for
+  scripts (state dies with a restart today).
 - **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
   **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
   cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry

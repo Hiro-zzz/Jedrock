@@ -1,6 +1,7 @@
 package com.jedrock.core.player;
 
 import com.jedrock.api.event.EventBus;
+import com.jedrock.api.event.player.PlayerArmorChangeEvent;
 import com.jedrock.api.event.player.PlayerKickEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
@@ -454,6 +455,13 @@ public final class CorePlayer implements Player {
      */
     @Override
     public void setArmor(com.jedrock.api.player.ArmorSlot slot, int state) {
+        // Listeners may refuse the piece. Nothing has been drawn anywhere yet, so a refusal simply
+        // doesn't happen — unlike the window paths, where the client moved the piece first.
+        if (eventBus != null && eventBus.hasListeners(PlayerArmorChangeEvent.class)
+                && eventBus.post(new PlayerArmorChangeEvent(this, slot, getArmor(slot), state))
+                        .isCancelled()) {
+            return;
+        }
         inventory.set(slot.inventorySlot(), state, state == 0 ? 0 : 1);
         syncInventory(); // refreshes the wearer's own view and fires the equipment hooks
     }

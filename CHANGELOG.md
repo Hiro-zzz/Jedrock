@@ -84,6 +84,37 @@ unstable — anything may change between entries.
   `PeHeldItemEncodingTest` (both PE wire shapes), `EntityTypeIdsTest` (non-mob types have no mob id)
   and `ScriptEntitiesTest` (a prop is an entity like any other).
 
+### Added
+
+- **Events for weather and equipment — the event model catches up with the features.** Three additions
+  close the gap the roadmap named: the sky and a player's gear could both be changed, but nothing could
+  subscribe to either.
+  **`WeatherChangeEvent`** carries `from` / `to`, and is both cancellable and redirectable (`setTo`) — a
+  server that wants rain but never thunder is four lines. It is posted by `CoreWorld.setWeather` itself
+  rather than by its callers, which is a deliberate exception to how block events work (those fire at the
+  handler that decided on the edit): a block edit arrives from one player through one handler, while a
+  weather change has three front doors — `/weather`, a script's `world.setWeather`, and the api — and only
+  the world is common to all of them. Nothing has been sent to a client when the event fires, so a refusal
+  leaves nothing to undo.
+  **`PlayerArmorChangeEvent`** fires per slot with the previous and next state, wherever the piece came
+  from: `Player.setArmor` from code, a creative client's drag into slots 36-39, or a survival window click.
+  The window paths compare the four worn slots before and after the click instead of predicting what the
+  click will do — what a click does depends on the cursor — and a refused change is written back and
+  corrected on the client by the resync that path already performs. Only snapshotted when something is
+  listening.
+  **`PlayerHeldItemChangeEvent`** fires on a real hotbar switch (not when the stack inside the held slot
+  changes — the player didn't choose that), carrying both slots and both items. Cancelling has the same
+  honest limit as the sneak toggle: the server refuses to *reflect* the switch — nothing that reads the
+  held item sees it and no other client redraws the hand — but the switcher's own hotbar stays where they
+  put it, because no edition here has a clientbound packet that moves it back. `onHeldSlotChange` moved
+  from `JedrockServer` into `ContainerService` on the way, where the rest of the equipment logic lives.
+  All three are scriptable by name (`events.on('WeatherChange', …)`), demonstrated in `plugins/example.js`.
+  **A Rhino trap is now pinned by a test**, because it cost this project a bug once already (script command
+  args) and every enum-carrying event walks into it: a `String` returned *from Java* is not `===` a JS
+  string literal, so `e.getTo().name() === 'THUNDER'` is silently false and the `if` around a listener's
+  real work never runs. Loose `==`, `String(…)`, and comparing the enum constants themselves all behave —
+  the test asserts all four outcomes at once so the guidance can't rot.
+
 ### Changed
 
 - **`JedrockServer` split into five collaborators (1822 → 1043 lines).** The class had accumulated every

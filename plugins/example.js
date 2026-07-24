@@ -119,6 +119,24 @@ events.on('GameModeChange', function (e) {              // from / newGameMode; s
     console.log(e.getPlayer().getName(), e.getFrom().name(), '->', e.getNewGameMode().name());
 });
 
+// --- Equipment: what a player wears and what they hold ---
+events.on('PlayerArmorChange', function (e) {           // slot + previous/next state; cancellable
+    bump('PlayerArmorChange');
+    // Fires wherever the piece came from: a creative drag, a survival window click, or setArmor from
+    // code. Cancelling puts the slot back and corrects the client.
+    if (e.getNext() !== 0 && e.getSlot().name() === 'HELMET') {
+        e.getPlayer().sendMessage('{gray}Nice hat.');
+    }
+});
+
+events.on('PlayerHeldItemChange', function (e) {        // previous/new slot + previous/new item; cancellable
+    bump('PlayerHeldItemChange');
+    // Only a real hotbar switch fires this — not the stack changing inside the slot you already hold.
+    // Cancelling makes the server refuse to believe the switch (the client's own hotbar still moves).
+    // e.g. lock everyone to slot 0 while a minigame runs:
+    // if (locked) e.setCancelled(true);
+});
+
 // --- Blocks ---
 events.on('BlockBreak', function (e) {                  // x/y/z + canonical state; cancellable
     bump('BlockBreak');
@@ -141,6 +159,20 @@ events.on('ServerStart', function (e) { bump('ServerStart'); console.log('server
 events.on('ServerStop',  function (e) { bump('ServerStop');  console.log('server stopping'); });
 events.on('ServerTick',  function (e) { bump('ServerTick'); });   // e.getTick(); fires 20×/sec — counted only
 events.on('WorldSave',   function (e) { bump('WorldSave'); console.log('world saved:', e.getWorld().getName()); });
+
+var Weather = Packages.com.jedrock.api.world.Weather;   // the enum itself, for reading and redirecting
+
+events.on('WeatherChange', function (e) {               // from / to; setTo redirects; cancellable
+    bump('WeatherChange');
+    // Every way in lands here: /weather, world.setWeather, or the Java api. Nothing has been sent to a
+    // client yet, so cancelling leaves no trace — and setTo redirects instead of refusing.
+    // CAREFUL: a String that came from Java is NOT === a JS string, so `e.getTo().name() === 'THUNDER'`
+    // is silently false. Compare the enum constants (below), use ==, or wrap in String(...).
+    if (e.getTo() == Weather.THUNDER) {
+        e.setTo(Weather.RAIN);                          // no storms on this server
+    }
+    console.log('sky:', String(e.getFrom().name()), '->', String(e.getTo().name()));
+});
 
 // ============================================================================
 //  SCHEDULER — ticks (20/sec). Handles have .cancel().

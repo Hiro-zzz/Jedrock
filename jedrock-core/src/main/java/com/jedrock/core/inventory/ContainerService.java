@@ -3,6 +3,8 @@ package com.jedrock.core.inventory;
 import com.jedrock.api.event.EventBus;
 import com.jedrock.api.event.block.PlayerInteractBlockEvent;
 import com.jedrock.api.event.player.InventoryClickEvent;
+import com.jedrock.api.event.player.PlayerArmorChangeEvent;
+import com.jedrock.api.event.player.PlayerHeldItemChangeEvent;
 import com.jedrock.api.player.ArmorSlot;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
@@ -50,6 +52,10 @@ public final class ContainerService {
                 && events.post(new InventoryClickEvent(player, coreSlot, button, shift)).isCancelled();
         // coreSlot < 0 = an unbacked slot (crafting grid) or a click mode we don't model — resync only.
         if (!vetoed && coreSlot >= 0 && coreSlot < inv.size()) {
+            // A click can dress or undress the player — dragging a helmet in, or shifting one out — and
+            // what it ends up doing depends on the cursor, so the armor is compared after the fact
+            // rather than predicted. Only snapshotted when somebody is listening.
+            int[] wornBefore = armorSnapshot(player);
             if (shift) {
                 // Quick-move to the "other" region: hotbar↔main, and armor/off-hand back into storage.
                 int from, to;
@@ -60,6 +66,7 @@ public final class ContainerService {
             } else {
                 InventoryClick.normal(inv, cur, coreSlot, button == 1);
             }
+            vetoArmorChanges(player, wornBefore);
         }
         // Server is authoritative: resync the whole window + cursor, overriding any client misprediction.
         player.syncInventory();
@@ -323,14 +330,88 @@ public final class ContainerService {
         }
         Container inv = player.getInventory();
         if (coreSlot >= 0 && coreSlot < inv.size()) {
+            int[] wornBefore = armorSnapshot(player);
             inv.set(coreSlot, state, count); // mirror only; the creative client already shows it
             // A creative player dragging armor into slots 36-39 dresses their avatar for everyone else;
             // dropping something into the held slot redraws the hand the same way.
             if (coreSlot >= ArmorSlot.HELMET.inventorySlot() && coreSlot <= ArmorSlot.BOOTS.inventorySlot()) {
+                if (vetoArmorChanges(player, wornBefore)) {
+                    // Refused: the creative client already drew the piece on itself, so correct it with
+                    // the slot as the server now holds it — the same correction a refused edit gets.
+                    player.syncSlot(coreSlot);
+                    return;
+                }
                 broadcast.armor(player);
             } else if (coreSlot == player.getHeldItemSlot()) {
                 broadcast.heldItem(player);
             }
         }
+    }
+
+    public void onHeldSlotChange(PlayerConnection connection, int slot) {
+        CorePlayer player = players.getByConnectionOrNull(connection);
+        if (player == null) {
+            return;
+        }
+        // Let listeners refuse the switch. Only a real move between hotbar slots is announced — a client
+        // re-reporting the slot it already holds isn't a choice the player made. Cancelling means the
+        // server doesn't record the switch, so nothing that reads the held item sees it and no other
+        // client redraws the hand; the switcher's own hotbar stays where they put it (no edition here has
+        // a packet to move it back).
+        int previousSlot = player.getHeldItemSlot();
+        if (slot >= 0 && slot < 9 && slot != previousSlot
+                && events.hasListeners(PlayerHeldItemChangeEvent.class)) {
+            PlayerHeldItemChangeEvent event = new PlayerHeldItemChangeEvent(player, previousSlot, slot,
+                    player.getHeldItem(), player.getInventory().stateAt(slot));
+            if (events.post(event).isCancelled()) {
+                return;
+            }
+        }
+        player.setHeldItemSlot(slot);
+        broadcast.heldItem(player);
+    }
+
+    /**
+     * The four worn states, or {@code null} when nothing is listening for armor changes — the snapshot
+     * exists only to compare against, so an unlistened server doesn't take one.
+     */
+    private int[] armorSnapshot(CorePlayer player) {
+        if (!events.hasListeners(PlayerArmorChangeEvent.class)) {
+            return null;
+        }
+        ArmorSlot[] slots = ArmorSlot.values();
+        int[] worn = new int[slots.length];
+        for (int i = 0; i < slots.length; i++) {
+            worn[i] = player.getArmor(slots[i]);
+        }
+        return worn;
+    }
+
+    /**
+     * Post one {@link PlayerArmorChangeEvent} per piece that {@code wornBefore} says has changed, and put
+     * back any piece a listener refused. The caller resyncs the window afterwards, which is what actually
+     * tells the client about the reversal.
+     *
+     * @return {@code true} if at least one change was refused
+     */
+    private boolean vetoArmorChanges(CorePlayer player, int[] wornBefore) {
+        if (wornBefore == null) {
+            return false; // nobody listening — nothing was snapshotted
+        }
+        boolean refused = false;
+        Container inv = player.getInventory();
+        for (ArmorSlot slot : ArmorSlot.values()) {
+            int previous = wornBefore[slot.ordinal()];
+            int next = player.getArmor(slot);
+            if (previous == next) {
+                continue;
+            }
+            if (events.post(new PlayerArmorChangeEvent(player, slot, previous, next)).isCancelled()) {
+                // Written straight to the container: setArmor would post the event a second time.
+                inv.set(slot.inventorySlot(), previous, previous == 0 ? 0 : 1);
+                refused = true;
+            }
+        }
+        return refused;
     }
 }

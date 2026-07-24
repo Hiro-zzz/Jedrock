@@ -8,6 +8,7 @@ import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Dimension;
+import com.jedrock.api.world.Weather;
 import com.jedrock.core.command.Command;
 import com.jedrock.core.command.CommandManager;
 import com.jedrock.core.net.PacketDirection;
@@ -53,6 +54,69 @@ class PluginManagerTest {
 
     private PluginManager manager(EventBus bus, Path dir, PacketTapRegistry packetTaps) {
         return new PluginManager(bus, null, new Scheduler(), new CommandManager(null), packetTaps, dir);
+    }
+
+    /**
+     * The weather event reaches scripts, and its enum-valued redirect is usable from JS — the one part of
+     * this event that isn't obviously ergonomic through Rhino, so it is pinned rather than assumed. The
+     * script reads the enum the way {@link #aJavaStringFromAnEnumIsNotStrictlyEqualToAJsString} says to.
+     */
+    @Test
+    void aScriptCanRedirectTheWeather(@TempDir Path dir) throws IOException {
+        EventBus bus = new EventBus();
+        CoreWorld world = new CoreWorld("sky", Dimension.OVERWORLD, 1L);
+        world.setEventBus(bus);
+        Files.writeString(dir.resolve("sky.js"),
+                "events.on('WeatherChange', function (e) {\n"
+                        + "  if (e.getTo() == Packages.com.jedrock.api.world.Weather.THUNDER)"
+                        + " e.setTo(Packages.com.jedrock.api.world.Weather.RAIN);\n"
+                        + "});");
+        manager(bus, dir).loadAll();
+
+        world.setWeather(Weather.THUNDER);
+
+        assertEquals(Weather.RAIN, world.getWeather(), "the script downgraded the storm");
+    }
+
+    /**
+     * A Rhino trap worth pinning, because it has already cost this project one bug (script command args)
+     * and every enum-carrying event walks into it: a {@code String} returned <em>from Java</em> is not
+     * strictly equal to a JS string literal, so {@code e.getTo().name() === 'THUNDER'} is silently false
+     * and the {@code if} around a listener's real work never runs. Loose {@code ==}, an explicit
+     * {@code String(…)} cast, and comparing the enum constants themselves all behave.
+     */
+    @Test
+    void aJavaStringFromAnEnumIsNotStrictlyEqualToAJsString(@TempDir Path dir) {
+        EventBus bus = new EventBus();
+        PluginManager plugins = manager(bus, dir);
+        plugins.loadSource("cmp.js",
+                "events.on('PlayerChat', function (e) {\n"
+                        + "  var w = Packages.com.jedrock.api.world.Weather.THUNDER;\n"
+                        + "  e.setMessage('strict=' + (w.name() === 'THUNDER')\n"
+                        + "    + ' loose=' + (w.name() == 'THUNDER')\n"
+                        + "    + ' cast=' + (String(w.name()) === 'THUNDER')\n"
+                        + "    + ' enum=' + (w == Packages.com.jedrock.api.world.Weather.THUNDER));\n"
+                        + "});", 1L);
+
+        PlayerChatEvent event = new PlayerChatEvent(null, "");
+        bus.post(event);
+
+        assertEquals("strict=false loose=true cast=true enum=true", event.getMessage(),
+                "=== against a Java string is the trap; the other three are the ways out");
+    }
+
+    @Test
+    void aScriptCanRefuseTheWeather(@TempDir Path dir) throws IOException {
+        EventBus bus = new EventBus();
+        CoreWorld world = new CoreWorld("sky", Dimension.OVERWORLD, 1L);
+        world.setEventBus(bus);
+        Files.writeString(dir.resolve("sky.js"),
+                "events.on('WeatherChange', function (e) { e.setCancelled(true); });");
+        manager(bus, dir).loadAll();
+
+        world.setWeather(Weather.RAIN);
+
+        assertEquals(Weather.CLEAR, world.getWeather(), "the sky never changed");
     }
 
     private static PacketEvent inbound(int id, byte[] payload) {

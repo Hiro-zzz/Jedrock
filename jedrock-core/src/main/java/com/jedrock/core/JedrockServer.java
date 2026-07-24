@@ -148,6 +148,7 @@ public class JedrockServer implements Server, ConnectionListener {
         this.name = config.name();
         this.defaultWorld = new CoreWorld("world", Dimension.OVERWORLD, config.seed());
         this.judge = new BlindJudge(config.judgeEnabled(), config.maxReach(), config.maxMoveDelta());
+        this.defaultWorld.setEventBus(eventBus); // so a weather change can be vetoed wherever it came from
         this.entities = new EntityDirector(playerRegistry, defaultWorld);
         this.containers = new ContainerService(playerRegistry, defaultWorld, eventBus, broadcast);
         this.combat = new CombatService(playerRegistry, defaultWorld, eventBus, broadcast, entities, judge);
@@ -907,11 +908,7 @@ public class JedrockServer implements Server, ConnectionListener {
 
     @Override
     public void onHeldSlotChange(PlayerConnection connection, int slot) {
-        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
-        if (player != null) {
-            player.setHeldItemSlot(slot);
-            broadcast.heldItem(player);
-        }
+        containers.onHeldSlotChange(connection, slot);
     }
 
     @Override

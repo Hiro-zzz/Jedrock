@@ -11,6 +11,8 @@ import com.jedrock.api.event.player.PlayerDamageEvent;
 import com.jedrock.api.event.player.PlayerDeathEvent;
 import com.jedrock.api.event.player.InventoryClickEvent;
 import com.jedrock.api.event.player.PlayerInteractEntityEvent;
+import com.jedrock.api.event.player.PlayerArmorChangeEvent;
+import com.jedrock.api.event.player.PlayerHeldItemChangeEvent;
 import com.jedrock.api.event.player.PlayerJoinEvent;
 import com.jedrock.api.event.player.PlayerKickEvent;
 import com.jedrock.api.event.player.PlayerLoginEvent;
@@ -25,6 +27,7 @@ import com.jedrock.api.event.player.PlayerUseItemEvent;
 import com.jedrock.api.event.server.ServerStartEvent;
 import com.jedrock.api.event.server.ServerStopEvent;
 import com.jedrock.api.event.server.ServerTickEvent;
+import com.jedrock.api.event.world.WeatherChangeEvent;
 import com.jedrock.api.event.world.WorldSaveEvent;
 
 import java.util.LinkedHashMap;
@@ -68,9 +71,12 @@ public final class EventTypes {
         register("BlockBreak", BlockBreakEvent.class);
         register("BlockPlace", BlockPlaceEvent.class);
         register("PlayerInteractBlock", PlayerInteractBlockEvent.class);
+        register("PlayerArmorChange", PlayerArmorChangeEvent.class);
+        register("PlayerHeldItemChange", PlayerHeldItemChangeEvent.class);
         register("ServerStart", ServerStartEvent.class);
         register("ServerStop", ServerStopEvent.class);
         register("ServerTick", ServerTickEvent.class);
+        register("WeatherChange", WeatherChangeEvent.class);
         register("WorldSave", WorldSaveEvent.class);
     }
 
