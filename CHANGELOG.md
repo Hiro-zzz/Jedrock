@@ -8,6 +8,81 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Two more ways to pose a block: worn, and full-size.** Building on item props, the decoration
+  vocabulary gains the two techniques that put a *block* wherever you want it.
+  **Equipment on entities:** puppets gained `setHeldItem(state)` and `setArmor(slot, state)` (scripts:
+  `entity.setHeldItem(...)`, `entity.setArmor('helmet', ...)`), relayed to every viewer and caught up
+  when a newcomer spawns. Any canonical state works, blocks included — so an entity wearing a block,
+  with `setFlag('invisible', true)` hiding the body, is a block posed at any height with nothing under
+  it. It also just makes better mobs: a script guard can now carry a sword and wear armour.
+  **Falling-block props:** a new `EntityType.FALLING_BLOCK` / `entities.spawnBlock(state, x, y, z)`
+  renders a block at *full size* where an item prop renders a small model. Per edition: **JE** Spawn
+  Object type **70** with the block packed into the object-data int as `id | (meta << 12)` — the exact
+  packing ViaVersion's 1.13 converter unpacks the other way — plus the no-gravity field on 1.12.2;
+  **PE** an AddEntity of PMMP's `FallingSand` (id 66) carrying the block as `id | (meta << 8)`, in
+  `DATA_VARIANT` (index **2**) at 1.1.5 but `DATA_BLOCK_INFO` (index **20**) at 0.14 — the eras moved
+  it — and pinned immobile. 0.14 routes the block through the same crash gate the chunks use.
+  **JE 1.8 renders every prop as a worn block instead**, and that is not a shortcut — it is the only
+  encoding that holds still there. Confirmed on a real 1.8 client: item entities *and* falling blocks
+  both drop to the ground, because a 1.8 client locally simulates the "simple" entity kinds (items,
+  falling blocks, projectiles) rather than interpolating toward the positions the server sends, and 1.8
+  has no no-gravity metadata to switch that off. A living entity is not simulated that way — which is
+  why the hologram armor stands have always held their place — so on 1.8 both prop kinds ride an
+  invisible marker armor stand wearing the item on its head, with the spawn and every later move
+  offset to keep the block where the caller asked. The size distinction survives the substitution: an
+  item prop rides a *small* stand (whose head renders what it wears at about half scale, the nearest
+  1.8 has to the item entity other versions use) and a block prop a full-size one. Later versions use
+  the real entity types with no-gravity set. `/decor` in `plugins/example.js` shows all three techniques. Tested in
+  `EntityTypeIdsTest` (prop types have object types, not mob ids) and `ScriptEntitiesTest` (worn block
+  + full-size block).
+
+- **Item props — blocks and items as free-standing decoration, cross-edition.** A new canonical
+  `EntityType.ITEM`: an entity whose *body is an item or a block*, rendered as a small floating model.
+  It is the decoration primitive, and it does what a real block cannot — sit at a fractional position,
+  hang unsupported in mid-air, overlap its neighbours, carry a floating label, and move. `Server
+  .spawnItem(location, state)` and, for scripts, `entities.spawnItem(Blocks.state(89, 0), x, y, z)`
+  returning the same `ScriptEntity` as any other entity, so props tick, pose and despawn alike. **No
+  resource pack is involved**: this is a vanilla entity type doing its normal job, so it renders on
+  unmodified clients — which is the whole point, since a server pack would break the project's
+  join-with-any-client promise (and 0.14 barely supports one).
+  Per edition, because an item stack is not a mob: **JE** spawns it with Spawn Object (1.8 `0x0E`,
+  fixed-point; 1.12.2 `0x00`, doubles; object type 2 both) and then names the item in **Entity
+  Metadata** — index **10** at 1.8 and **6** at 1.12.2, the shift ViaVersion's own index table records
+  (item was 5 in 1.9; 1.10 inserted no-gravity at 5 and pushed every later field along); 1.12.2 also
+  pins no-gravity. **PE** uses `AddItemEntity` (1.1.5 `0x0f`, 0.14 `0x9a` big-endian), spawned
+  immobile — inline in the metadata at 1.1.5, and at 0.14 with a following `SetEntityData`, since that
+  era's packet has no metadata field at all. Zero velocity everywhere, and the server never sends a
+  pickup, so a prop is inert. `/decor` demo in `plugins/example.js` (a hovering lantern, a ring of gems
+  at fractional radius inside one block's footprint, and a bobbing centrepiece). Tested in
+  `PeHeldItemEncodingTest` (both PE wire shapes), `EntityTypeIdsTest` (non-mob types have no mob id)
+  and `ScriptEntitiesTest` (a prop is an entity like any other).
+
+### Changed
+
+- The Java Edition **Slot** wire format now lives in one place (`JeSlots`) instead of being spelled out
+  again in every packet that carries an item.
+
+- **Programmable entities for scripts — the `entities` global.** Puppets stop being one-off props and
+  become the scripting API's mob primitive: an eighth global lets a script spawn bodies, drive them and
+  find them. `entities.spawn('zombie', x, y, z)` (or a `Location`, optionally named) returns a
+  `ScriptEntity` with movement (`moveTo`, `teleport`, `moveToward(target, speed)` — a straight-line step
+  that walks through walls as happily as across a field, because there is still no pathfinding),
+  aim (`lookAt` accepting a point, a player or another entity), looks (`setNameTag`, `setFlag('on_fire')`),
+  animations (`swing`, `hurt`), a per-entity **state bag** (`set` / `get` / `has` — the entity's memory
+  between ticks), spatial queries (`nearestPlayer(radius)`, `distanceTo(anything)`), and the two hooks
+  that make it programmable: **`onTick(fn)`** — the mob's brain, run every tick with the entity as its
+  argument — and `onInteract(fn)`. Plus `entities.all()` / `near(x, y, z, r)` / `count()` / `removeAll()`.
+  The server still simulates nothing: behaviour is whatever the script writes, which is the illusionist
+  model taken to its conclusion.
+  **Entities are owned by the plugin that spawned them** and despawned on unload or hot-reload, following
+  the same lifecycle as its commands, tasks and taps — this also fixes a leak, since a script that
+  spawned puppets previously left them standing after a reload with callbacks bound to a torn-down scope.
+  Ticking costs **one scheduled task per plugin**, not per entity, started lazily on the first `onTick`;
+  every callback runs on the game-loop thread under the usual script lock, and a throwing handler is
+  logged without stalling the others. `/guard` and `/despawn` demos in `plugins/example.js`. Tested in
+  `ScriptEntitiesTest` (spawn + dress + drive from a tick handler, reload despawns the old bodies, a
+  handler stops with the entity it drives).
+
 - **Armor on avatars, cross-edition.** A worn helmet / chestplate / leggings / boots now render on the
   wearer's avatar for every other player, on all four protocols. Visual only — the illusionist rule
   holds, the server simulates no protection. New `ArmorSlot` enum (head-to-feet, each carrying its

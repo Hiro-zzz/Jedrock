@@ -85,6 +85,23 @@ public interface PlayerConnection {
      * is the entity's uuid (JE 1.12.2 SpawnMob carries it; other editions ignore it). A connection that
      * can't render it may ignore the call.
      */
+    /**
+     * Spawn an item prop — a dropped-item entity rendering {@code state} (canonical
+     * {@code (id << 4) | meta}, a block id included) at a position. Its own packet on every edition,
+     * because an item stack isn't a mob. Spawned immobile, so it stays exactly where it was put.
+     * Default no-op.
+     */
+    default void spawnItemEntity(long entityId, java.util.UUID uuid,
+                                 double x, double y, double z, int state) {}
+
+    /**
+     * Spawn a falling-block prop — an entity whose body is a <b>full-size</b> block, unlike the small
+     * model an item prop renders. Pinned in place where the edition allows it (see the implementations:
+     * JE 1.8 has no no-gravity field, so it is the one that may drift). Default no-op.
+     */
+    default void spawnFallingBlock(long entityId, java.util.UUID uuid,
+                                   double x, double y, double z, int state) {}
+
     default void spawnEntity(long entityId, java.util.UUID uuid, com.jedrock.api.entity.EntityType type,
                              double x, double y, double z, float yaw, float pitch) {}
 

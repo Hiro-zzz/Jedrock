@@ -112,6 +112,16 @@ public final class PluginManager {
         return scheduler;
     }
 
+    Server server() {
+        return server;
+    }
+
+    /** How many entities a loaded plugin currently owns (-1 if it isn't loaded). For tests and diagnostics. */
+    public int entityCount(String pluginName) {
+        ScriptPlugin plugin = plugins.get(pluginName);
+        return plugin == null ? -1 : plugin.entities().size();
+    }
+
     CommandManager commandManager() {
         return commandManager;
     }
@@ -213,6 +223,8 @@ public final class PluginManager {
                 if (server != null) { // headless tests run without a server (and thus without a world)
                     ScriptableObject.putProperty(scope, "world",
                             Context.javaToJS(new ScriptWorld(server.getDefaultWorld()), scope));
+                    ScriptableObject.putProperty(scope, "entities",
+                            Context.javaToJS(new ScriptEntities(this, plugin), scope));
                 }
                 ScriptableObject.putProperty(scope, "console",
                         Context.javaToJS(new ScriptConsole(name), scope));
@@ -333,6 +345,32 @@ public final class PluginManager {
     }
 
     /**
+     * Invoke an entity callback — a per-tick brain or an interaction — with the entity as the first
+     * argument and, for an interaction, the player as the second. Same script lock, same Rhino context
+     * and same swallow-and-log as {@link #callHandler}, so one misbehaving entity can't stall the tick
+     * loop or break the others.
+     */
+    void callEntityHandler(ScriptPlugin plugin, Function handler, ScriptEntity entity, Object second) {
+        scriptLock.lock();
+        try {
+            Context cx = contextFactory.enterContext();
+            try {
+                Scriptable scope = plugin.scope();
+                Object[] args = second == null
+                        ? new Object[]{Context.javaToJS(entity, scope)}
+                        : new Object[]{Context.javaToJS(entity, scope), Context.javaToJS(second, scope)};
+                handler.call(cx, scope, scope, args);
+            } finally {
+                Context.exit();
+            }
+        } catch (RuntimeException e) {
+            LOGGER.error("Plugin " + plugin.name() + " entity handler threw: " + e.getMessage());
+        } finally {
+            scriptLock.unlock();
+        }
+    }
+
+    /**
      * Run a no-argument script callback that a scheduled task fired. Mirrors {@link #callHandler} — same
      * script lock, same Rhino context, same swallow-and-log — but for a {@code scheduler} task. When
      * {@code oneShotHandle} is non-null the task was a one-shot: drop it from the plugin now it has fired,
@@ -430,6 +468,11 @@ public final class PluginManager {
         }
         for (Scheduler.Task task : plugin.tasks()) {
             task.cancel();
+        }
+        // Despawn the script's entities — a reloaded script must not inherit bodies whose brains
+        // (tick and interaction callbacks) belong to the torn-down scope.
+        for (ScriptEntity entity : plugin.entities()) {
+            entity.remove();
         }
         for (Command command : plugin.commands()) {
             commandManager.unregister(command);

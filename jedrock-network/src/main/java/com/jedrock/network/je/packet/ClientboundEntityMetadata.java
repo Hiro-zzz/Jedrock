@@ -35,10 +35,13 @@ public final class ClientboundEntityMetadata implements ClientboundPacket {
     private static final int INDEX_CUSTOM_NAME_VISIBLE = 3;
     private static final int INDEX_NO_GRAVITY = 5;
     private static final int INDEX_HAND_STATES = 6;
+    /** An item-stack entity's item — the same index the hand-states field uses on a living entity. */
+    private static final int INDEX_ITEM = 6;
     private static final int INDEX_ARMOR_STAND_FLAGS = 11;
 
     private static final int TYPE_BYTE = 0;
     private static final int TYPE_STRING = 3;
+    private static final int TYPE_SLOT = 5;
     private static final int TYPE_BOOLEAN = 6;
     private static final int METADATA_END = 0xFF;
 
@@ -69,6 +72,27 @@ public final class ClientboundEntityMetadata implements ClientboundPacket {
     /** A puppet's floating name; {@code null} / empty hides it. */
     public static ClientboundEntityMetadata nameTag(int entityId, String name) {
         return new ClientboundEntityMetadata(entityId, b -> writeNameTag(b, name));
+    }
+
+    /**
+     * The item an item-stack entity renders. Index 6 at 1.12.2 — ViaVersion's table puts it at 5 in 1.9,
+     * and 1.10 inserted no-gravity at 5, shifting every later subclass field by one. Also pins no-gravity
+     * so a prop never drifts.
+     */
+    /**
+     * Pin an entity against the client's own physics (no-gravity, index 5 — added in 1.10). Needed by
+     * the few entity types a client animates itself, above all a falling block.
+     */
+    public static ClientboundEntityMetadata noGravity(int entityId) {
+        return new ClientboundEntityMetadata(entityId, b -> writeBooleanEntry(b, INDEX_NO_GRAVITY, true));
+    }
+
+    public static ClientboundEntityMetadata item(int entityId, int state) {
+        return new ClientboundEntityMetadata(entityId, b -> {
+            writeKey(b, INDEX_ITEM, TYPE_SLOT);
+            JeSlots.write(b, state, state == 0 ? 0 : 1);
+            writeBooleanEntry(b, INDEX_NO_GRAVITY, true);
+        });
     }
 
     /**

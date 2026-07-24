@@ -209,9 +209,26 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   four editions and are driven for now by the temporary `/puppet` and `/hologram` commands — their real life
   comes with the scripting API.
 
+- ✅ **Props — decoration a real block can't do.** Three ways to put a block or item exactly where no
+  block can go, all without a resource pack (vanilla entity types doing their normal jobs, so they render
+  on unmodified clients across all four protocols): `entities.spawnItem(...)` for a small floating model,
+  `entities.spawnBlock(...)` for a **full-size** block (JE Spawn Object 70 / PE `FallingSand`), and
+  `entity.setArmor('helmet', ...)` on an invisible body — a block worn at any height with nothing holding
+  it up. Props sit at fractional positions, hang unsupported, overlap freely, take floating labels and
+  move. Entities can also hold and wear things for their own sake: a script guard with a sword and armour.
+  Try `/decor`.
+
+- ✅ **Programmable entities.** Puppets are the scripting API's mob primitive: `entities.spawn('zombie',
+  x, y, z)` hands a script a body it can move (`moveToward(target, speed)`), aim (`lookAt`), dress
+  (`setNameTag`, `setFlag`), animate (`swing`, `hurt`) and query (`nearestPlayer(12)`, `distanceTo`) —
+  plus a state bag and, the point of it all, **`onTick(fn)`: the mob's brain, written in JavaScript**.
+  The server simulates nothing; a fifteen-line handler is a guard that watches, follows and returns to
+  its post. Entities belong to the plugin that spawned them and despawn on hot-reload, and a whole
+  plugin's ticking costs one scheduled task. Try `/guard`.
+
 - ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
-  backend, not the compiled core: a script gets seven globals — `server` / `events` / `scheduler` /
-  `commands` / `packets` / `world` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
+  backend, not the compiled core: a script gets eight globals — `server` / `events` / `scheduler` /
+  `commands` / `packets` / `world` / `entities` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
   name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
   work (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too

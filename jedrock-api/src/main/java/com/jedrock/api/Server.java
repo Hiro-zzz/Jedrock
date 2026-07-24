@@ -119,6 +119,22 @@ public interface Server {
     PuppetEntity spawnPuppet(EntityType type, Location at, String name);
 
     /**
+     * Spawn an <b>item prop</b> — a dropped-item entity whose body is {@code state} (a canonical
+     * {@code (id << 4) | meta}; a block id renders as a small floating block, an item as its model).
+     * The decoration primitive: unlike a real block it sits at a fractional position, hangs unsupported,
+     * overlaps its neighbours and takes a floating label. Immobile and never picked up — the server
+     * simulates nothing. Returns the same handle a puppet does, so it moves, turns and despawns alike.
+     */
+    PuppetEntity spawnItem(Location at, int state);
+
+    /**
+     * Spawn a <b>falling-block prop</b> — like {@link #spawnItem} but rendering {@code state} at
+     * <em>full block size</em> rather than as a small model. Pinned against the client's own physics
+     * wherever the edition allows it (JE 1.8 has no such field, so a prop may drift for those players).
+     */
+    PuppetEntity spawnFallingBlock(Location at, int state);
+
+    /**
      * Spawn a hologram — floating lines of text — at {@code at}, visible to every player cross-edition.
      * The topmost line sits at {@code at}; the rest hang below it. Returns a handle to re-text, move or
      * remove it. Lines use the edition-agnostic chat markup, so one string renders the same everywhere.

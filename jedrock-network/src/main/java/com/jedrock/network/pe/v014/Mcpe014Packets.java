@@ -34,6 +34,7 @@ public final class Mcpe014Packets {
     public static final int ID_LEVEL_EVENT = 0xa2;  // outbound: world effects — 1000-series sounds, 0x4000|particle
     public static final int ID_MOB_EQUIPMENT = 0xa7; // both ways: the item in an entity's hand (held-item sync)
     public static final int ID_MOB_ARMOR_EQUIPMENT = 0xa8; // outbound: the four worn armor pieces, one packet
+    public static final int ID_ADD_ITEM_ENTITY = 0x9a;     // outbound: a dropped-item entity, carrying its item
     public static final int WINDOW_ID_ARMOR = 0x78;        // the wearer's own armor slots (SPECIAL_ARMOR)
     public static final int ID_ENTITY_EVENT = 0xa4; // outbound: one-shot entity event (hurt animation etc.)
     public static final int ID_INTERACT = 0xa9;    // inbound: attack / interact with an entity
@@ -64,6 +65,10 @@ public final class Mcpe014Packets {
     public static final int DATA_NAMETAG_INDEX = 2;       // string: the floating nametag
     public static final int DATA_SHOW_NAMETAG_INDEX = 3;  // byte: 1 = always show it
     public static final int DATA_NO_AI_INDEX = 15;        // byte: 1 = immobile
+    /** Int: a falling block's {@code id | (meta << 8)}. PMMP calls it DATA_BLOCK_INFO — index 20 at 0.14,
+     *  where protocol 113 moved the same value to DATA_VARIANT (index 2). */
+    public static final int DATA_BLOCK_INFO_INDEX = 20;
+    public static final int DATA_TYPE_INT = 2;
     public static final int DATA_TYPE_BYTE = 0;
     public static final int DATA_TYPE_STRING = 4;
     public static final int META_END = 0x7f;
@@ -278,6 +283,42 @@ public final class Mcpe014Packets {
         metadata.accept(b);
         b.writeByte(META_END);     // terminates the metadata block
         b.writeShort(0);           // entity links: none
+    }
+
+    /**
+     * AddItemEntity (0x9a) — a dropped-item entity carrying its item, the decoration primitive. Layout,
+     * verbatim from the 0.14-era PMMP {@code AddItemEntityPacket}: eid (BE long), the item Slot, then the
+     * position and speed as three big-endian floats each. Unlike 113's version it has <b>no metadata
+     * field</b>, so immobility has to follow in its own packet — see {@link #setEntityNoAi}.
+     */
+    public static void addItemEntity(ByteBuf b, long eid, double x, double y, double z, int state) {
+        b.writeByte(ID_ADD_ITEM_ENTITY);
+        b.writeLong(eid);
+        writeSlot(b, state, state == 0 ? 0 : 1);
+        b.writeFloat((float) x); b.writeFloat((float) y); b.writeFloat((float) z);
+        b.writeFloat(0f); b.writeFloat(0f); b.writeFloat(0f); // speed: none, it's a prop
+    }
+
+    /**
+     * A falling-block prop: an ordinary AddEntity of the FallingSand type, immobile, with the block it
+     * renders in DATA_BLOCK_INFO (index 20 at 0.14) as {@code id | (meta << 8)}.
+     */
+    public static void addFallingBlock(ByteBuf b, long eid, double x, double y, double z, int blockInfo) {
+        addEntity(b, eid, com.jedrock.network.EntityTypeIds.BEDROCK_FALLING_BLOCK,
+                (float) x, (float) y, (float) z, 0f, 0f,
+                meta -> {
+                    writeMetaByte(meta, DATA_NO_AI_INDEX, 1);
+                    meta.writeByte((DATA_TYPE_INT << 5) | DATA_BLOCK_INFO_INDEX);
+                    meta.writeInt(blockInfo);
+                });
+    }
+
+    /** Pin an entity in place (SetEntityData with NO_AI) — what keeps a prop from drifting at 0.14. */
+    public static void setEntityNoAi(ByteBuf b, long eid) {
+        b.writeByte(ID_SET_ENTITY_DATA);
+        b.writeLong(eid);
+        writeMetaByte(b, DATA_NO_AI_INDEX, 1);
+        b.writeByte(META_END);
     }
 
     /** One line of a hologram: an invisible, immobile item entity whose nametag is the floating text. */

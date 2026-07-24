@@ -75,6 +75,14 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Move an avatar previously shown via {@link #showPlayer} to an absolute position. */
     void moveAvatar(JedrockConnection c, long entityId, double x, double y, double z, float yaw, float pitch);
 
+    /** Spawn an item prop (this version's Spawn Object packet plus the metadata carrying the item). */
+    default void spawnItemEntity(JedrockConnection c, long entityId, java.util.UUID uuid,
+                                 double x, double y, double z, int state) {}
+
+    /** Spawn a falling-block prop (Spawn Object type 70, the block packed into its object data). */
+    default void spawnFallingBlock(JedrockConnection c, long entityId, java.util.UUID uuid,
+                                   double x, double y, double z, int state) {}
+
     /** Spawn a non-player puppet entity of the given canonical type (this version's spawn-mob packet). */
     void spawnEntity(JedrockConnection c, long entityId, java.util.UUID uuid,
                      com.jedrock.api.entity.EntityType type,

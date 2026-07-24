@@ -20,11 +20,43 @@ public enum EntityType {
     CHICKEN,
     COW,
     SKELETON,
-    CREEPER;
+    CREEPER,
+    /**
+     * A dropped-item entity — the one type whose body <em>is</em> an item or a block, rendered as a small
+     * floating model. It is the decoration primitive: unlike a real block it can sit at a fractional
+     * position, hang in mid-air, overlap another, and carry a floating label. Like {@link #PLAYER} it has
+     * no mob id; every edition spawns it with its own dedicated packet (see {@code EntityTypeIds}).
+     */
+    ITEM,
+    /**
+     * A falling-block entity — the one type whose body is a <b>full-size</b> block, where {@link #ITEM}
+     * renders the same block as a small model. The other decoration primitive, and the fussier one: a
+     * client animates this type itself, so it is pinned with whatever "don't move" lever each edition
+     * has (JE 1.8 has none — see the handler).
+     */
+    FALLING_BLOCK;
 
     /** Whether this type renders as a player avatar (the NPC path) rather than a mob. */
     public boolean isPlayer() {
         return this == PLAYER;
+    }
+
+    /** Whether this type renders an item / block rather than a creature (the prop path). */
+    public boolean isItem() {
+        return this == ITEM;
+    }
+
+    /** Whether this type renders a full-size block (the falling-block prop path). */
+    public boolean isFallingBlock() {
+        return this == FALLING_BLOCK;
+    }
+
+    /**
+     * Whether this type is a creature spawned through the spawn-mob path — everything that is not a
+     * player avatar or a prop. Only these have a per-edition mob id.
+     */
+    public boolean isMob() {
+        return !isPlayer() && !isItem() && !isFallingBlock();
     }
 
     /** Lower-case canonical name (e.g. {@code "zombie"}), for display and command parsing. */

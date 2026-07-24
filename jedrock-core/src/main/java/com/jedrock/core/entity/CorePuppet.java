@@ -38,13 +38,26 @@ public final class CorePuppet implements PuppetEntity {
     private volatile boolean alive = true;
     private volatile String nameTag;
     private volatile int flags;
+    /** For an {@link EntityType#ITEM} prop: the canonical state its body renders. Unused otherwise. */
+    private final int itemState;
 
     public CorePuppet(EntityType type, String name, World world, Location location, JedrockServer server) {
+        this(type, name, world, location, server, 0);
+    }
+
+    public CorePuppet(EntityType type, String name, World world, Location location, JedrockServer server,
+                      int itemState) {
         this.type = type;
         this.name = name;
         this.world = world;
         this.location = location;
         this.server = server;
+        this.itemState = itemState;
+    }
+
+    /** The item or block an {@link EntityType#ITEM} prop renders as its body. */
+    public int getItemState() {
+        return itemState;
     }
 
     // ===== Entity =====
@@ -157,6 +170,42 @@ public final class CorePuppet implements PuppetEntity {
     /** The puppet's whole canonical flag mask — what the relay hands the network layer. */
     public int getFlags() {
         return flags;
+    }
+
+    /** Held item and the four worn pieces (head-to-feet), as canonical states; 0 = nothing. */
+    private volatile int heldItem;
+    private final int[] armor = new int[com.jedrock.api.player.ArmorSlot.values().length];
+
+    @Override
+    public void setHeldItem(int state) {
+        this.heldItem = state;
+        server.relayPuppetHeldItem(this);
+    }
+
+    @Override
+    public int getHeldItem() {
+        return heldItem;
+    }
+
+    @Override
+    public void setArmor(com.jedrock.api.player.ArmorSlot slot, int state) {
+        armor[slot.ordinal()] = state;
+        server.relayPuppetArmor(this);
+    }
+
+    @Override
+    public int getArmor(com.jedrock.api.player.ArmorSlot slot) {
+        return armor[slot.ordinal()];
+    }
+
+    /** Whether anything is worn — lets the relay skip an all-empty armor packet. */
+    public boolean hasArmor() {
+        for (int state : armor) {
+            if (state != 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

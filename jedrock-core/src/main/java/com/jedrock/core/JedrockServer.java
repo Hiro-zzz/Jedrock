@@ -584,13 +584,28 @@ public class JedrockServer implements Server, ConnectionListener {
 
     @Override
     public PuppetEntity spawnPuppet(EntityType type, Location at, String name) {
-        CorePuppet puppet = new CorePuppet(type, name, defaultWorld, at, this);
+        return register(new CorePuppet(type, name, defaultWorld, at, this), at);
+    }
+
+    @Override
+    public PuppetEntity spawnItem(Location at, int state) {
+        return register(new CorePuppet(EntityType.ITEM, EntityType.ITEM.canonicalName(),
+                defaultWorld, at, this, state), at);
+    }
+
+    @Override
+    public PuppetEntity spawnFallingBlock(Location at, int state) {
+        return register(new CorePuppet(EntityType.FALLING_BLOCK, EntityType.FALLING_BLOCK.canonicalName(),
+                defaultWorld, at, this, state), at);
+    }
+
+    /** Add a freshly built puppet to the roster and show it to everyone online (joiners get it in onLogin). */
+    private PuppetEntity register(CorePuppet puppet, Location at) {
         puppets.add(puppet);
-        // Show it to everyone currently online; a later joiner is shown it in onLogin.
         for (CorePlayer p : playerRegistry.online()) {
             spawnPuppetTo(p.getConnection(), puppet);
         }
-        LOGGER.info("Spawned puppet " + type.canonicalName() + " #" + puppet.getEntityId()
+        LOGGER.info("Spawned puppet " + puppet.getEntityType().canonicalName() + " #" + puppet.getEntityId()
                 + " at " + String.format(java.util.Locale.ROOT, "%.1f,%.1f,%.1f", at.x(), at.y(), at.z()));
         return puppet;
     }
@@ -608,8 +623,17 @@ public class JedrockServer implements Server, ConnectionListener {
                     loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
             return;
         }
-        conn.spawnEntity(puppet.getEntityId(), puppet.getUniqueId(), puppet.getEntityType(),
-                loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
+        if (puppet.getEntityType().isItem()) {
+            // A prop's body IS the item, so it spawns through its own packet on every edition.
+            conn.spawnItemEntity(puppet.getEntityId(), puppet.getUniqueId(),
+                    loc.x(), loc.y(), loc.z(), puppet.getItemState());
+        } else if (puppet.getEntityType().isFallingBlock()) {
+            conn.spawnFallingBlock(puppet.getEntityId(), puppet.getUniqueId(),
+                    loc.x(), loc.y(), loc.z(), puppet.getItemState());
+        } else {
+            conn.spawnEntity(puppet.getEntityId(), puppet.getUniqueId(), puppet.getEntityType(),
+                    loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
+        }
         // Catch the newcomer up on the look the puppet has accumulated since it spawned.
         if (puppet.getFlags() != 0) {
             conn.setEntityFlags(puppet.getEntityId(), puppet.getFlags());
@@ -617,6 +641,13 @@ public class JedrockServer implements Server, ConnectionListener {
         String nameTag = puppet.getNameTag();
         if (nameTag != null && !nameTag.isEmpty()) {
             conn.setEntityNameTag(puppet.getEntityId(), ChatText.toLegacy(nameTag));
+        }
+        // …and whatever it carries, so a newcomer sees a dressed statue rather than a bare mob.
+        if (puppet.getHeldItem() != Blocks.AIR) {
+            conn.showHeldItem(puppet.getEntityId(), puppet.getHeldItem());
+        }
+        if (puppet.hasArmor()) {
+            showPuppetArmorTo(conn, puppet);
         }
     }
 
@@ -644,6 +675,27 @@ public class JedrockServer implements Server, ConnectionListener {
         for (CorePlayer p : playerRegistry.online()) {
             p.getConnection().swingArm(puppet.getEntityId());
         }
+    }
+
+    /** Relay what a puppet holds to every viewer. Called by {@link CorePuppet#setHeldItem}. */
+    public void relayPuppetHeldItem(CorePuppet puppet) {
+        for (CorePlayer p : playerRegistry.online()) {
+            p.getConnection().showHeldItem(puppet.getEntityId(), puppet.getHeldItem());
+        }
+    }
+
+    /** Relay a puppet's worn armor to every viewer. Called by {@link CorePuppet#setArmor}. */
+    public void relayPuppetArmor(CorePuppet puppet) {
+        for (CorePlayer p : playerRegistry.online()) {
+            showPuppetArmorTo(p.getConnection(), puppet);
+        }
+    }
+
+    /** Dress one puppet on one connection (the relay and the join-time catch-up share this). */
+    private static void showPuppetArmorTo(PlayerConnection conn, CorePuppet puppet) {
+        conn.showArmor(puppet.getEntityId(),
+                puppet.getArmor(ArmorSlot.HELMET), puppet.getArmor(ArmorSlot.CHESTPLATE),
+                puppet.getArmor(ArmorSlot.LEGGINGS), puppet.getArmor(ArmorSlot.BOOTS));
     }
 
     /** Relay a puppet's hurt flash to every viewer. Called by {@link CorePuppet#hurt}. */
