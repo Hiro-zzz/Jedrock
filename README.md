@@ -206,8 +206,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   fires an interaction callback. A **hologram** is the same idea with the body removed: floating lines of
   text, authored once in the shared markup, rendered on Java as an invisible marker armor stand and on
   Bedrock as an item entity with no item (neither legacy Bedrock era has an armor stand). Both work on all
-  four editions and are driven for now by the temporary `/puppet` and `/hologram` commands — their real life
-  comes with the scripting API.
+  four editions. `/puppet` and `/hologram` place them by hand; their real life is the scripting API below,
+  which drives the same primitive as **programmable entities** and as **props**.
 
 - ✅ **Props — decoration a real block can't do.** Three ways to put a block or item exactly where no
   block can go, all without a resource pack (vanilla entity types doing their normal jobs, so they render
@@ -350,8 +350,12 @@ jedrock
 │       └── v014/         # Bedrock 0.14 (protocol 45): Pe014RakNetServer + PeSession014 + the
 │                         #   pre-VarInt codec (Mcpe014Codec/Login/Packets/ChunkSerializer/Batch)
 ├── jedrock-gameloop     # Dedicated 20 TPS drift-correcting loop + Scheduler (Tickable)
-└── jedrock-core         # The server: PlayerRegistry, CoreWorld/BlockStorage, JedrockServer,
-                         #   plugin/ (the Rhino script host — the only place a non-api dep lives besides network)
+└── jedrock-core         # The server: JedrockServer, PlayerRegistry, CoreWorld/BlockStorage
+    ├── plugin/          #   the Rhino script host (the only non-api dep besides network) + its globals
+    ├── entity/          #   CorePuppet / PuppetRegistry: the entity behind mobs, holograms and props
+    ├── command/         #   CommandManager + the built-ins, on one CommandSender surface
+    ├── permission/      #   OpList + PermissionManager (groups, wildcards, prefixes)
+    └── world/           #   the bake (terrain, biomes, decoration), storage and level persistence
 ```
 
 Dependency direction: `network → api`, `core → api + network + gameloop + utils`. The network
@@ -424,6 +428,12 @@ scratch buffers, so encoding a chunk allocates nothing per section.
 | `LevelIO` / `BiomeStorage` | core | Persist the baked world + biome map to a compact `world/level.jdw` |
 | `PlayerRegistry` | core | Thread-safe roster indexed by uuid / name / connection |
 | `EventBus` / `EventPriority` | api | Cancellable, priority-ordered events the core routes decisions through; reflection-free, with a `hasListeners` hot-path gate |
+| `PluginManager` / `ScriptPlugin` | core/plugin | The Rhino host: loads `plugins/*.js`, injects the globals, and owns each script's listeners, tasks, commands, taps and entities so a hot-reload tears them all down |
+| `PuppetEntity` / `CorePuppet` | api / core | The server-driven entity: a mob, an NPC, a hologram line or a decoration prop — moved and dressed, never simulated |
+| `ScriptEntity` / `ScriptEntities` | core/plugin | That primitive as scripts see it: movement, state, spatial queries and an `onTick` brain, owned per plugin |
+| `EntityTypeIds` / `EntityFlagIds` | network | The entity counterpart of the block palette: canonical type / flag → each edition's wire ids |
+| `CommandManager` / `CommandSender` | core | One command surface for players and the console, gated by `PermissionManager` (groups, wildcards, deny-wins) |
+| `PacketTapRegistry` | core/net | Raw in/out packet taps on all four protocols, with cancel and inject |
 | `GameLoop` / `Scheduler` | gameloop | 20 TPS heartbeat, run-later / repeating tasks |
 | `TickMetrics` / `ServerStatus` | gameloop / api | Live TPS, MSPT (+ peak), uptime and memory — via `Server.getStatus()` |
 | `Debug` | utils | Optional category-scoped verbose logging (off by default, zero cost) |
@@ -492,8 +502,12 @@ logged with `-Djedrock.status.seconds=30`.
 > default. Add a loopback exemption once:
 > `CheckNetIsolation LoopbackExempt -a -n=Microsoft.MinecraftUWP_yourid`
 
-Tests are plain JUnit 5 (`mvn test`) covering the block matrix, player registry, chunk encoding
-and MCPE compression — no client required.
+Tests are plain JUnit 5 (`mvn test`) — ~340 of them, no client required. Beyond the block matrix,
+player registry, chunk encoding and MCPE compression, they pin the things that are expensive to get
+wrong: the **byte layout** of packets that were ground-truthed against PocketMine or minecraft-data
+(titles, sounds, particles, equipment, inventories, props), the per-edition **id tables**, the
+scripting layer end-to-end (a real script loads, cancels events, registers commands, hot-reloads and
+tears down), and world persistence round-trips.
 
 ---
 
@@ -520,12 +534,15 @@ simulation stays out (see non-goals).
   `EventBus` gained priorities (LOWEST…MONITOR), `ignoreCancelled` listeners, precise removal handles, and a
   `hasListeners` fast-path so the hottest paths (movement) allocate nothing when unlistened — reflection-free
   and dependency-free by design. **The script loader landed too:** custom gameplay now lives in
-  hot-reloadable **JavaScript** plugins (`plugins/*.js`) on a **Rhino** backend, not the compiled core. A
-  script gets `server` / `events` / `console` and wires behaviour with `events.on('PlayerJoin', e => …)`,
-  the handler receiving the real event to read and cancel. Rhino (`rhino-runtime`, ~1.5 MB, pure Java, zero
-  transitive deps) was chosen over GraalJS (tens of MB incl. ICU4J) to keep the tree lean; it lives only in
-  `core`, so the `api` stays runtime-neutral. This is the "scriptable API" pillar going from *planned* to
-  *real* — the gate the rest of the roadmap waited on.
+  hot-reloadable **JavaScript** plugins (`plugins/*.js`) on a **Rhino** backend, not the compiled core.
+  Rhino (`rhino-runtime`, ~1.5 MB, pure Java, zero transitive deps) was chosen over GraalJS (tens of MB
+  incl. ICU4J) to keep the tree lean; it lives only in `core`, so the `api` stays runtime-neutral. That
+  gate is what the rest of the roadmap waited on, and the surface behind it has kept growing — eight
+  globals now (`server` / `events` / `scheduler` / `commands` / `packets` / `world` / `entities` /
+  `console`), covering custom events, `/slash` commands, scheduling, raw packet taps, block editing,
+  weather, sounds and particles, and **programmable entities** (see [What works today](#what-works-today)).
+  What it still wants: **persistent storage** for scripts (state dies with a restart today) and events for
+  the newer features (weather, equipment).
 - **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
   **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
   cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry
@@ -537,16 +554,25 @@ simulation stays out (see non-goals).
   `SNEAKING`, a canonical set holding only what maps to one bit on *every* edition, mapped by `EntityFlagIds`),
   and **swing / hurt** animations. **Holograms** are the purest form of it — a name tag with the body taken
   away: each line is its own invisible entity (Java: a marker armor stand; Bedrock: an item entity with no
-  item, PocketMine's own floating-text hack), authored once in the shared markup. Temporary `/puppet` and
-  `/hologram` commands drive them until the **API** does, so a mob *appears* alive without the server ever
-  running AI or pathfinding. (The wire is ground-truthed and unit-tested; on-screen placement of holograms
-  still wants a nudge against a live client.)
-- **Final touch-ups.** Smaller polish, mostly unlocked by the API: **held-item / equipment relay** (show
-  what a player holds and wears, rendering the specific item-use animation); a fuller **command framework**
-  (typed args and tab-completion — a `CommandSender` abstraction, a unified console and an op + group
-  **permission system** already landed); the
-  **illusion toolkit** (titles / action bars, scoreboards, boss bars, particles, sounds, Bedrock forms);
-  and a **sharper judge** (per-axis limits, interaction ray-casts).
+  item, PocketMine's own floating-text hack), authored once in the shared markup. `/puppet` and `/hologram`
+  place them by hand, but the **API drives them now**: the same primitive is what scripts spawn as
+  programmable entities (with a JS `onTick` for a brain) and as decoration props, so a mob *appears* alive
+  without the server ever running AI or pathfinding.
+- **Decoration — the accidental discovery.** That a puppet can stand anywhere, at any fraction of a block,
+  in mid-air and inside walls, turned out to be the feature rather than the limitation: entities are how
+  this server does **scenery**. Three ways to pose a block or item where no block can go are in (a small
+  item model, a full-size block, or a block worn on an invisible head), on all four protocols and with no
+  resource pack. What would grow it further: **splitting head yaw from body yaw** (the packets already
+  exist), a **wider entity-type vocabulary** (`EntityTypeIds` is two lines per type), and a `/pose`
+  in-game editor that exports a scene as a committable script. Known limits: no armor stands in either PE
+  era, no per-entity scale, no limb posing. And the one number to watch as scenes grow — a static prop
+  costs no ticks but one spawn packet per joining player, and a 0.14 client will find that ceiling first.
+- **Final touch-ups.** Smaller polish, mostly unlocked by the API. Landed since: the **held-item /
+  equipment relay** (what a player holds and wears, on avatars and puppets alike), **titles / action
+  bars**, **sounds and particles**, **weather**, `getPing` and chat **display names**, and a fuller
+  **command framework** (a `CommandSender` abstraction, a unified console, op + group **permissions**).
+  Still open: **typed command args and tab-completion**, the rest of the illusion toolkit (**scoreboards,
+  boss bars, Bedrock forms**), and a **sharper judge** (per-axis limits, interaction ray-casts).
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
   runtime world simulation or physics, no 1.13+ flattening. Knockback is deliberately excluded for the
   same reason — the server simulates no physics. Custom logic that wants any of these lives in a script
