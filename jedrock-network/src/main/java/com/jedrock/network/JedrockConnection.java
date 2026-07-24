@@ -122,6 +122,11 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void showHeldItem(long entityId, int state) {
+        protocolHandler.showHeldItem(this, entityId, state);
+    }
+
+    @Override
     public void playSound(com.jedrock.api.world.Sound sound, double x, double y, double z, float volume, float pitch) {
         protocolHandler.playSound(this, sound, x, y, z, volume, pitch);
     }

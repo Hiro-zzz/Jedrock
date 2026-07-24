@@ -803,6 +803,7 @@ public class JedrockServer implements Server, ConnectionListener {
         CorePlayer player = new CorePlayer(uuid, username, connection, defaultWorld, spawn,
                 gameModeFor(uuid), eventBus);
         player.setPermissions(opList, permissions); // isOp/hasPermission/getPrefix resolve against these
+        player.setHeldItemListener(this::relayHeldItem); // a changed hand redraws on every other client
 
         playerRegistry.add(player);
         defaultWorld.addPlayer(player);
@@ -845,6 +846,11 @@ public class JedrockServer implements Server, ConnectionListener {
             // Sync a currently posed player (crouch / sprint / item-use) so the newcomer sees it.
             if (other instanceof CorePlayer oc && (oc.isSneaking() || oc.isSprinting() || oc.isUsingItem())) {
                 connection.setPose(other.getEntityId(), oc.isSneaking(), oc.isSprinting(), oc.isUsingItem());
+            }
+            // …and whatever they're holding, so a spawned avatar isn't empty-handed until they switch.
+            int otherHeld = other.getHeldItem();
+            if (otherHeld != Blocks.AIR) {
+                connection.showHeldItem(other.getEntityId(), otherHeld);
             }
             other.getConnection().showPlayer(uuid, username, player.getEntityId(),
                     spawn.x(), spawn.y(), spawn.z(), spawn.yaw(), spawn.pitch());
@@ -1473,6 +1479,30 @@ public class JedrockServer implements Server, ConnectionListener {
             Container inv = player.getInventory();
             if (slot < 36) {
                 inv.set(slot, state, count);
+            }
+        }
+    }
+
+    @Override
+    public void onHeldSlotChange(PlayerConnection connection, int slot) {
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player != null) {
+            player.setHeldItemSlot(slot);
+            relayHeldItem(player);
+        }
+    }
+
+    /**
+     * Show what {@code holder} is holding on every other player's copy of their avatar, cross-edition.
+     * Called when they switch hotbar slots and when the held stack itself changes (mine / place /
+     * script edit) — the holder's own client draws their hand from their inventory, so they're skipped.
+     */
+    public void relayHeldItem(CorePlayer holder) {
+        int state = holder.getHeldItem();
+        long entityId = holder.getEntityId();
+        for (CorePlayer other : playerRegistry.online()) {
+            if (other != holder) {
+                other.getConnection().showHeldItem(entityId, state);
             }
         }
     }

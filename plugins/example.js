@@ -172,6 +172,8 @@ commands.register('test', function (player, args) {
     player.sendMessage(' address={white}' + player.getAddress()
         + '{gray} ping={white}' + player.getPing() + 'ms');
     player.sendMessage(' displayName={white}' + player.getDisplayName());
+    player.sendMessage(' held: slot={white}' + player.getHeldItemSlot()
+        + '{gray} item={white}' + player.getHeldItem());
     player.sendMessage(' health={white}' + player.getHealth() + '/' + player.getMaxHealth()
         + '{gray} gamemode={white}' + player.getGameMode().name());
     player.sendMessage(' pose: sneak={white}' + player.isSneaking()

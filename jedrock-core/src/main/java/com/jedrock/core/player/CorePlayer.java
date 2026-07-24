@@ -157,14 +157,41 @@ public final class CorePlayer implements Player {
         return inventory.take(state, 0, STORAGE_SLOTS);
     }
 
+    /**
+     * Notified whenever the item in this player's hand may have changed — the server wires this to
+     * relay the new item onto every other client's copy of the avatar.
+     */
+    @FunctionalInterface
+    public interface HeldItemListener {
+        void heldItemChanged(CorePlayer player);
+    }
+
+    private volatile HeldItemListener heldItemListener;
+
+    public void setHeldItemListener(HeldItemListener listener) {
+        this.heldItemListener = listener;
+    }
+
+    /** Fire the held-item hook (no-op before the server wires it, e.g. in tests). */
+    private void heldItemMayHaveChanged() {
+        HeldItemListener listener = heldItemListener;
+        if (listener != null) {
+            listener.heldItemChanged(this);
+        }
+    }
+
     /** Push one inventory slot to the client (a live pickup / consume — refreshes the hotbar HUD). */
     public void syncSlot(int slot) {
         connection.setInventorySlot(slot, inventory.stateAt(slot), inventory.countAt(slot));
+        if (slot == heldSlot) {
+            heldItemMayHaveChanged(); // the hand itself changed — other clients must redraw it
+        }
     }
 
     /** Push the whole inventory to the client (a reset — join, respawn, game-mode switch). */
     public void syncInventory() {
         connection.setInventory(inventory.states(), inventory.counts());
+        heldItemMayHaveChanged();
     }
 
     // ===== Inventory API (scripting-facing; operates on the 36 storage slots 0-35) =====
@@ -368,6 +395,26 @@ public final class CorePlayer implements Player {
     @Override
     public String getName() {
         return name;
+    }
+
+    /** The selected hotbar slot (0-8), as last reported by the client. */
+    private volatile int heldSlot = 0;
+
+    @Override
+    public int getHeldItemSlot() {
+        return heldSlot;
+    }
+
+    /** Record a hotbar switch reported by the client. Out-of-range slots are ignored. */
+    public void setHeldItemSlot(int slot) {
+        if (slot >= 0 && slot < 9) {
+            this.heldSlot = slot;
+        }
+    }
+
+    @Override
+    public int getHeldItem() {
+        return inventory.stateAt(heldSlot);
     }
 
     /** Chat display name; null = none set, so getDisplayName falls back to the real name. */

@@ -8,6 +8,22 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Held-item tracking — the item in your hand is visible to everyone, cross-edition.** Every edition
+  already reported hotbar switches; the reports were being dropped (JE 1.8 swallowed them outright,
+  1.12.2 and PE 1.1.5 kept a local view for placement only). They now funnel through one
+  `onHeldSlotChange` callback into `CorePlayer`, and the held stack is drawn on every *other* client's
+  copy of the avatar: **JE** Entity Equipment (1.8 `0x04` — slot is an `i16`; 1.12.2 `0x3f` — a varint;
+  slot 0 = main hand), **PE 1.1.5** MobEquipment `0x1f` and **PE 0.14** MobEquipment `0xa7` (big-endian
+  eid, and only two trailing slot bytes — the era predates 113's windowId). A player draws their own
+  hand from their inventory, so the holder is skipped. The visual also refreshes when the *stack*
+  changes rather than the slot (mining a block, placing one, a script `setItem`) — `CorePlayer` fires a
+  `HeldItemListener` from its sync path when the change touches the held slot, following the
+  `CoreWorld.BlockChangeListener` precedent — and a freshly spawned avatar is shown holding whatever it
+  already holds. API: `Player.getHeldItemSlot()` and `getHeldItem()`, both reachable from scripts (in
+  `/test`). 0.14 sends the item through its usual crash gate, so an id it can't render becomes an empty
+  hand instead of a crash. Tested in `PeHeldItemEncodingTest` (both PE wire shapes) and
+  `CorePlayerIdentityTest` (slot tracking, hook fires only for the hand).
+
 - **Weather, cross-edition.** One `Weather` enum (`CLEAR` / `RAIN` / `THUNDER`) on the world — pure
   client-side scenery in the illusionist model: no timer, no simulation, it stays until set again.
   `World.getWeather()` / `setWeather(...)` broadcast a change to every player (deduped — setting the

@@ -229,6 +229,11 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   (or the 0–255 Y range) are dropped at the storage boundary, so no API path can grow the world past its
   edge. Try `/deck` and `/pillar` in `plugins/example.js`.
 
+- ✅ **Held items, cross-edition.** The block or weapon in your hotbar is drawn in your avatar's hand on
+  every other client — JE Entity Equipment, both PE eras' MobEquipment — updating when you switch slots
+  *and* when the stack itself changes (mine, place, a script `setItem`), plus once when an avatar spawns
+  so nobody appears empty-handed. Scripts read `player.getHeldItemSlot()` / `getHeldItem()`.
+
 - ✅ **Weather, cross-edition.** `/weather clear|rain|thunder` (or `world.setWeather('rain')` from a
   script) changes the sky for every player — JE via Change Game State (+ the darkness fade for
   thunder), both PE eras via the LevelEvent 3001-series. Pure scenery: no timer, no simulation; a late
