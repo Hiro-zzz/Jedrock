@@ -15,12 +15,31 @@ public enum EntityType {
      * rather than the spawn-mob path — so it has no mob id (see {@code EntityTypeIds}).
      */
     PLAYER,
+    // Mobs. Every one of these exists on all four target editions; the network layer holds the
+    // per-edition ids (EntityTypeIds) and 0.14's narrower safe set (Pe014Entities).
     ZOMBIE,
     PIG,
     CHICKEN,
     COW,
     SKELETON,
     CREEPER,
+    SHEEP,
+    WOLF,
+    VILLAGER,
+    MOOSHROOM,
+    SQUID,
+    BAT,
+    OCELOT,
+    SNOW_GOLEM,
+    SPIDER,
+    CAVE_SPIDER,
+    SILVERFISH,
+    ENDERMAN,
+    SLIME,
+    ZOMBIE_PIGMAN,
+    GHAST,
+    MAGMA_CUBE,
+    BLAZE,
     /**
      * A dropped-item entity — the one type whose body <em>is</em> an item or a block, rendered as a small
      * floating model. It is the decoration primitive: unlike a real block it can sit at a fractional
@@ -34,7 +53,14 @@ public enum EntityType {
      * client animates this type itself, so it is pinned with whatever "don't move" lever each edition
      * has (JE 1.8 has none — see the handler).
      */
-    FALLING_BLOCK;
+    FALLING_BLOCK,
+    /**
+     * A line of floating text and nothing else — a body taken away until only its label is left. The
+     * same trick a hologram line uses (an invisible marker armor stand on Java, an item entity with no
+     * item on Bedrock), but as an ordinary entity a script owns, moves and ticks like the rest. Its
+     * text is its {@linkplain com.jedrock.api.entity.PuppetEntity#setNameTag name tag}.
+     */
+    TEXT;
 
     /** Whether this type renders as a player avatar (the NPC path) rather than a mob. */
     public boolean isPlayer() {
@@ -51,12 +77,17 @@ public enum EntityType {
         return this == FALLING_BLOCK;
     }
 
+    /** Whether this type is a floating line of text (the label path). */
+    public boolean isText() {
+        return this == TEXT;
+    }
+
     /**
      * Whether this type is a creature spawned through the spawn-mob path — everything that is not a
      * player avatar or a prop. Only these have a per-edition mob id.
      */
     public boolean isMob() {
-        return !isPlayer() && !isItem() && !isFallingBlock();
+        return !isPlayer() && !isItem() && !isFallingBlock() && !isText();
     }
 
     /** Lower-case canonical name (e.g. {@code "zombie"}), for display and command parsing. */

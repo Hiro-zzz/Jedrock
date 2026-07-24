@@ -406,24 +406,49 @@ commands.register('guard', function (player, args) {
     player.sendMessage('{green}Guard posted. {gray}(' + entities.count() + ' entity(ies) from this plugin)');
 });
 
-// /decor — a small scene of item props: blocks and items posed where real blocks can't go.
-// Item entities are the decoration primitive — fractional positions, floating unsupported,
-// overlapping freely, and each one labelable and movable like any other entity.
+// /decor — a scene built as one object: props posed where real blocks can't go, a label naming it,
+// and the whole arrangement kept in a group so it can be turned or cleared in a single call.
+var scene = null;   // remembered so /decor spin and /decor off can act on it
+
 commands.register('decor', function (player, args) {
+    if (args.length > 0 && args[0] === 'spin' && scene) {
+        scene.rotate(45);                       // the whole arrangement turns together
+        player.sendMessage('{gray}Scene turned 45°.');
+        return;
+    }
+    if (args.length > 0 && args[0] === 'off') {
+        if (scene) scene.remove();
+        scene = null;
+        player.sendMessage('{gray}Scene cleared.');
+        return;
+    }
+
     var loc = player.getLocation();
     var x = Math.floor(loc.x()) + 0.5, y = loc.y(), z = Math.floor(loc.z()) + 0.5;
 
-    // A lantern hovering at head height — no block below it, no block it could ever occupy.
-    var lamp = entities.spawnItem(Blocks.state(89, 0), x + 2, y + 2.4, z);
-    lamp.setNameTag('{yellow}Lantern');
+    // A ring of gems at fractional radius: eight props inside one block's footprint. The shape
+    // helper walks the circle; the callback decides what stands at each point.
+    scene = entities.circle(8, x, y + 1.1, z, 1.2, function (px, py, pz) {
+        return entities.spawnItem(Blocks.state(264, 0), px, py, pz);
+    });
+    scene.setPivot(x, y, z);
 
-    // A ring of gems at fractional radius: eight props inside one block's footprint.
-    for (var i = 0; i < 8; i++) {
-        var a = (Math.PI * 2 / 8) * i;
-        entities.spawnItem(Blocks.state(264, 0), x + Math.cos(a) * 1.2, y + 1.1, z + Math.sin(a) * 1.2);
-    }
+    // A lantern hovering at head height — no block below it, no block it could ever occupy —
+    // and its label, which is now an entity like everything else.
+    scene.add(entities.spawnItem(Blocks.state(89, 0), x + 2, y + 2.4, z));
+    scene.add(entities.spawnText('{yellow}Lantern', x + 2, y + 3.1, z));
 
-    // A slowly rising, spinning centrepiece — decoration doesn't have to hold still.
+    // A full-size block floating at half height — an arch a real block can't make.
+    scene.add(entities.spawnBlock(Blocks.state(20, 0), x - 2, y + 2.5, z));
+
+    // The other way to pose a block: wear it. An invisible body holding the block on its head,
+    // which puts it at any height, any angle, with nothing underneath.
+    var pedestal = scene.add(entities.spawn('zombie', x - 2, y, z + 2));
+    pedestal.setFlag('invisible', true);
+    pedestal.setArmor('helmet', Blocks.state(35, 14));
+
+    // A slowly rising centrepiece — decoration doesn't have to hold still. Left out of the group
+    // on purpose: its tick drives its own position, so a group move would fight it.
     var core = entities.spawnItem(Blocks.state(133, 0), x, y + 1.0, z);
     core.set('t', 0);
     core.onTick(function (e) {
@@ -432,16 +457,8 @@ commands.register('decor', function (player, args) {
         e.moveTo(x, y + 1.0 + Math.sin(t / 20) * 0.35, z);
     });
 
-    // A full-size block floating at half height — an arch a real block can't make.
-    entities.spawnBlock(Blocks.state(20, 0), x - 2, y + 2.5, z);
-
-    // The other way to pose a block: wear it. An invisible body holding the block on its head,
-    // which puts it at any height, any angle, with nothing underneath.
-    var pedestal = entities.spawn('zombie', x - 2, y, z + 2);
-    pedestal.setFlag('invisible', true);
-    pedestal.setArmor('helmet', Blocks.state(35, 14));
-
-    player.sendMessage('{green}Scene built {gray}(' + entities.count() + ' props; /despawn clears it)');
+    player.sendMessage('{green}Scene built {gray}(' + scene.size() + ' in the group, '
+        + entities.count() + ' total). {white}/decor spin{gray}, {white}/decor off');
 });
 
 // /despawn — remove every entity this plugin spawned.

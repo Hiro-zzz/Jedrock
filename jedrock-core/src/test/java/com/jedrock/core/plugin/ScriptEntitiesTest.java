@@ -116,6 +116,13 @@ class ScriptEntitiesTest {
             return prop(EntityType.FALLING_BLOCK, at, state);
         }
 
+        @Override
+        public PuppetEntity spawnText(Location at, String text) {
+            FakePuppet puppet = (FakePuppet) prop(EntityType.TEXT, at, 0);
+            puppet.setNameTag(text);
+            return puppet;
+        }
+
         private PuppetEntity prop(EntityType type, Location at, int state) {
             FakePuppet puppet = new FakePuppet(nextId++, type, at);
             puppet.itemState = state;
@@ -234,6 +241,35 @@ class ScriptEntitiesTest {
         assertEquals(67.5, block.getLocation().y(), 1.0e-6, "posed mid-block");
 
         plugins.unloadAll();
+    }
+
+    @Test
+    void aGroupMovesRotatesAndClearsAsOne(@TempDir Path dir) {
+        Scheduler scheduler = new Scheduler();
+        PluginManager plugins = manager(dir, scheduler);
+        plugins.loadSource("scene.js",
+                // Four props on a circle of radius 2 around the origin, plus a label, as one scene.
+                "var scene = entities.circle(4, 0, 64, 0, 2, function (x, y, z) {\n"
+              + "    return entities.spawnItem(89 << 4, x, y, z);\n"
+              + "});\n"
+              + "scene.add(entities.spawnText('{yellow}Ring', 0, 66, 0));\n"
+              + "scene.setPivot(0, 64, 0);\n"
+              + "var placed = scene.size();\n"
+                // A quarter turn carries the first prop from +x to +z, then the scene shifts bodily.
+              + "scene.rotate(90);\n"
+              + "scene.move(10, 0, 0);\n", 1L);
+
+        assertEquals(5, server.spawned.size(), "four props placed on the shape, plus the label");
+        assertEquals(EntityType.TEXT, server.spawned.get(4).getEntityType(), "the label is a text prop");
+        assertEquals("{yellow}Ring", server.spawned.get(4).getNameTag());
+
+        FakePuppet first = server.spawned.get(0);
+        assertEquals(10.0, first.getLocation().x(), 1.0e-6, "rotated a quarter turn, then moved as one");
+        assertEquals(2.0, first.getLocation().z(), 1.0e-6, "the turn carried it from +x round to +z");
+        assertEquals(10.0, server.spawned.get(4).getLocation().x(), 1.0e-6, "the label travelled too");
+
+        plugins.unloadAll();
+        assertEquals(0, server.alive(), "unload clears the scene with its plugin");
     }
 
     @Test

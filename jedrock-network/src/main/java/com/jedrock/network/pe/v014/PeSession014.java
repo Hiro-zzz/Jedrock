@@ -124,6 +124,11 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     @Override
     public void spawnEntity(long entityId, UUID uuid, com.jedrock.api.entity.EntityType type,
                             double x, double y, double z, float yaw, float pitch) {
+        // 0.14 predates some of the canonical mobs; showing it an id it doesn't know risks the same
+        // crash its block palette does, so an unsupported mob is simply not rendered for this client.
+        if (!Pe014Entities.supports(type)) {
+            return;
+        }
         // AddEntity takes feet y. The type maps to the shared MCPE id table.
         int typeId = com.jedrock.network.EntityTypeIds.bedrockId(type);
         sendWrapped(b -> Mcpe014Packets.addEntity(b, entityId, typeId,

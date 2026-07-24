@@ -209,14 +209,17 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   four editions. `/puppet` and `/hologram` place them by hand; their real life is the scripting API below,
   which drives the same primitive as **programmable entities** and as **props**.
 
-- ✅ **Props — decoration a real block can't do.** Three ways to put a block or item exactly where no
-  block can go, all without a resource pack (vanilla entity types doing their normal jobs, so they render
-  on unmodified clients across all four protocols): `entities.spawnItem(...)` for a small floating model,
-  `entities.spawnBlock(...)` for a **full-size** block (JE Spawn Object 70 / PE `FallingSand`), and
-  `entity.setArmor('helmet', ...)` on an invisible body — a block worn at any height with nothing holding
-  it up. Props sit at fractional positions, hang unsupported, overlap freely, take floating labels and
-  move. Entities can also hold and wear things for their own sake: a script guard with a sword and armour.
-  Try `/decor`.
+- ✅ **Props and scenes — decoration a real block can't do.** Three ways to put a block or item exactly
+  where no block can go, all without a resource pack (vanilla entity types doing their normal jobs, so
+  they render on unmodified clients across all four protocols): `entities.spawnItem(...)` for a small
+  floating model, `entities.spawnBlock(...)` for a **full-size** block (JE Spawn Object 70 / PE
+  `FallingSand`), and `entity.setArmor('helmet', ...)` on an invisible body — a block worn at any height
+  with nothing holding it up. Props sit at fractional positions, hang unsupported and overlap freely.
+  `entities.spawnText(...)` gives them **labels** (a hologram line, but an ordinary entity), and
+  `entities.group()` makes a **scene**: add props, then `move` / `rotate(degrees)` / `remove` the whole
+  arrangement at once, with `circle` / `line` / `grid` helpers to place a callback's output along a
+  shape. Entities can also hold and wear things for their own sake: a script guard with a sword and
+  armour. Try `/decor`, then `/decor spin`.
 
 - ✅ **Programmable entities.** Puppets are the scripting API's mob primitive: `entities.spawn('zombie',
   x, y, z)` hands a script a body it can move (`moveToward(target, speed)`), aim (`lookAt`), dress
@@ -562,11 +565,13 @@ simulation stays out (see non-goals).
   in mid-air and inside walls, turned out to be the feature rather than the limitation: entities are how
   this server does **scenery**. Three ways to pose a block or item where no block can go are in (a small
   item model, a full-size block, or a block worn on an invisible head), on all four protocols and with no
-  resource pack. What would grow it further: **splitting head yaw from body yaw** (the packets already
-  exist), a **wider entity-type vocabulary** (`EntityTypeIds` is two lines per type), and a `/pose`
-  in-game editor that exports a scene as a committable script. Known limits: no armor stands in either PE
-  era, no per-entity scale, no limb posing. And the one number to watch as scenes grow — a static prop
-  costs no ticks but one spawn packet per joining player, and a 0.14 client will find that ceiling first.
+  resource pack, plus **labels** and **groups** so an arrangement is authored and moved as one, and a
+  cast of **23 mob types** to pose. What would grow it further: **splitting head yaw from body yaw** (the
+  packets already exist), **saving a scene** so it survives a restart without a script rebuilding it, and
+  a `/pose` in-game editor that exports one as a committable file. Known limits: no armor stands in
+  either PE era, no per-entity scale, no limb posing, and 0.14 renders only the mobs it is old enough to
+  know. And the one number to watch as scenes grow — a static prop costs no ticks but one spawn packet
+  per joining player, and a 0.14 client will find that ceiling first.
 - **Final touch-ups.** Smaller polish, mostly unlocked by the API. Landed since: the **held-item /
   equipment relay** (what a player holds and wears, on avatars and puppets alike), **titles / action
   bars**, **sounds and particles**, **weather**, `getPing` and chat **display names**, and a fuller

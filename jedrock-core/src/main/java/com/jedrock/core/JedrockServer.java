@@ -599,6 +599,14 @@ public class JedrockServer implements Server, ConnectionListener {
                 defaultWorld, at, this, state), at);
     }
 
+    @Override
+    public PuppetEntity spawnText(Location at, String text) {
+        CorePuppet puppet = new CorePuppet(EntityType.TEXT, EntityType.TEXT.canonicalName(),
+                defaultWorld, at, this, 0);
+        puppet.initNameTag(text); // the text must be set before the spawn relay carries it out
+        return register(puppet, at);
+    }
+
     /** Add a freshly built puppet to the roster and show it to everyone online (joiners get it in onLogin). */
     private PuppetEntity register(CorePuppet puppet, Location at) {
         puppets.add(puppet);
@@ -630,6 +638,12 @@ public class JedrockServer implements Server, ConnectionListener {
         } else if (puppet.getEntityType().isFallingBlock()) {
             conn.spawnFallingBlock(puppet.getEntityId(), puppet.getUniqueId(),
                     loc.x(), loc.y(), loc.z(), puppet.getItemState());
+        } else if (puppet.getEntityType().isText()) {
+            // A label's whole body is its text, so it spawns through the hologram-line path with the
+            // name tag as the content — and the catch-up below would only re-send the same string.
+            conn.spawnTextLine(puppet.getEntityId(), puppet.getUniqueId(),
+                    loc.x(), loc.y(), loc.z(), ChatText.toLegacy(puppet.getNameTag()));
+            return;
         } else {
             conn.spawnEntity(puppet.getEntityId(), puppet.getUniqueId(), puppet.getEntityType(),
                     loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());

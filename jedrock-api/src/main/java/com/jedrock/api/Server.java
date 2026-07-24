@@ -135,6 +135,14 @@ public interface Server {
     PuppetEntity spawnFallingBlock(Location at, int state);
 
     /**
+     * Spawn a <b>floating line of text</b> — a hologram line as an ordinary entity, so it moves, ticks
+     * and despawns like the rest. Re-text it with {@link PuppetEntity#setNameTag}. For a block of
+     * several lines, spawn one per line (a group keeps them together) or use
+     * {@link #spawnHologram}, which manages the stack for you.
+     */
+    PuppetEntity spawnText(Location at, String text);
+
+    /**
      * Spawn a hologram — floating lines of text — at {@code at}, visible to every player cross-edition.
      * The topmost line sits at {@code at}; the rest hang below it. Returns a handle to re-text, move or
      * remove it. Lines use the edition-agnostic chat markup, so one string renders the same everywhere.
