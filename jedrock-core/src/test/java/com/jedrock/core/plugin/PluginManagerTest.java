@@ -23,6 +23,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -388,6 +389,48 @@ class PluginManagerTest {
         player.setHealth(20);
         cm.dispatch(player, "/eq clear");
         assertEquals(3, player.getHealth(), "args[0] === 'clear' matched a primitive string");
+    }
+
+    @Test
+    void aScriptCommandCanSupplyTabCompletion(@TempDir Path dir) {
+        CommandManager cm = new CommandManager(null);
+        PluginManager plugins = manager(new EventBus(), dir, cm);
+        plugins.loadSource("kit.js",
+                "commands.register({\n"
+              + "  name: 'kit',\n"
+              + "  execute: function (player, args) {},\n"
+              + "  complete: function (player, args) { return ['starter', 'pvp', 'builder']; }\n"
+              + "});", 1L);
+
+        CorePlayer player = newPlayer();
+        // On the first argument: the script's whole list, narrowed to the partial by the core.
+        assertEquals(List.of("starter", "pvp", "builder"), cm.complete(player, "/kit "));
+        assertEquals(List.of("pvp"), cm.complete(player, "/kit p"));
+    }
+
+    @Test
+    void aScriptCommandWithoutCompleteOffersNothing(@TempDir Path dir) {
+        CommandManager cm = new CommandManager(null);
+        PluginManager plugins = manager(new EventBus(), dir, cm);
+        plugins.loadSource("plain.js",
+                "commands.register('plain', function (player, args) {});", 1L);
+
+        assertTrue(cm.complete(newPlayer(), "/plain ").isEmpty(), "no completer, no suggestions");
+        // But the label still completes.
+        assertTrue(cm.complete(newPlayer(), "/pla").contains("/plain"));
+    }
+
+    @Test
+    void aThrowingCompleterYieldsNoSuggestionsRatherThanBreakingTyping(@TempDir Path dir) {
+        CommandManager cm = new CommandManager(null);
+        PluginManager plugins = manager(new EventBus(), dir, cm);
+        plugins.loadSource("boomc.js",
+                "commands.register({\n"
+              + "  name: 'boomc', execute: function (p, a) {},\n"
+              + "  complete: function (p, a) { throw new Error('nope'); }\n"
+              + "});", 1L);
+
+        assertTrue(cm.complete(newPlayer(), "/boomc ").isEmpty(), "a broken completer must not throw to the wire");
     }
 
     @Test

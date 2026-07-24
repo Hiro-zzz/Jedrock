@@ -451,17 +451,67 @@ public final class PluginManager {
                 // `args.join(' ')`, `parseInt(args[0])` AND strict `args[0] === 'x'` — all natural. (Passing a
                 // typed String[] instead wraps it as a Java array, handing elements back as Java objects;
                 // wrapping each as `new String()` makes a String OBJECT, which breaks `===` against a literal.)
-                Object[] jsElements = new Object[args.length];
-                System.arraycopy(args, 0, jsElements, 0, args.length);
-                Scriptable jsArgs = cx.newArray(scope, jsElements);
                 handler.call(cx, scope, scope,
-                        new Object[]{Context.javaToJS(sender, scope), jsArgs});
+                        new Object[]{Context.javaToJS(sender, scope), jsArray(cx, scope, args)});
             } finally {
                 Context.exit();
             }
         } finally {
             scriptLock.unlock();
         }
+    }
+
+    /**
+     * Run a script command's optional {@code complete} function and return its suggestions. Same lock and
+     * context as {@link #callCommand}; the handler gets {@code (player, args)} with the last arg the
+     * partial token, and returns an array (or one string) of candidates. A thrown error yields no
+     * suggestions rather than propagating — a broken completer must never break typing. The candidates are
+     * returned as-is; the caller narrows them to the partial.
+     */
+    List<String> callComplete(ScriptPlugin plugin, Function completer, CommandSender sender, String[] args) {
+        scriptLock.lock();
+        try {
+            Context cx = contextFactory.enterContext();
+            try {
+                Scriptable scope = plugin.scope();
+                Object result = completer.call(cx, scope, scope,
+                        new Object[]{Context.javaToJS(sender, scope), jsArray(cx, scope, args)});
+                return toStringList(result);
+            } catch (RuntimeException e) {
+                LOGGER.warn("Plugin " + plugin.name() + " command completer threw: " + e);
+                return List.of();
+            } finally {
+                Context.exit();
+            }
+        } finally {
+            scriptLock.unlock();
+        }
+    }
+
+    /** Build a JS array of primitive strings (see {@link #callCommand} for why primitives, not wrappers). */
+    private static Scriptable jsArray(Context cx, Scriptable scope, String[] args) {
+        Object[] elements = new Object[args.length];
+        System.arraycopy(args, 0, elements, 0, args.length);
+        return cx.newArray(scope, elements);
+    }
+
+    /** Turn a completer's return value — a JS array, a lone string, or nothing — into a list of strings. */
+    private static List<String> toStringList(Object result) {
+        if (result instanceof org.mozilla.javascript.NativeArray array) {
+            long len = array.getLength();
+            List<String> out = new java.util.ArrayList<>((int) len);
+            for (int i = 0; i < len; i++) {
+                Object item = array.get(i, array);
+                if (item != null && item != Scriptable.NOT_FOUND) {
+                    out.add(Context.toString(item));
+                }
+            }
+            return out;
+        }
+        if (result instanceof CharSequence s) {
+            return List.of(s.toString());
+        }
+        return List.of();
     }
 
     /**

@@ -1,7 +1,9 @@
 package com.jedrock.core.plugin;
 
+import com.jedrock.api.Server;
 import com.jedrock.api.command.CommandSender;
 import com.jedrock.core.JedrockServer;
+import com.jedrock.core.command.ArgType;
 import com.jedrock.core.command.Command;
 import org.mozilla.javascript.Function;
 
@@ -24,9 +26,11 @@ final class ScriptCommand implements Command {
     private final String usage;
     private final List<String> aliases;
     private final Function handler;
+    /** Optional {@code complete} function supplying tab-completion suggestions; null = none. */
+    private final Function completer;
 
     ScriptCommand(PluginManager manager, ScriptPlugin plugin, String name, String description, String usage,
-                  List<String> aliases, Function handler) {
+                  List<String> aliases, Function handler, Function completer) {
         this.manager = manager;
         this.plugin = plugin;
         this.name = name;
@@ -34,6 +38,7 @@ final class ScriptCommand implements Command {
         this.usage = usage;
         this.aliases = aliases;
         this.handler = handler;
+        this.completer = completer;
     }
 
     @Override
@@ -59,5 +64,16 @@ final class ScriptCommand implements Command {
     @Override
     public void execute(JedrockServer server, CommandSender sender, String[] args) {
         manager.callCommand(plugin, handler, sender, args);
+    }
+
+    @Override
+    public List<String> complete(Server server, CommandSender sender, String[] args) {
+        if (completer == null || args.length == 0) {
+            return List.of();
+        }
+        // The script returns candidates; narrow them to the partial (the last token) so a script can
+        // just return its whole list, the way the built-in arg types complete.
+        List<String> candidates = manager.callComplete(plugin, completer, sender, args);
+        return ArgType.matching(args[args.length - 1], candidates);
     }
 }
