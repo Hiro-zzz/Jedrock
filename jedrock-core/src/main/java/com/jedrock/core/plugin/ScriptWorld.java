@@ -2,7 +2,12 @@ package com.jedrock.core.plugin;
 
 import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.Location;
+import com.jedrock.api.world.Particle;
+import com.jedrock.api.world.Sound;
 import com.jedrock.api.world.World;
+
+import java.util.Arrays;
+import java.util.Locale;
 
 /**
  * The {@code world} object a script sees — block-level access to the shared world. Every write goes
@@ -100,5 +105,41 @@ public final class ScriptWorld {
     /** Whether {@code (x, z)} is inside the finite world — outside, reads are air and writes are dropped. */
     public boolean isInside(double x, double z) {
         return world.isInsideBounds(x, z);
+    }
+
+    /**
+     * Play a canonical sound at a position, audible to every player, cross-edition. The name is a
+     * {@link Sound} constant, case-insensitive: {@code 'levelup'}, {@code 'explode'}, {@code 'click'}…
+     */
+    public void playSound(String sound, double x, double y, double z) {
+        playSound(sound, x, y, z, 1.0, 1.0);
+    }
+
+    /** As {@link #playSound(String, double, double, double)} with volume and pitch (1 = normal, best-effort per edition). */
+    public void playSound(String sound, double x, double y, double z, double volume, double pitch) {
+        world.playSound(parse(Sound.class, sound), x, y, z, (float) volume, (float) pitch);
+    }
+
+    /**
+     * Draw one canonical particle at a position, visible to every player, cross-edition. The name is a
+     * {@link Particle} constant, case-insensitive: {@code 'heart'}, {@code 'flame'}, {@code 'portal'}…
+     */
+    public void spawnParticle(String particle, double x, double y, double z) {
+        spawnParticle(particle, x, y, z, 1, 0.0);
+    }
+
+    /** A burst: {@code count} particles scattered within ±{@code spread} blocks (PE caps the count per burst). */
+    public void spawnParticle(String particle, double x, double y, double z, int count, double spread) {
+        world.spawnParticle(parse(Particle.class, particle), x, y, z, count, spread);
+    }
+
+    /** Parse a case-insensitive enum name, failing with the full list of valid names — a script-friendly error. */
+    private static <E extends Enum<E>> E parse(Class<E> type, String name) {
+        try {
+            return Enum.valueOf(type, name.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException | NullPointerException e) {
+            throw new IllegalArgumentException("unknown " + type.getSimpleName().toLowerCase(Locale.ROOT)
+                    + " '" + name + "' — one of: " + Arrays.toString(type.getEnumConstants()));
+        }
     }
 }

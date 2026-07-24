@@ -38,6 +38,8 @@ final class McpeProtocol {
     static final int ID_SET_ENTITY_DATA = 0x27;   // entity metadata (sneak pose etc.)
     static final int ID_ANIMATE = 0x2C;           // arm swing
     static final int ID_SET_TITLE = 0x59;         // outbound: title / subtitle / action-bar / times (protocol 113)
+    static final int ID_LEVEL_SOUND_EVENT = 0x19; // outbound: entity-ish sounds (explode / levelup / note …)
+    static final int ID_LEVEL_EVENT = 0x1a;       // outbound: world effects — 1000-series sounds, 0x4000|particle
 
     // --- SetTitle types (protocol 113, PMMP SetTitlePacket) ---
     static final int TITLE_TYPE_CLEAR = 0;

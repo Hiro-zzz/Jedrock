@@ -203,6 +203,35 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     }
 
     @Override
+    public void playSound(com.jedrock.api.world.Sound sound, double x, double y, double z, float volume, float pitch) {
+        // 0.14 has LevelEvent only; sounds it predates map to the closest available id (see PeEffects).
+        // The data field carries pitch×1000 (PMMP GenericSound, identical in the 0.14 tree); no volume slot.
+        int evid = com.jedrock.network.pe.PeEffects.levelEventSound014(sound);
+        sendWrapped(b -> Mcpe014Packets.levelEvent(b, evid, x, y, z, Math.round(pitch * 1000f)));
+    }
+
+    /** PE draws one particle per LevelEvent packet — cap a burst so a script can't flood the wire. */
+    private static final int MAX_PARTICLE_BURST = 32;
+
+    @Override
+    public void spawnParticle(com.jedrock.api.world.Particle particle, double x, double y, double z,
+                              int count, double spread) {
+        int evid = com.jedrock.network.pe.PeEffects.ADD_PARTICLE_MASK
+                | com.jedrock.network.pe.PeEffects.particle014(particle);
+        int n = Math.min(Math.max(1, count), MAX_PARTICLE_BURST);
+        java.util.concurrent.ThreadLocalRandom rnd = java.util.concurrent.ThreadLocalRandom.current();
+        for (int i = 0; i < n; i++) {
+            final double px = x + offset(rnd, spread), py = y + offset(rnd, spread), pz = z + offset(rnd, spread);
+            sendWrapped(b -> Mcpe014Packets.levelEvent(b, evid, px, py, pz, 0));
+        }
+    }
+
+    /** A uniform scatter in ±spread (0 spread → exactly at the point). */
+    private static double offset(java.util.concurrent.ThreadLocalRandom rnd, double spread) {
+        return spread <= 0 ? 0 : (rnd.nextDouble() * 2.0 - 1.0) * spread;
+    }
+
+    @Override
     public void setPose(long entityId, boolean sneaking, boolean sprinting, boolean usingItem) {
         // Crouch needs the DATA_FLAGS byte; the 0.14 client draws sprint / item-use itself, but sending
         // them too is harmless and keeps a late joiner in sync with the full pose.

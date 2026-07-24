@@ -8,6 +8,26 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Sounds and particles, cross-edition.** Canonical `Sound` (12: click, door, fizz, bow, teleport,
+  anvils, explode, levelup, pop, orb, note) and `Particle` (20: poof, huge explosion, bubble, splash,
+  crit, smokes, drips, villager moods, note, portal, enchantment, flame, lava, redstone, snowball,
+  slime, heart) enums in the API, each mapped per protocol from ground truth: **JE** Named Sound Effect
+  (1.8 `0x29` era names like `random.levelup`; 1.12.2 `0x19` + category with `entity.player.levelup`
+  names) and World Particles (1.8 `0x2a` / 1.12.2 `0x22`, one shared pre-flattening id table —
+  minecraft-data), **PE 1.1.5** LevelEvent `0x1a` (1000-series sound ids, data = pitch×1000 per PMMP
+  `GenericSound`; particles as `0x4000|type`) plus LevelSoundEvent `0x19` for the three sounds that
+  live only there (explode 45 / levelup 55 / note 72), and **PE 0.14** LevelEvent `0xa2` (big-endian
+  short/floats/int) with its own shorter tables — sounds 0.14 predates fall back to the closest
+  available id, documented per case. API: `World.playSound(sound, x, y, z[, volume, pitch])` /
+  `spawnParticle(particle, x, y, z[, count, spread])` (broadcast to the world) and
+  `Player.playSound(sound[, volume, pitch])` (a private ding at the player). JE draws a burst from one
+  packet; the PE eras get one packet per particle, capped at 32 per burst. Scripts:
+  `world.playSound('levelup', x, y, z)` / `world.spawnParticle('heart', x, y, z, 12, 0.8)` with
+  case-insensitive names and an error listing the valid set; `/fx [boom]` demo in `plugins/example.js`.
+  Byte-verified in `PeEffectsEncodingTest` (113 LevelEvent / LevelSoundEvent, 0.14 big-endian body,
+  mapping completeness both eras) and `JeEffectsTest` (names both eras, ids below the data-carrying
+  range, particle body layout).
+
 - **World-interaction API — programmatic edits that render live, cross-edition.** The world can now be
   edited from code exactly like a player edits it: `CoreWorld` gained a **block-change listener** that the
   server registers after bake/load, so **every** `setBlockId` write — a player's edit, a command, a script —

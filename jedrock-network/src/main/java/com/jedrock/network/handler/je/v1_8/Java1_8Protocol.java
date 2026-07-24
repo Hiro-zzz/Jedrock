@@ -21,6 +21,8 @@ public final class Java1_8Protocol {
     public static final int CB_JOIN_GAME = 0x01;
     public static final int CB_CHAT = 0x02;             // chat/system; position byte 2 = action bar
     public static final int CB_TITLE = 0x45;            // title/subtitle/times (actions 0/1/2, 3=hide, 4=reset)
+    public static final int CB_NAMED_SOUND = 0x29;      // named sound effect (string name + pos*8 + volume + pitch byte)
+    public static final int CB_WORLD_PARTICLES = 0x2a;  // particle burst (id + pos + offsets + speed + count)
     public static final int CB_CHANGE_GAME_STATE = 0x2B; // reason byte + float value (gamemode switch)
     public static final int CB_UPDATE_HEALTH = 0x06;     // float health + food varint + saturation float
     public static final int CB_SPAWN_POSITION = 0x05;

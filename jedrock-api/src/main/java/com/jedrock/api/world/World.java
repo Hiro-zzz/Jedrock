@@ -155,6 +155,37 @@ public interface World {
     }
 
     /**
+     * Play a canonical {@link Sound} at a position, audible to every player in this world — each
+     * client renders it in its own protocol. Volume and pitch are best-effort per edition (1 = normal).
+     */
+    default void playSound(Sound sound, double x, double y, double z, float volume, float pitch) {
+        for (Player p : getPlayers()) {
+            p.getConnection().playSound(sound, x, y, z, volume, pitch);
+        }
+    }
+
+    /** As {@link #playSound(Sound, double, double, double, float, float)} at normal volume and pitch. */
+    default void playSound(Sound sound, double x, double y, double z) {
+        playSound(sound, x, y, z, 1.0f, 1.0f);
+    }
+
+    /**
+     * Draw a burst of {@code count} canonical {@link Particle}s around a position, scattered within
+     * roughly {@code spread} blocks, visible to every player in this world. Keep counts modest — the
+     * PE eras send one packet per particle (implementations cap the count).
+     */
+    default void spawnParticle(Particle particle, double x, double y, double z, int count, double spread) {
+        for (Player p : getPlayers()) {
+            p.getConnection().spawnParticle(particle, x, y, z, count, spread);
+        }
+    }
+
+    /** One particle, exactly at the position. */
+    default void spawnParticle(Particle particle, double x, double y, double z) {
+        spawnParticle(particle, x, y, z, 1, 0.0);
+    }
+
+    /**
      * Spawn location for this world.
      */
     Location getSpawnLocation();

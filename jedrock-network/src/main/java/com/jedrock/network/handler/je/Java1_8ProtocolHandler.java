@@ -270,6 +270,30 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
         send(c, CB_TITLE, b -> ByteBufUtils.writeVarInt(b, 4)); // 4 = reset
     }
 
+    @Override
+    public void playSound(JedrockConnection c, com.jedrock.api.world.Sound sound,
+                          double x, double y, double z, float volume, float pitch) {
+        // 1.8 Named Sound Effect (0x29): name, effect position as fixed-point ints (×8), volume float,
+        // pitch as an unsigned byte where 63 = normal (ground truth minecraft-data pc/1.8).
+        String name = JeEffects.soundName1_8(sound);
+        int pitchByte = Math.min(255, Math.max(0, Math.round(pitch * 63f)));
+        send(c, CB_NAMED_SOUND, b -> {
+            ByteBufUtils.writeString(b, name);
+            b.writeInt((int) (x * 8.0));
+            b.writeInt((int) (y * 8.0));
+            b.writeInt((int) (z * 8.0));
+            b.writeFloat(volume);
+            b.writeByte(pitchByte);
+        });
+    }
+
+    @Override
+    public void spawnParticle(JedrockConnection c, com.jedrock.api.world.Particle particle,
+                              double x, double y, double z, int count, double spread) {
+        int id = JeEffects.particleId(particle);
+        send(c, CB_WORLD_PARTICLES, b -> JeEffects.writeParticleBody(b, id, x, y, z, count, spread));
+    }
+
     /** Wrap an already-rendered legacy (§) string as a JSON chat component (a title/subtitle/action-bar body). */
     private static String json(String legacy) {
         return "{\"text\":\"" + JsonText.escape(legacy == null ? "" : legacy) + "\"}";

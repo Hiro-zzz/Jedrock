@@ -38,6 +38,14 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Clear any title / subtitle shown. Default: a no-op. */
     default void clearTitle(JedrockConnection c) {}
 
+    /** Play a canonical sound at a position (this version's Named Sound Effect packet). Default: a no-op. */
+    default void playSound(JedrockConnection c, com.jedrock.api.world.Sound sound,
+                           double x, double y, double z, float volume, float pitch) {}
+
+    /** Draw a burst of canonical particles around a position (World Particles packet). Default: a no-op. */
+    default void spawnParticle(JedrockConnection c, com.jedrock.api.world.Particle particle,
+                               double x, double y, double z, int count, double spread) {}
+
     /** Add a player entry to the client's tab list. */
     void addToTab(JedrockConnection c, UUID uuid, String name);
 

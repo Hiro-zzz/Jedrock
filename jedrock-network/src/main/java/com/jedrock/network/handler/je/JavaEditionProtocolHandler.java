@@ -250,6 +250,8 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     /** 1.12.2 Title packet (id 0x48 — NOT 0x4B, which is another packet): actions 0 title, 1 subtitle,
      *  2 action-bar, 3 times, 4 hide, 5 reset. Verified against minecraft-data for protocol 340. */
     private static final int CB_TITLE = 0x48;
+    private static final int CB_NAMED_SOUND = 0x19;      // named sound effect (name + category + pos*8 + volume + pitch)
+    private static final int CB_WORLD_PARTICLES = 0x22;  // particle burst (same body as 1.8's 0x2a)
 
     @Override
     public void sendActionBar(JedrockConnection c, String text) {
@@ -269,6 +271,30 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     @Override
     public void clearTitle(JedrockConnection c) {
         send(c, CB_TITLE, b -> ByteBufUtils.writeVarInt(b, 5)); // 5 = reset
+    }
+
+    @Override
+    public void playSound(JedrockConnection c, com.jedrock.api.world.Sound sound,
+                          double x, double y, double z, float volume, float pitch) {
+        // 1.12.2 Named Sound Effect (0x19): name, sound category (varint, 0 = master), effect position
+        // as fixed-point ints (×8), volume and pitch floats (ground truth minecraft-data pc/1.12.2).
+        String name = JeEffects.soundName1_12(sound);
+        send(c, CB_NAMED_SOUND, b -> {
+            ByteBufUtils.writeString(b, name);
+            ByteBufUtils.writeVarInt(b, 0);
+            b.writeInt((int) (x * 8.0));
+            b.writeInt((int) (y * 8.0));
+            b.writeInt((int) (z * 8.0));
+            b.writeFloat(volume);
+            b.writeFloat(pitch);
+        });
+    }
+
+    @Override
+    public void spawnParticle(JedrockConnection c, com.jedrock.api.world.Particle particle,
+                              double x, double y, double z, int count, double spread) {
+        int id = JeEffects.particleId(particle);
+        send(c, CB_WORLD_PARTICLES, b -> JeEffects.writeParticleBody(b, id, x, y, z, count, spread));
     }
 
     /** Wrap an already-rendered legacy (§) string as a JSON chat component. */
