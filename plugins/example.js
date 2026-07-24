@@ -373,6 +373,22 @@ commands.register({
     }
 });
 
+// /boss <0-100> [color] — a boss bar across the top (Java 1.12.2; 1.8 and Bedrock ignore it). setBossBar
+// takes a title, a 0..1 fill, and an optional colour name; calling it again updates the same bar.
+commands.register({
+    name: 'boss', description: 'Show a boss bar', usage: '/boss <0-100> [color]',
+    complete: function (player, args) {
+        return args.length === 2 ? ['pink', 'blue', 'red', 'green', 'yellow', 'purple', 'white'] : [];
+    },
+    execute: function (player, args) {
+        if (args[0] === 'off') { player.clearBossBar(); return; }
+        var pct = args.length ? parseInt(args[0]) : 100;
+        if (isNaN(pct)) { player.sendMessage('{red}Usage: /boss <0-100> [color]  (or /boss off)'); return; }
+        player.setBossBar('{red}The Boss {gray}(' + pct + '%)', Math.max(0, Math.min(100, pct)) / 100,
+            args.length > 1 ? args[1] : 'purple');
+    }
+});
+
 // /inv — exercise the scripting inventory API (survival: give / set / count / remove / clear).
 commands.register('inv', function (player, args) {
     var stone = Blocks.state(Blocks.STONE, 0);

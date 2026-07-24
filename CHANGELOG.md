@@ -86,6 +86,16 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Boss bar, Java 1.12.2.** `player.setBossBar(title, progress[, color])` / `clearBossBar()` — a titled
+  bar across the top of the screen with a 0..1 fill and one of seven colours (`pink` … `white`, default
+  purple). Purely presentational: no entity, no combat, just a bar showing whatever you set. Driven by the
+  dedicated Boss Bar packet (`0x0C`): an add the first time, then only the deltas — a health update, a
+  title update, and a style update when the colour actually changed — so a per-tick refresh never re-adds
+  the bar. The sequencing lives in `JeBossBar` (unit-tested with a recording wire). 1.8 has no boss-bar
+  packet (it predates 1.9's, and the wither-entity trick that fakes one is a separate, riskier technique
+  left for later); Bedrock's legacy clients aren't wired here. Both let the default no-op stand. Try
+  `/boss 50 red` in `plugins/example.js`.
+
 - **Sidebar scoreboard, Java (1.8 + 1.12.2).** `player.setSidebar(title, [lines])` / `clearSidebar()` — a
   titled panel of text lines down the right of the screen, authored in the unified markup. Purely
   presentational, true to the illusion: the server tracks no real scores; the lines are whatever you set,

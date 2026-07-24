@@ -267,6 +267,16 @@ public interface PlayerConnection {
     default void clearSidebar() {}
 
     /**
+     * Show / update the boss bar: a title (already rendered to legacy {@code §} form), a fill fraction
+     * ({@code 0}..{@code 1}), and a canonical colour id (0 pink, 1 blue, 2 red, 3 green, 4 yellow,
+     * 5 purple, 6 white — the JE wire values). Java 1.12.2 draws it; everything else ignores it. Default no-op.
+     */
+    default void setBossBar(String title, float progress, int color) {}
+
+    /** Remove the boss bar, if shown. Default no-op. */
+    default void clearBossBar() {}
+
+    /**
      * Draw {@code state} (canonical {@code (id << 4) | meta}, 0 = empty hand) in the hand of another
      * player's avatar — JE Entity Equipment / PE MobEquipment. Sent when the holder switches hotbar
      * slots, when the held stack changes, and once when the avatar spawns. Default no-op.

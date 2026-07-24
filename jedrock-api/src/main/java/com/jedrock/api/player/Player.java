@@ -240,6 +240,27 @@ public interface Player extends Entity, CommandSender {
     int SIDEBAR_MAX_LINES = 16;
 
     /**
+     * Show a <b>boss bar</b> across the top of the screen: a title and a fill fraction, in the default
+     * purple. Purely presentational — no entity, no combat; the bar shows whatever you set. Calling it
+     * again updates the same bar. Java 1.12.2 only for now (it has the dedicated packet); 1.8 and Bedrock
+     * ignore it (1.8 has no boss-bar packet, and the legacy Bedrock clients aren't wired here yet).
+     *
+     * @param progress the fill, {@code 0.0}..{@code 1.0} (clamped)
+     */
+    default void setBossBar(String title, float progress) {
+        setBossBar(title, progress, "purple");
+    }
+
+    /**
+     * As {@link #setBossBar(String, float)} but with a bar colour: {@code pink}, {@code blue}, {@code red},
+     * {@code green}, {@code yellow}, {@code purple} or {@code white} (unknown falls back to purple).
+     */
+    void setBossBar(String title, float progress, String color);
+
+    /** Remove the boss bar, if one is shown. */
+    void clearBossBar();
+
+    /**
      * @return true if the player is still connected
      */
     boolean isOnline();

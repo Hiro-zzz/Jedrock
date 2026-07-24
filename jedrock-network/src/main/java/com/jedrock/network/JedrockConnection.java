@@ -137,6 +137,16 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void setBossBar(String title, float progress, int color) {
+        protocolHandler.setBossBar(this, title, progress, color);
+    }
+
+    @Override
+    public void clearBossBar() {
+        protocolHandler.clearBossBar(this);
+    }
+
+    @Override
     public void showHeldItem(long entityId, int state) {
         protocolHandler.showHeldItem(this, entityId, state);
     }

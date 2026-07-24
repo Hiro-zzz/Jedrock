@@ -578,6 +578,33 @@ public final class CorePlayer implements Player {
     }
 
     @Override
+    public void setBossBar(String title, float progress, String color) {
+        float clamped = progress < 0f ? 0f : (progress > 1f ? 1f : progress);
+        connection.setBossBar(ChatText.toLegacy(title == null ? "" : title), clamped, bossBarColorId(color));
+    }
+
+    @Override
+    public void clearBossBar() {
+        connection.clearBossBar();
+    }
+
+    /** Map a colour name to the canonical boss-bar colour id (the JE wire values); unknown → purple. */
+    private static int bossBarColorId(String color) {
+        if (color == null) {
+            return 5;
+        }
+        return switch (color.toLowerCase(java.util.Locale.ROOT)) {
+            case "pink" -> 0;
+            case "blue" -> 1;
+            case "red" -> 2;
+            case "green" -> 3;
+            case "yellow" -> 4;
+            case "white" -> 6;
+            default -> 5; // purple
+        };
+    }
+
+    @Override
     public boolean isOnline() {
         return connection.isActive();
     }

@@ -271,6 +271,7 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     private static final int CB_SCOREBOARD_OBJECTIVE = 0x42; // create/update/remove a scoreboard objective
     private static final int CB_UPDATE_SCORE = 0x45;    // set/remove one score entry
     private static final int CB_DISPLAY_OBJECTIVE = 0x3B; // bind an objective to a display slot (1 = sidebar)
+    private static final int CB_BOSS_BAR = 0x0C;        // add/remove/update a boss bar
     private static final int CB_TITLE = 0x48;
     private static final int CB_NAMED_SOUND = 0x19;      // named sound effect (name + category + pos*8 + volume + pitch)
     private static final int CB_WORLD_PARTICLES = 0x22;  // particle burst (same body as 1.8's 0x2a)
@@ -546,6 +547,60 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     @Override
     public void clearSidebar(JedrockConnection c) {
         sidebar(c).clear();
+    }
+
+    // ===== Boss bar (1.12.2 Boss Bar 0x0C; 1.8 has no such packet, so it degrades) =====
+
+    private final java.util.UUID bossBarId = java.util.UUID.randomUUID();
+    private JeBossBar bossBar;
+
+    private JeBossBar bossBar(JedrockConnection c) {
+        if (bossBar == null) {
+            bossBar = new JeBossBar(new JeBossBar.Wire() {
+                @Override public void add(String title, float progress, int color) {
+                    bossBarPacket(c, 0, b -> {
+                        ByteBufUtils.writeString(b, json(title));
+                        b.writeFloat(progress);
+                        ByteBufUtils.writeVarInt(b, color);
+                        ByteBufUtils.writeVarInt(b, 0);   // division 0 = no notches
+                        b.writeByte(0);                    // flags
+                    });
+                }
+                @Override public void updateHealth(float progress) {
+                    bossBarPacket(c, 2, b -> b.writeFloat(progress));
+                }
+                @Override public void updateTitle(String title) {
+                    bossBarPacket(c, 3, b -> ByteBufUtils.writeString(b, json(title)));
+                }
+                @Override public void updateStyle(int color) {
+                    bossBarPacket(c, 4, b -> { ByteBufUtils.writeVarInt(b, color); ByteBufUtils.writeVarInt(b, 0); });
+                }
+                @Override public void remove() {
+                    bossBarPacket(c, 1, b -> {});
+                }
+            });
+        }
+        return bossBar;
+    }
+
+    /** Boss Bar (0x0C): the bar uuid, the action, then the action-specific body. */
+    private void bossBarPacket(JedrockConnection c, int action, Consumer<ByteBuf> body) {
+        send(c, CB_BOSS_BAR, b -> {
+            b.writeLong(bossBarId.getMostSignificantBits());
+            b.writeLong(bossBarId.getLeastSignificantBits());
+            ByteBufUtils.writeVarInt(b, action);
+            body.accept(b);
+        });
+    }
+
+    @Override
+    public void setBossBar(JedrockConnection c, String title, float progress, int color) {
+        bossBar(c).set(title, progress, color);
+    }
+
+    @Override
+    public void clearBossBar(JedrockConnection c) {
+        bossBar(c).clear();
     }
 
     @Override
