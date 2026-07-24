@@ -533,6 +533,25 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         sendGameBatch(b -> writeSetEntityDataFlags(b, entityId, sneaking, sprinting, usingItem));
     }
 
+    @Override
+    public void showHeldItem(long entityId, int state) {
+        sendGameBatch(b -> writeMobEquipment(b, entityId, state));
+    }
+
+    /**
+     * Encode a MobEquipment (0x1f) body, verbatim from PMMP at protocol 113: entity runtime id
+     * (unsigned varlong), the item Slot, inventorySlot (byte), hotbarSlot (byte), windowId (byte 0).
+     * The slot bytes only matter for the holder's own inventory; a viewer just renders the item.
+     */
+    static void writeMobEquipment(ByteBuf b, long entityRuntimeId, int state) {
+        ByteBufUtils.writeVarInt(b, ID_MOB_EQUIPMENT);
+        ByteBufUtils.writeVarLong(b, entityRuntimeId);
+        McpeCodec.writeSlot(b, state, state == 0 ? 0 : 1);
+        b.writeByte(0);
+        b.writeByte(0);
+        b.writeByte(0);
+    }
+
     /** Encode an Animate packet body (protocol 113): action (putVarInt), then entity runtime id. */
     static void writeAnimate(ByteBuf b, int action, long entityRuntimeId) {
         ByteBufUtils.writeVarInt(b, ID_ANIMATE);
@@ -862,6 +881,10 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
                 LOGGER.debug(() -> "[PE] held hotbar slot = " + hotbarSlot);
                 if (listener != null && listener.gameModeOf(this) == GameMode.CREATIVE) {
                     listener.onContainerSetSlot(this, WINDOW_ID_PLAYER, hotbarSlot, item.state(), item.count());
+                }
+                if (listener != null) {
+                    // Redraw the hand on every other client's copy of this avatar.
+                    listener.onHeldSlotChange(this, hotbarSlot);
                 }
             }
         } catch (RuntimeException e) {

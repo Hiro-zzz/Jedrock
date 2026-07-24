@@ -126,7 +126,12 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
             }
         } else if (id == ServerboundHeldItemChange.PACKET_ID) {
             ServerboundHeldItemChange h = lazy.materialize(ServerboundHeldItemChange::fromBuffer);
-            if (h.slot >= 0 && h.slot < 9) heldSlot = h.slot;
+            if (h.slot >= 0 && h.slot < 9) {
+                heldSlot = h.slot;
+                if (connection.getListener() != null) {
+                    connection.getListener().onHeldSlotChange(connection, h.slot);
+                }
+            }
         } else if (id == ServerboundCreativeInventoryAction.PACKET_ID) {
             ServerboundCreativeInventoryAction c = lazy.materialize(ServerboundCreativeInventoryAction::fromBuffer);
             int state = c.itemId <= 0 ? 0 : Blocks.state(c.itemId, c.damage);
@@ -253,6 +258,7 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     private static final int CB_TITLE = 0x48;
     private static final int CB_NAMED_SOUND = 0x19;      // named sound effect (name + category + pos*8 + volume + pitch)
     private static final int CB_WORLD_PARTICLES = 0x22;  // particle burst (same body as 1.8's 0x2a)
+    private static final int CB_ENTITY_EQUIPMENT = 0x3f; // eid (varint) + slot (varint, 0 = main hand) + item
 
     @Override
     public void sendActionBar(JedrockConnection c, String text) {
@@ -272,6 +278,17 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     @Override
     public void clearTitle(JedrockConnection c) {
         send(c, CB_TITLE, b -> ByteBufUtils.writeVarInt(b, 5)); // 5 = reset
+    }
+
+    @Override
+    public void showHeldItem(JedrockConnection c, long entityId, int state) {
+        // Entity Equipment (0x3f at 340): entity id (varint), equipment slot (varint, 0 = main hand),
+        // then the standard Slot — ground truth minecraft-data packet_entity_equipment.
+        send(c, CB_ENTITY_EQUIPMENT, b -> {
+            ByteBufUtils.writeVarInt(b, (int) entityId);
+            ByteBufUtils.writeVarInt(b, 0);
+            JeInventoryCodec.writeSlot(b, state, state == 0 ? 0 : 1);
+        });
     }
 
     @Override

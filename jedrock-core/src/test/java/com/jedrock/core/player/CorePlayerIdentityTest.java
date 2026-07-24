@@ -62,4 +62,39 @@ class CorePlayerIdentityTest {
         CorePlayer p = player(new NoopConnection());
         assertEquals(-1, p.getPing(), "the interface default is -1 (unknown)");
     }
+
+    @Test
+    void heldItemFollowsTheSelectedSlot() {
+        CorePlayer p = player(new NoopConnection());
+        int stone = com.jedrock.api.world.Blocks.state(1, 0);
+        int sword = com.jedrock.api.world.Blocks.state(276, 0);
+        p.setItem(0, stone, 1);
+        p.setItem(3, sword, 1);
+
+        assertEquals(0, p.getHeldItemSlot(), "slot 0 by default");
+        assertEquals(stone, p.getHeldItem());
+
+        p.setHeldItemSlot(3);
+        assertEquals(sword, p.getHeldItem(), "the hand follows the selected slot");
+
+        p.setHeldItemSlot(9);   // out of the hotbar
+        p.setHeldItemSlot(-1);
+        assertEquals(3, p.getHeldItemSlot(), "an out-of-range switch is ignored");
+    }
+
+    @Test
+    void theHeldItemHookFiresOnlyForTheHand() {
+        CorePlayer p = player(new NoopConnection());
+        int[] fired = {0};
+        p.setHeldItemListener(who -> fired[0]++);
+
+        p.setItem(0, com.jedrock.api.world.Blocks.state(1, 0), 1); // the held slot → relay
+        assertEquals(1, fired[0], "changing the hand notifies");
+
+        p.setItem(5, com.jedrock.api.world.Blocks.state(1, 0), 1); // another slot → silent
+        assertEquals(1, fired[0], "a change elsewhere in the inventory does not");
+
+        p.clearInventory(); // a full resync always notifies (the hand may have emptied)
+        assertEquals(2, fired[0]);
+    }
 }

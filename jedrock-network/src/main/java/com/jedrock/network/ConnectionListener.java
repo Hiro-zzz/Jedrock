@@ -140,6 +140,9 @@ public interface ConnectionListener {
      */
     default void onCreativeSetSlot(PlayerConnection connection, int coreSlot, int state, int count) {}
 
+    /** The client switched its selected hotbar slot (0-8) — every edition reports this. */
+    default void onHeldSlotChange(PlayerConnection connection, int slot) {}
+
     /**
      * A Bedrock client reported a container slot change (it drives its own inventory and sends a
      * ContainerSetSlot per changed slot — client-authoritative, unlike Java's server-authoritative click).

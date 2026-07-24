@@ -203,6 +203,11 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     }
 
     @Override
+    public void showHeldItem(long entityId, int state) {
+        sendWrapped(b -> Mcpe014Packets.mobEquipment(b, entityId, safeState(state)));
+    }
+
+    @Override
     public int getPing() {
         // RakNet keeps its own connected-ping estimate per session — no game-layer probe needed.
         return (int) Math.min(Integer.MAX_VALUE, session.getPing());
@@ -334,6 +339,7 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
             case ID_REMOVE_BLOCK -> handleRemoveBlock(in);
             case ID_USE_ITEM -> handleUseItem(in);
             case ID_CONTAINER_SET_SLOT -> handleContainerSetSlot(in);
+            case ID_MOB_EQUIPMENT -> handleMobEquipment(in);
             case ID_CONTAINER_CLOSE -> handleContainerClose(in);
             case ID_PLAYER_ACTION -> handlePlayerAction(in);
             case ID_INTERACT -> handleInteract(in);
@@ -479,6 +485,21 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     public void setInventorySlot(int slot, int state, int count) {
         sendWrapped(b -> Mcpe014Packets.containerSetSlot(
                 b, Mcpe014Packets.WINDOW_ID_PLAYER, slot, safeState(state), count));
+    }
+
+    /**
+     * The client switched (or re-announced) its held item — MobEquipment inbound. Layout mirrors
+     * {@link Mcpe014Packets#mobEquipment}; only the selected hotbar slot matters (the item claim is
+     * ignored — the server-side inventory is the truth the relay reads from).
+     */
+    private void handleMobEquipment(ByteBuf in) {
+        in.readLong();                              // eid (the sender's own)
+        readSlot(in);                               // item claim — skipped
+        in.readByte();                              // slot
+        int selectedSlot = in.readUnsignedByte();
+        if (loggedIn && listener != null && selectedSlot < 9) {
+            listener.onHeldSlotChange(this, selectedSlot);
+        }
     }
 
     /** The client moved an item in a container (inbound ContainerSetSlot 0xb7 — client-authoritative). */

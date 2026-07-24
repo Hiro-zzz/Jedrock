@@ -73,6 +73,19 @@ public interface Player extends Entity, CommandSender {
     /** Set the chat display name; {@code null} or blank resets to the real name. Default: a no-op. */
     default void setDisplayName(String displayName) {}
 
+    /**
+     * The selected hotbar slot (0-8). Clients report switches; the server tracks it so placement and
+     * the cross-edition held-item visual know what's in the hand. Default 0 for a minimal player.
+     */
+    default int getHeldItemSlot() {
+        return 0;
+    }
+
+    /** The canonical {@code (id << 4) | meta} state in the player's hand (0 = empty). */
+    default int getHeldItem() {
+        return getItem(getHeldItemSlot());
+    }
+
     /** Play a canonical sound to this player only, at their own position (a private UI ding). */
     default void playSound(com.jedrock.api.world.Sound sound) {
         playSound(sound, 1.0f, 1.0f);

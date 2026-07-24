@@ -30,7 +30,7 @@ final class McpeProtocol {
     static final int ID_ENTITY_FALL = 0x25;       // inbound: the client reports a fall (its distance)
     static final int ID_SET_HEALTH = 0x2A;        // outbound: set the player's health (0..20)
     static final int ID_RESPAWN = 0x2D;           // outbound: place the player after a death-screen respawn
-    static final int ID_MOB_EQUIPMENT = 0x1F;     // inbound: the player's selected hotbar item changed
+    static final int ID_MOB_EQUIPMENT = 0x1F;     // both ways: the item in an entity's hand (held-item sync)
     static final int ID_INTERACT = 0x21;          // inbound: attack / interact with an entity
     static final int ID_USE_ITEM = 0x23;          // Win10 1.1.5 carries block placement here
     static final int ID_PLAYER_ACTION = 0x24;

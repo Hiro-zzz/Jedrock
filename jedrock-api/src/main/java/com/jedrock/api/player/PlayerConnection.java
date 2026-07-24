@@ -234,6 +234,13 @@ public interface PlayerConnection {
     default void sendWeather(com.jedrock.api.world.Weather weather) {}
 
     /**
+     * Draw {@code state} (canonical {@code (id << 4) | meta}, 0 = empty hand) in the hand of another
+     * player's avatar — JE Entity Equipment / PE MobEquipment. Sent when the holder switches hotbar
+     * slots, when the held stack changes, and once when the avatar spawns. Default no-op.
+     */
+    default void showHeldItem(long entityId, int state) {}
+
+    /**
      * Close the connection.
      */
     void close(String reason);

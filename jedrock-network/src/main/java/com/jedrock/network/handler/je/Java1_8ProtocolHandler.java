@@ -163,8 +163,13 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
             }
         } else if (id == SB_KEEP_ALIVE) {
             connection.onKeepAliveResponse(); // the round trip is the player's ping
+        } else if (id == SB_HELD_ITEM) {
+            int slot = in.readShort();
+            if (slot >= 0 && slot < 9 && listener != null) {
+                listener.onHeldSlotChange(connection, slot);
+            }
         }
-        // SB_HELD_ITEM / SB_CONFIRM_TRANSACTION — accepted, nothing to do.
+        // SB_CONFIRM_TRANSACTION — accepted, nothing to do.
     }
 
     /** 1.8 block placement: face 255 is a use-item; otherwise place the held block at face offset. */
@@ -270,6 +275,17 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     @Override
     public void clearTitle(JedrockConnection c) {
         send(c, CB_TITLE, b -> ByteBufUtils.writeVarInt(b, 4)); // 4 = reset
+    }
+
+    @Override
+    public void showHeldItem(JedrockConnection c, long entityId, int state) {
+        // Entity Equipment (0x04 at 47): entity id (varint), equipment slot (short, 0 = held), then
+        // the standard Slot — ground truth minecraft-data packet_entity_equipment.
+        send(c, CB_ENTITY_EQUIPMENT, b -> {
+            ByteBufUtils.writeVarInt(b, (int) entityId);
+            b.writeShort(0);
+            JeInventoryCodec.writeSlot(b, state, state == 0 ? 0 : 1);
+        });
     }
 
     @Override

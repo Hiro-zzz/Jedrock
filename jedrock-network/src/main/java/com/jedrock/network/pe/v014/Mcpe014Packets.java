@@ -32,6 +32,7 @@ public final class Mcpe014Packets {
     public static final int ID_REMOVE_BLOCK = 0x9e;
     public static final int ID_UPDATE_BLOCK = 0x9f;
     public static final int ID_LEVEL_EVENT = 0xa2;  // outbound: world effects — 1000-series sounds, 0x4000|particle
+    public static final int ID_MOB_EQUIPMENT = 0xa7; // both ways: the item in an entity's hand (held-item sync)
     public static final int ID_ENTITY_EVENT = 0xa4; // outbound: one-shot entity event (hurt animation etc.)
     public static final int ID_INTERACT = 0xa9;    // inbound: attack / interact with an entity
     public static final int ID_USE_ITEM = 0xaa;
@@ -435,6 +436,20 @@ public final class Mcpe014Packets {
         for (int i = 0; i < 9; i++) {
             b.writeInt(i + 9);
         }
+    }
+
+    /**
+     * MobEquipment (0xa7) — the item in an entity's hand. Layout, verbatim from the 0.14-era PMMP
+     * {@code MobEquipmentPacket}: eid (BE long), the item Slot, slot (byte), selectedSlot (byte).
+     * Note the 113 packet adds a trailing windowId byte; 0.14 has only the two slot bytes. The slot
+     * bytes matter to the holder's own inventory; a viewer just renders the item.
+     */
+    public static void mobEquipment(ByteBuf b, long eid, int state) {
+        b.writeByte(ID_MOB_EQUIPMENT);
+        b.writeLong(eid);
+        writeSlot(b, state, state == 0 ? 0 : 1);
+        b.writeByte(0);
+        b.writeByte(0);
     }
 
     /**
