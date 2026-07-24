@@ -38,6 +38,14 @@ public final class MsgCommand implements Command {
     }
 
     @Override
+    public java.util.List<CommandArg> arguments() {
+        // Declared for tab-completion only; execute() below still parses the raw args.
+        return java.util.List.of(
+                CommandArg.required("player", ArgType.PLAYER),
+                CommandArg.required("message", ArgType.GREEDY));
+    }
+
+    @Override
     public void execute(JedrockServer server, CommandSender sender, String[] args) {
         if (args.length < 2) {
             sender.sendMessage("{red}Usage: " + usage());

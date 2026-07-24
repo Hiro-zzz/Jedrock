@@ -36,6 +36,13 @@ public final class OpCommand implements Command {
     }
 
     @Override
+    public java.util.List<CommandArg> arguments() {
+        // Declared for tab-completion only; execute() below still parses the raw args.
+        return java.util.List.of(
+                CommandArg.optional("player", ArgType.PLAYER));
+    }
+
+    @Override
     public void execute(JedrockServer server, CommandSender sender, String[] args) {
         if (args.length == 0) {
             List<String> ops = List.copyOf(server.getOpList().names());
