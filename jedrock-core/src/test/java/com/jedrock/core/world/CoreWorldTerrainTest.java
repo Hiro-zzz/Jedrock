@@ -6,7 +6,6 @@ import com.jedrock.api.world.Location;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Terrain generation + layering + spawn placement for the procedural world. */
 class CoreWorldTerrainTest {

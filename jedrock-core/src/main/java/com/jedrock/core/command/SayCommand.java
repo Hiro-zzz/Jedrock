@@ -3,7 +3,6 @@ package com.jedrock.core.command;
 import com.jedrock.api.command.CommandSender;
 import com.jedrock.core.JedrockServer;
 
-import java.util.List;
 
 /**
  * {@code /say <message>} — broadcast a highlighted server message to every online player, cross-edition.

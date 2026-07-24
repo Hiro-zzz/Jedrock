@@ -10,21 +10,14 @@ import com.jedrock.api.entity.PuppetEntity;
 import com.jedrock.api.event.EventBus;
 import com.jedrock.api.event.block.BlockBreakEvent;
 import com.jedrock.api.event.block.BlockPlaceEvent;
-import com.jedrock.api.event.block.PlayerInteractBlockEvent;
-import com.jedrock.api.event.player.DamageCause;
 import com.jedrock.api.event.player.GameModeChangeEvent;
-import com.jedrock.api.event.player.InventoryClickEvent;
 import com.jedrock.api.event.player.PlayerChatEvent;
 import com.jedrock.api.event.player.PlayerCommandEvent;
-import com.jedrock.api.event.player.PlayerDamageEvent;
-import com.jedrock.api.event.player.PlayerDeathEvent;
-import com.jedrock.api.event.player.PlayerInteractEntityEvent;
 import com.jedrock.api.event.player.PlayerJoinEvent;
 import com.jedrock.api.event.player.PlayerLoginEvent;
 import com.jedrock.api.event.player.PlayerMoveEvent;
 import com.jedrock.api.event.player.PlayerPickupItemEvent;
 import com.jedrock.api.event.player.PlayerQuitEvent;
-import com.jedrock.api.event.player.PlayerRespawnEvent;
 import com.jedrock.api.event.player.PlayerTeleportEvent;
 import com.jedrock.api.event.player.PlayerToggleSneakEvent;
 import com.jedrock.api.event.player.PlayerToggleSprintEvent;
@@ -32,7 +25,6 @@ import com.jedrock.api.event.player.PlayerUseItemEvent;
 import com.jedrock.api.event.server.ServerStartEvent;
 import com.jedrock.api.event.server.ServerStopEvent;
 import com.jedrock.api.event.server.ServerTickEvent;
-import com.jedrock.api.event.world.WorldSaveEvent;
 import com.jedrock.api.player.ArmorSlot;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
@@ -65,21 +57,20 @@ import com.jedrock.core.command.HologramCommand;
 import com.jedrock.core.command.PuppetCommand;
 import com.jedrock.core.config.JedrockConfig;
 import com.jedrock.core.entity.CoreHologram;
-import com.jedrock.core.entity.CorePuppet;
+import com.jedrock.core.entity.EntityDirector;
 import com.jedrock.core.entity.PuppetRegistry;
-import com.jedrock.core.inventory.Container;
+import com.jedrock.core.inventory.ContainerService;
 import com.jedrock.core.permission.OpList;
 import com.jedrock.core.permission.PermissionManager;
 import com.jedrock.core.plugin.PluginManager;
-import com.jedrock.core.inventory.Cursor;
-import com.jedrock.core.inventory.InventoryClick;
 import com.jedrock.core.player.CorePlayer;
+import com.jedrock.core.player.PlayerBroadcast;
 import com.jedrock.core.net.PacketDirection;
 import com.jedrock.core.net.PacketEvent;
 import com.jedrock.core.net.PacketTapRegistry;
 import com.jedrock.core.player.PlayerRegistry;
 import com.jedrock.core.world.CoreWorld;
-import com.jedrock.core.world.LevelData;
+import com.jedrock.core.world.LevelManager;
 import com.jedrock.gameloop.GameLoop;
 import com.jedrock.gameloop.Scheduler;
 import com.jedrock.network.ConnectionListener;
@@ -89,9 +80,7 @@ import com.jedrock.utils.JLogger;
 import com.jedrock.utils.TickUtil;
 import com.jedrock.utils.text.ChatText;
 
-import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
@@ -136,16 +125,22 @@ public class JedrockServer implements Server, ConnectionListener {
 
     // In-memory state layer
     private final PlayerRegistry playerRegistry = new PlayerRegistry();
-    private final PuppetRegistry puppets = new PuppetRegistry();
-    /** Live holograms. Iterated on every join and mutated rarely, so a copy-on-write list fits. */
-    private final List<CoreHologram> holograms = new java.util.concurrent.CopyOnWriteArrayList<>();
+    /** The one place that walks the roster and pushes something to every connection. */
+    private final PlayerBroadcast broadcast = new PlayerBroadcast(playerRegistry);
+    /** Puppets and holograms: everything shown that is neither a player nor a block. */
+    private final EntityDirector entities;
+    /** Windows, chests and the creative mirror — every item that moves between slots. */
+    private final ContainerService containers;
+    /** Fall, void and melee — the one path from a source of damage to a health bar. */
+    private final CombatService combat;
+    /** The world's life on disk: the one-time bake, the autosave and the shutdown write. */
+    private final LevelManager levels;
     private final CoreWorld defaultWorld;
     private final BlindJudge judge;
     /** Remembers each player's last chosen game mode this run, so it survives a reconnect. */
     private final java.util.Map<UUID, GameMode> gameModes = new java.util.concurrent.ConcurrentHashMap<>();
 
     private final AtomicLong tickCounter = new AtomicLong(0);
-    private final AtomicBoolean saving = new AtomicBoolean(false);
 
     public JedrockServer() {
         // Load configuration first — everything below is parameterized by it.
@@ -153,6 +148,10 @@ public class JedrockServer implements Server, ConnectionListener {
         this.name = config.name();
         this.defaultWorld = new CoreWorld("world", Dimension.OVERWORLD, config.seed());
         this.judge = new BlindJudge(config.judgeEnabled(), config.maxReach(), config.maxMoveDelta());
+        this.entities = new EntityDirector(playerRegistry, defaultWorld);
+        this.containers = new ContainerService(playerRegistry, defaultWorld, eventBus, broadcast);
+        this.combat = new CombatService(playerRegistry, defaultWorld, eventBus, broadcast, entities, judge);
+        this.levels = new LevelManager(defaultWorld, eventBus);
 
         // Attach scheduler + core tick to game loop
         gameLoop.addTickable(scheduler);
@@ -211,8 +210,9 @@ public class JedrockServer implements Server, ConnectionListener {
     public List<ConnectionListener.CommandInfo> commands() {
         // Bedrock refuses to send a command it wasn't advertised; the PE session turns this into an
         // AvailableCommands manifest at spawn. Java clients need nothing.
-        List<ConnectionListener.CommandInfo> out = new java.util.ArrayList<>();
-        for (com.jedrock.core.command.Command c : commandManager.commands()) {
+        var registered = commandManager.commands();
+        List<ConnectionListener.CommandInfo> out = new java.util.ArrayList<>(registered.size());
+        for (com.jedrock.core.command.Command c : registered) {
             out.add(new ConnectionListener.CommandInfo(c.name(), c.description(), c.aliases()));
         }
         return out;
@@ -269,32 +269,9 @@ public class JedrockServer implements Server, ConnectionListener {
             }
             to = event.getTo();
         }
-        reposition(player, to);
+        broadcast.teleport(player, to);
         return true;
     }
-
-    /**
-     * The mechanics of a server-authoritative teleport, with no event: set the position, clear fall
-     * tracking (a teleport is not a fall — don't bill the next move for the jump or a void drop), tell the
-     * player's own client, and relay the move to every other avatar. Shared by {@link #teleport} and the
-     * respawn path.
-     */
-    private void reposition(CorePlayer player, Location to) {
-        player.setLocation(to);
-        player.resetFall();
-        player.getConnection().teleport(to.x(), to.y(), to.z(), to.yaw(), to.pitch());
-        long entityId = player.getEntityId();
-        for (CorePlayer other : playerRegistry.online()) {
-            if (other != player) {
-                other.getConnection().moveAvatar(entityId, to.x(), to.y(), to.z(), to.yaw(), to.pitch());
-            }
-        }
-    }
-
-    /** Interval (ticks) between environmental-damage sweeps — vanilla applies void damage every 10 ticks. */
-    private static final int ENVIRONMENT_TICK_INTERVAL = 10;
-    /** Void damage per sweep, in half-hearts (vanilla is 4 = two hearts). */
-    private static final int VOID_DAMAGE = 4;
 
     private void serverTick(long currentTick) {
         // Core server-wide per-tick work goes here.
@@ -305,30 +282,13 @@ public class JedrockServer implements Server, ConnectionListener {
         networkServer.tick(currentTick);
 
         // Environmental damage runs on the loop (not per move) so it fires even for a player who has
-        // stopped sending position updates. Gated to a coarse interval — no need to check every tick.
-        if (currentTick % ENVIRONMENT_TICK_INTERVAL == 0) {
-            environmentTick();
-        }
+        // stopped sending position updates. The service gates itself to a coarse interval.
+        combat.environmentTick(currentTick);
 
         // The scriptable heartbeat: fire a tick event for listeners hanging periodic work on the loop.
         // Only built when something is listening, so an idle server pays nothing for it.
         if (eventBus.hasListeners(ServerTickEvent.class)) {
             eventBus.post(new ServerTickEvent(currentTick));
-        }
-    }
-
-    /**
-     * Periodic environmental damage. Today: the void — a survival player who has dropped past the finite
-     * world's floor takes damage until they die (silent respawn at spawn). Runs on the game-loop thread;
-     * {@link #hurt} and its packet sends are thread-safe. Other sources (lava, suffocation) would slot in
-     * here.
-     */
-    private void environmentTick() {
-        for (CorePlayer player : playerRegistry.online()) {
-            if (player.getGameMode() == GameMode.SURVIVAL && defaultWorld.isInVoid(player.getLocation().y())) {
-                hurt(player, VOID_DAMAGE, DamageCause.VOID,
-                        "{gray}" + ChatText.escape(player.getName()) + " fell out of the world");
-            }
         }
     }
 
@@ -353,13 +313,15 @@ public class JedrockServer implements Server, ConnectionListener {
 
         // Load (or, on first run, generate) the world before any listener accepts logins, so a joining
         // player sees the baked terrain and persisted edits rather than a half-built world.
-        prepareWorld();
+        levels.prepare();
 
         // From here on, every world write — a player's edit or a script/API call — is pushed to each
         // online client in its own protocol, so World.setBlockId is all an edit needs to be visible.
         // Registered after the bake so the one-time generation doesn't fire millions of callbacks.
         defaultWorld.setChangeListener((x, y, z, state) -> {
-            for (Player p : playerRegistry.all()) {
+            // Iterates the registry's live view: a script `world.fill` walks this per changed cell,
+            // so the loop must not mint a collection wrapper on every block it writes.
+            for (CorePlayer p : playerRegistry.online()) {
                 p.getConnection().sendBlockChange(x, y, z, state);
             }
         });
@@ -391,7 +353,7 @@ public class JedrockServer implements Server, ConnectionListener {
         long saveSeconds = Long.getLong("jedrock.world.save-seconds", 300L);
         if (saveSeconds > 0) {
             long periodTicks = saveSeconds * TickUtil.TPS;
-            scheduler.runTaskTimer(this::autosave, periodTicks, periodTicks);
+            scheduler.runTaskTimer(levels::autosave, periodTicks, periodTicks);
             LOGGER.info("World autosave enabled (every " + saveSeconds + "s)");
         }
 
@@ -454,90 +416,9 @@ public class JedrockServer implements Server, ConnectionListener {
         networkServer.shutdown();
 
         // Save last, with the loop stopped and listeners closed, so no edit races the snapshot.
-        if (defaultWorld.isDirty()) {
-            saveWorld();
-        }
+        levels.saveIfDirty();
 
         LOGGER.info("Shutdown complete.");
-    }
-
-    // ===== World persistence =====
-
-    /** Path of the level file for the default world, e.g. {@code world/level.jdw}. */
-    private Path levelFile() {
-        return Path.of(defaultWorld.getName(), "level.jdw");
-    }
-
-    /**
-     * Bring the world up: load a saved level if present, then bake if it isn't generated yet (a fresh
-     * world, or a pre-bake file). A freshly baked world is saved immediately. A file we can't read is
-     * left untouched and we bake a fresh world over it in memory rather than clobber it.
-     */
-    private void prepareWorld() {
-        Path file = levelFile();
-        if (Files.isRegularFile(file)) {
-            try {
-                LevelData meta = defaultWorld.load(file);
-                if (meta.seed() != defaultWorld.getSeed()) {
-                    LOGGER.warn("Saved world seed " + meta.seed() + " differs from configured seed "
-                            + defaultWorld.getSeed() + " — edits were made against the saved terrain");
-                }
-                LOGGER.info("Loaded world from " + file.toAbsolutePath()
-                        + " (" + defaultWorld.loadedSections() + " sections, "
-                        + defaultWorld.compressedSections() + " compressed)");
-            } catch (IOException e) {
-                LOGGER.error("Failed to load world from " + file.toAbsolutePath()
-                        + " — leaving it untouched and generating a fresh world in memory", e);
-            }
-        } else {
-            LOGGER.info("No saved world at " + file.toAbsolutePath() + " — generating a fresh one");
-        }
-
-        if (!defaultWorld.isGenerated()) {
-            LOGGER.info("Baking finite " + CoreWorld.BOUNDS_CHUNKS + "x" + CoreWorld.BOUNDS_CHUNKS
-                    + "-chunk world (one-time)...");
-            long t0 = System.nanoTime();
-            defaultWorld.bake();
-            long ms = (System.nanoTime() - t0) / 1_000_000;
-            LOGGER.info("Baked " + defaultWorld.loadedSections() + " sections ("
-                    + defaultWorld.compressedSections() + " compressed) in " + ms + " ms");
-            saveWorld(); // persist the freshly baked world so the next run just loads it
-        }
-    }
-
-    /** Save the world synchronously (used on shutdown). Best-effort: an I/O failure is logged, not fatal. */
-    private void saveWorld() {
-        Path file = levelFile();
-        // Let plugins flush any world-tied state they want persisted alongside the terrain.
-        if (eventBus.hasListeners(WorldSaveEvent.class)) {
-            eventBus.post(new WorldSaveEvent(defaultWorld));
-        }
-        try {
-            defaultWorld.save(file);
-            LOGGER.info("Saved world to " + file.toAbsolutePath()
-                    + " (" + defaultWorld.loadedSections() + " sections)");
-        } catch (IOException e) {
-            LOGGER.error("Failed to save world to " + file.toAbsolutePath(), e);
-        }
-    }
-
-    /** Periodic autosave: runs {@link #saveWorld()} off-thread if the world changed, else skips. */
-    private void autosave() {
-        if (!defaultWorld.isDirty()) {
-            return; // nothing changed since the last save — don't rewrite the level file
-        }
-        if (!saving.compareAndSet(false, true)) {
-            return; // a previous save is still running — skip this round rather than pile up
-        }
-        Thread t = new Thread(() -> {
-            try {
-                saveWorld();
-            } finally {
-                saving.set(false);
-            }
-        }, "jedrock-autosave");
-        t.setDaemon(true);
-        t.start();
     }
 
     @Override
@@ -580,248 +461,46 @@ public class JedrockServer implements Server, ConnectionListener {
         return defaultWorld;
     }
 
-    // ===== Puppets (server-puppeteered visual entities) =====
+    // ===== Puppets and holograms — the EntityDirector does the work =====
 
     @Override
     public PuppetEntity spawnPuppet(EntityType type, Location at, String name) {
-        return register(new CorePuppet(type, name, defaultWorld, at, this), at);
+        return entities.spawnPuppet(type, at, name);
     }
 
     @Override
     public PuppetEntity spawnItem(Location at, int state) {
-        return register(new CorePuppet(EntityType.ITEM, EntityType.ITEM.canonicalName(),
-                defaultWorld, at, this, state), at);
+        return entities.spawnItem(at, state);
     }
 
     @Override
     public PuppetEntity spawnFallingBlock(Location at, int state) {
-        return register(new CorePuppet(EntityType.FALLING_BLOCK, EntityType.FALLING_BLOCK.canonicalName(),
-                defaultWorld, at, this, state), at);
+        return entities.spawnFallingBlock(at, state);
     }
 
     @Override
     public PuppetEntity spawnText(Location at, String text) {
-        CorePuppet puppet = new CorePuppet(EntityType.TEXT, EntityType.TEXT.canonicalName(),
-                defaultWorld, at, this, 0);
-        puppet.initNameTag(text); // the text must be set before the spawn relay carries it out
-        return register(puppet, at);
+        return entities.spawnText(at, text);
     }
 
-    /** Add a freshly built puppet to the roster and show it to everyone online (joiners get it in onLogin). */
-    private PuppetEntity register(CorePuppet puppet, Location at) {
-        puppets.add(puppet);
-        for (CorePlayer p : playerRegistry.online()) {
-            spawnPuppetTo(p.getConnection(), puppet);
-        }
-        LOGGER.info("Spawned puppet " + puppet.getEntityType().canonicalName() + " #" + puppet.getEntityId()
-                + " at " + String.format(java.util.Locale.ROOT, "%.1f,%.1f,%.1f", at.x(), at.y(), at.z()));
-        return puppet;
+    @Override
+    public Hologram spawnHologram(Location at, String... lines) {
+        return entities.spawnHologram(at, lines);
     }
 
-    /**
-     * Show one puppet to one connection. A {@link EntityType#PLAYER} puppet renders through the player-avatar
-     * path (a tab / player-list entry + spawn-player), reusing exactly what real players use; a mob puppet
-     * uses the spawn-entity path. Shared by the spawn broadcast and the join-time catch-up in onLogin.
-     */
-    private void spawnPuppetTo(PlayerConnection conn, CorePuppet puppet) {
-        Location loc = puppet.getLocation();
-        if (puppet.getEntityType().isPlayer()) {
-            conn.addToTab(puppet.getUniqueId(), puppet.getName()); // JE needs the tab entry before the avatar
-            conn.showPlayer(puppet.getUniqueId(), puppet.getName(), puppet.getEntityId(),
-                    loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
-            return;
-        }
-        if (puppet.getEntityType().isItem()) {
-            // A prop's body IS the item, so it spawns through its own packet on every edition.
-            conn.spawnItemEntity(puppet.getEntityId(), puppet.getUniqueId(),
-                    loc.x(), loc.y(), loc.z(), puppet.getItemState());
-        } else if (puppet.getEntityType().isFallingBlock()) {
-            conn.spawnFallingBlock(puppet.getEntityId(), puppet.getUniqueId(),
-                    loc.x(), loc.y(), loc.z(), puppet.getItemState());
-        } else if (puppet.getEntityType().isText()) {
-            // A label's whole body is its text, so it spawns through the hologram-line path with the
-            // name tag as the content — and the catch-up below would only re-send the same string.
-            conn.spawnTextLine(puppet.getEntityId(), puppet.getUniqueId(),
-                    loc.x(), loc.y(), loc.z(), ChatText.toLegacy(puppet.getNameTag()));
-            return;
-        } else {
-            conn.spawnEntity(puppet.getEntityId(), puppet.getUniqueId(), puppet.getEntityType(),
-                    loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
-        }
-        // Catch the newcomer up on the look the puppet has accumulated since it spawned.
-        if (puppet.getFlags() != 0) {
-            conn.setEntityFlags(puppet.getEntityId(), puppet.getFlags());
-        }
-        String nameTag = puppet.getNameTag();
-        if (nameTag != null && !nameTag.isEmpty()) {
-            conn.setEntityNameTag(puppet.getEntityId(), ChatText.toLegacy(nameTag));
-        }
-        // …and whatever it carries, so a newcomer sees a dressed statue rather than a bare mob.
-        if (puppet.getHeldItem() != Blocks.AIR) {
-            conn.showHeldItem(puppet.getEntityId(), puppet.getHeldItem());
-        }
-        if (puppet.hasArmor()) {
-            showPuppetArmorTo(conn, puppet);
-        }
-    }
-
-    /** Relay a puppet's floating text to every viewer. Called by {@link CorePuppet#setNameTag}. */
-    public void relayPuppetNameTag(CorePuppet puppet) {
-        if (puppet.getEntityType().isPlayer()) {
-            return; // a player avatar's name is its player name on every edition — nothing to set
-        }
-        String nameTag = puppet.getNameTag();
-        String rendered = nameTag == null ? "" : ChatText.toLegacy(nameTag);
-        for (CorePlayer p : playerRegistry.online()) {
-            p.getConnection().setEntityNameTag(puppet.getEntityId(), rendered);
-        }
-    }
-
-    /** Relay a puppet's whole flag set to every viewer. Called by {@link CorePuppet#setFlag}. */
-    public void relayPuppetFlags(CorePuppet puppet) {
-        for (CorePlayer p : playerRegistry.online()) {
-            p.getConnection().setEntityFlags(puppet.getEntityId(), puppet.getFlags());
-        }
-    }
-
-    /** Relay a puppet's arm swing to every viewer. Called by {@link CorePuppet#swing}. */
-    public void relayPuppetSwing(CorePuppet puppet) {
-        for (CorePlayer p : playerRegistry.online()) {
-            p.getConnection().swingArm(puppet.getEntityId());
-        }
-    }
-
-    /** Relay what a puppet holds to every viewer. Called by {@link CorePuppet#setHeldItem}. */
-    public void relayPuppetHeldItem(CorePuppet puppet) {
-        for (CorePlayer p : playerRegistry.online()) {
-            p.getConnection().showHeldItem(puppet.getEntityId(), puppet.getHeldItem());
-        }
-    }
-
-    /** Relay a puppet's worn armor to every viewer. Called by {@link CorePuppet#setArmor}. */
-    public void relayPuppetArmor(CorePuppet puppet) {
-        for (CorePlayer p : playerRegistry.online()) {
-            showPuppetArmorTo(p.getConnection(), puppet);
-        }
-    }
-
-    /** Dress one puppet on one connection (the relay and the join-time catch-up share this). */
-    private static void showPuppetArmorTo(PlayerConnection conn, CorePuppet puppet) {
-        conn.showArmor(puppet.getEntityId(),
-                puppet.getArmor(ArmorSlot.HELMET), puppet.getArmor(ArmorSlot.CHESTPLATE),
-                puppet.getArmor(ArmorSlot.LEGGINGS), puppet.getArmor(ArmorSlot.BOOTS));
-    }
-
-    /** Relay a puppet's hurt flash to every viewer. Called by {@link CorePuppet#hurt}. */
-    public void relayPuppetHurt(CorePuppet puppet) {
-        for (CorePlayer p : playerRegistry.online()) {
-            p.getConnection().playHurtAnimation(puppet.getEntityId());
-        }
-    }
-
-    /** Relay a puppet's move to every viewer. Called by {@link CorePuppet#teleport}. */
-    public void movePuppet(CorePuppet puppet, Location to) {
-        boolean asPlayer = puppet.getEntityType().isPlayer();
-        for (CorePlayer p : playerRegistry.online()) {
-            if (asPlayer) {
-                p.getConnection().moveAvatar(puppet.getEntityId(), to.x(), to.y(), to.z(), to.yaw(), to.pitch());
-            } else {
-                p.getConnection().moveEntity(puppet.getEntityId(), to.x(), to.y(), to.z(), to.yaw(), to.pitch());
-            }
-        }
-    }
-
-    /** Despawn a puppet from every viewer and drop it from the registry. Called by {@link CorePuppet#remove}. */
-    public void removePuppet(CorePuppet puppet) {
-        if (puppets.remove(puppet.getEntityId()) == null) {
-            return; // already gone
-        }
-        boolean asPlayer = puppet.getEntityType().isPlayer();
-        for (CorePlayer p : playerRegistry.online()) {
-            if (asPlayer) {
-                p.getConnection().hidePlayer(puppet.getUniqueId(), puppet.getEntityId());
-                p.getConnection().removeFromTab(puppet.getUniqueId());
-            } else {
-                p.getConnection().removeEntity(puppet.getEntityId());
-            }
-        }
+    /** The puppeteer — puppets, holograms, and every relay that shows them cross-edition. */
+    public EntityDirector getEntities() {
+        return entities;
     }
 
     /** The live puppet roster — used by the {@code /puppet} command to list / resolve puppets. */
     public PuppetRegistry getPuppets() {
-        return puppets;
+        return entities.getPuppets();
     }
 
-    // ===== Holograms (floating text) =====
-
-    @Override
-    public Hologram spawnHologram(Location at, String... lines) {
-        CoreHologram hologram = new CoreHologram(defaultWorld, at, this, lines);
-        holograms.add(hologram);
-        for (CorePlayer p : playerRegistry.online()) {
-            spawnHologramTo(p.getConnection(), hologram);
-        }
-        LOGGER.info("Spawned hologram #" + hologram.getEntityId() + " (" + lines.length + " lines) at "
-                + String.format(java.util.Locale.ROOT, "%.1f,%.1f,%.1f", at.x(), at.y(), at.z()));
-        return hologram;
-    }
-
-    /** Show every line of one hologram to one connection. Shared by the spawn broadcast and onLogin. */
-    private void spawnHologramTo(PlayerConnection conn, CoreHologram hologram) {
-        List<String> lines = hologram.getLines();
-        long[] ids = hologram.getLineIds();
-        for (int i = 0; i < lines.size(); i++) {
-            Location at = hologram.lineLocation(i);
-            conn.spawnTextLine(ids[i], hologram.getUniqueId(), at.x(), at.y(), at.z(),
-                    ChatText.toLegacy(lines.get(i)));
-        }
-    }
-
-    /** Relay one re-texted hologram line. Called by {@link CoreHologram#setLine}. */
-    public void relayHologramLine(CoreHologram hologram, int index) {
-        long id = hologram.getLineIds()[index];
-        String rendered = ChatText.toLegacy(hologram.getLines().get(index));
-        for (CorePlayer p : playerRegistry.online()) {
-            p.getConnection().setEntityNameTag(id, rendered);
-        }
-    }
-
-    /** Move a hologram's whole stack. Called by {@link CoreHologram#teleport}. */
-    public void moveHologram(CoreHologram hologram) {
-        long[] ids = hologram.getLineIds();
-        for (int i = 0; i < ids.length; i++) {
-            Location at = hologram.lineLocation(i);
-            for (CorePlayer p : playerRegistry.online()) {
-                p.getConnection().moveEntity(ids[i], at.x(), at.y(), at.z(), 0f, 0f);
-            }
-        }
-    }
-
-    /** Despawn {@code oldIds} and re-show the hologram — its line count changed ({@link CoreHologram#setLines}). */
-    public void respawnHologram(CoreHologram hologram, long[] oldIds) {
-        for (CorePlayer p : playerRegistry.online()) {
-            for (long id : oldIds) {
-                p.getConnection().removeEntity(id);
-            }
-            spawnHologramTo(p.getConnection(), hologram);
-        }
-    }
-
-    /** Despawn every line and drop the hologram. Called by {@link CoreHologram#remove}. */
-    public void removeHologram(CoreHologram hologram) {
-        if (!holograms.remove(hologram)) {
-            return; // already gone
-        }
-        for (CorePlayer p : playerRegistry.online()) {
-            for (long id : hologram.getLineIds()) {
-                p.getConnection().removeEntity(id);
-            }
-        }
-    }
-
-    /** The live holograms — used by the {@code /puppet} command to list / resolve them. */
+    /** The live holograms — used by the {@code /hologram} command to list / resolve them. */
     public List<CoreHologram> getHolograms() {
-        return holograms;
+        return entities.getHolograms();
     }
 
     /** The script plugin manager — used by the console {@code plugins} command. */
@@ -874,12 +553,12 @@ public class JedrockServer implements Server, ConnectionListener {
         player.setEquipmentListener(new CorePlayer.EquipmentListener() {
             @Override
             public void heldItemChanged(CorePlayer p) {
-                relayHeldItem(p);
+                broadcast.heldItem(p);
             }
 
             @Override
             public void armorChanged(CorePlayer p) {
-                relayArmor(p);
+                broadcast.armor(p);
             }
         });
 
@@ -903,7 +582,7 @@ public class JedrockServer implements Server, ConnectionListener {
         player.sendMessage("{green}Welcome to **Jedrock**!");
         String joinMessage = event.getJoinMessage();
         if (joinMessage != null && !joinMessage.isEmpty()) {
-            broadcast(joinMessage, player);
+            broadcast.message(joinMessage, player);
         }
 
         // Tab list: give the newcomer the whole roster, and add the newcomer to everyone else's.
@@ -940,12 +619,7 @@ public class JedrockServer implements Server, ConnectionListener {
         }
 
         // Show every existing puppet and hologram to the newcomer (existing players already see them).
-        for (CorePuppet puppet : puppets.all()) {
-            spawnPuppetTo(connection, puppet);
-        }
-        for (CoreHologram hologram : holograms) {
-            spawnHologramTo(connection, hologram);
-        }
+        entities.showAllTo(connection);
 
         LOGGER.info(username + " joined [" + connection.getProtocolVersion().getVersionName()
                 + "] (" + playerRegistry.size() + " online)");
@@ -963,7 +637,7 @@ public class JedrockServer implements Server, ConnectionListener {
         eventBus.post(event);
         String quitMessage = event.getQuitMessage();
         if (quitMessage != null && !quitMessage.isEmpty()) {
-            broadcast(quitMessage, null);
+            broadcast.message(quitMessage, null);
         }
         LOGGER.info(player.getName() + " disconnected (" + playerRegistry.size() + " online)");
     }
@@ -1031,19 +705,14 @@ public class JedrockServer implements Server, ConnectionListener {
         if (version.isJava() || version == ProtocolVersion.PE_0_14) {
             double fell = player.trackFall(from.y(), y);
             if (fell > 0) {
-                applyFallDamage(player, fell);
+                combat.applyFallDamage(player, fell);
             }
         }
 
         // Relay at the sender's own rate; both clients interpolate between updates. Iterate the live
         // roster view directly and skip the Optional/capturing lambda, so a move packet allocates
         // only the immutable Location snapshot (kept immutable so getLocation stays an atomic swap).
-        long entityId = player.getEntityId();
-        for (CorePlayer other : playerRegistry.online()) {
-            if (other != player) {
-                other.getConnection().moveAvatar(entityId, x, y, z, yaw, pitch);
-            }
-        }
+        broadcast.move(player, x, y, z, yaw, pitch);
     }
 
     @Override
@@ -1119,71 +788,7 @@ public class JedrockServer implements Server, ConnectionListener {
 
     @Override
     public void onFall(PlayerConnection connection, float fallDistance) {
-        // Bedrock 1.1.5 reports its own falls (EntityFall) — apply the damage from the client's report.
-        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
-        if (player != null) {
-            applyFallDamage(player, fallDistance);
-        }
-    }
-
-    /**
-     * Turn a fall distance into vanilla fall damage (one point per block past the first three) and apply
-     * it via {@link #hurt}. Shared by the Bedrock client's {@code EntityFall} report and the server-side
-     * fall tracking used by editions with no fall-report packet (Java, PE 0.14).
-     */
-    private void applyFallDamage(CorePlayer player, double fallDistance) {
-        int damage = (int) Math.floor(fallDistance) - 3;
-        hurt(player, damage, DamageCause.FALL,
-                "{gray}" + ChatText.escape(player.getName()) + " fell to their death");
-    }
-
-    /**
-     * Apply {@code amount} half-hearts of damage to a survival player from any source (fall, void, and
-     * later PvP), push the new health to their HUD, and handle death. Death is deliberately primitive —
-     * a silent respawn at spawn with full health, no death-screen handshake (a kept feature) — and
-     * broadcasts {@code deathMessage}. A no-op outside survival or for a non-positive {@code amount}.
-     */
-    private void hurt(CorePlayer player, int amount, DamageCause cause, String deathMessage) {
-        if (player.getGameMode() != GameMode.SURVIVAL || amount <= 0) {
-            return;
-        }
-        // Let listeners veto or rescale the damage before it lands (invulnerability, a difficulty tweak).
-        // Zeroing the amount is the same as cancelling.
-        if (eventBus.hasListeners(PlayerDamageEvent.class)) {
-            PlayerDamageEvent event = eventBus.post(new PlayerDamageEvent(player, cause, amount));
-            if (event.isCancelled() || event.getAmount() <= 0) {
-                return;
-            }
-            amount = event.getAmount();
-        }
-        // Show the hit to everyone else: the victim's avatar flashes red (its own client shows the hit
-        // from its dropping health bar, so it doesn't need this). Covers every source — PvP, fall, void.
-        long entityId = player.getEntityId();
-        for (CorePlayer other : playerRegistry.online()) {
-            if (other != player) {
-                other.getConnection().playHurtAnimation(entityId);
-            }
-        }
-        PlayerConnection connection = player.getConnection();
-        if (player.damage(amount) <= 0) {
-            // Death: a listener may restyle or suppress the announcement (null / empty = no broadcast).
-            String message = deathMessage;
-            if (eventBus.hasListeners(PlayerDeathEvent.class)) {
-                message = eventBus.post(new PlayerDeathEvent(player, cause, deathMessage)).getDeathMessage();
-            }
-            player.setHealth(CorePlayer.MAX_HEALTH); // clamps + refreshes the client's health HUD
-            // Where they respawn — world spawn by default, but a listener may redirect it (a bed, a lobby).
-            Location respawn = defaultWorld.getSpawnLocation();
-            if (eventBus.hasListeners(PlayerRespawnEvent.class)) {
-                respawn = eventBus.post(new PlayerRespawnEvent(player, respawn)).getRespawnLocation();
-            }
-            reposition(player, respawn); // resets fall tracking too; not the eventful teleport (uncancellable)
-            if (message != null && !message.isEmpty()) {
-                broadcast(message, null);
-            }
-        } else {
-            connection.setHealth(player.getHealth());
-        }
+        combat.onFall(connection, fallDistance);
     }
 
     @Override
@@ -1223,7 +828,7 @@ public class JedrockServer implements Server, ConnectionListener {
             return;
         }
         player.setSneaking(sneaking);
-        relayPose(player);
+        broadcast.pose(player);
     }
 
     @Override
@@ -1237,7 +842,7 @@ public class JedrockServer implements Server, ConnectionListener {
             return;
         }
         player.setSprinting(sprinting);
-        relayPose(player);
+        broadcast.pose(player);
     }
 
     @Override
@@ -1251,20 +856,7 @@ public class JedrockServer implements Server, ConnectionListener {
             return;
         }
         player.setUsingItem(using);
-        relayPose(player);
-    }
-
-    /** Relay a player's full pose (sneak + sprint + item-use share a flags field, so send together). */
-    private void relayPose(CorePlayer player) {
-        long entityId = player.getEntityId();
-        boolean sneaking = player.isSneaking();
-        boolean sprinting = player.isSprinting();
-        boolean usingItem = player.isUsingItem();
-        for (CorePlayer other : playerRegistry.online()) {
-            if (other != player) {
-                other.getConnection().setPose(entityId, sneaking, sprinting, usingItem);
-            }
-        }
+        broadcast.pose(player);
     }
 
     @Override
@@ -1273,297 +865,44 @@ public class JedrockServer implements Server, ConnectionListener {
         if (player == null) {
             return;
         }
-        long entityId = player.getEntityId();
-        for (CorePlayer other : playerRegistry.online()) {
-            if (other != player) {
-                other.getConnection().swingArm(entityId);
-            }
-        }
+        broadcast.swing(player);
     }
+
+    // ===== Inventories, windows and chests — the ContainerService does the work =====
 
     @Override
     public void onWindowClick(PlayerConnection connection, int coreSlot, int button, boolean shift) {
-        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
-        if (player == null || player.getGameMode() != GameMode.SURVIVAL) {
-            return; // creative manages its own inventory client-side — don't apply or resync over it
-        }
-        Container inv = player.getInventory();
-        Cursor cur = player.getCursor();
-        // Let a listener veto the click before it's applied. A cancel still falls through to the resync
-        // below, so the client's optimistic move is reverted.
-        boolean vetoed = eventBus.hasListeners(InventoryClickEvent.class)
-                && eventBus.post(new InventoryClickEvent(player, coreSlot, button, shift)).isCancelled();
-        // coreSlot < 0 = an unbacked slot (crafting grid) or a click mode we don't model — resync only.
-        if (!vetoed && coreSlot >= 0 && coreSlot < inv.size()) {
-            if (shift) {
-                // Quick-move to the "other" region: hotbar↔main, and armor/off-hand back into storage.
-                int from, to;
-                if (coreSlot < 9) { from = 9; to = 36; }        // hotbar → main
-                else if (coreSlot < 36) { from = 0; to = 9; }   // main → hotbar
-                else { from = 0; to = 36; }                     // armor / off-hand → storage
-                InventoryClick.shift(inv, coreSlot, from, to);
-            } else {
-                InventoryClick.normal(inv, cur, coreSlot, button == 1);
-            }
-        }
-        // Server is authoritative: resync the whole window + cursor, overriding any client misprediction.
-        player.syncInventory();
-        connection.setCursorItem(cur.state(), cur.count());
+        containers.onWindowClick(connection, coreSlot, button, shift);
     }
 
     @Override
     public void onWindowClose(PlayerConnection connection) {
-        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
-        if (player == null) {
-            return;
-        }
-        // In creative, only intervene when closing a chest — closing the creative menu must not disturb it.
-        if (player.getGameMode() != GameMode.SURVIVAL && !player.hasContainerOpen()) {
-            return;
-        }
-        player.closeContainer(); // a chest, if any, is no longer open
-        Cursor cur = player.getCursor();
-        // Return any carried item to storage; whatever doesn't fit is lost (no item entities to drop).
-        while (!cur.isEmpty() && player.addToInventory(cur.state()) >= 0) {
-            cur.set(cur.state(), cur.count() - 1);
-        }
-        cur.clear();
-        player.syncInventory();
-        connection.setCursorItem(0, 0);
+        containers.onWindowClose(connection);
     }
-
-    /**
-     * Window id for a player's open chest (a player has at most one container open). Must be ≥ 2: MCPE
-     * reserves 0/1 (PMMP assigns custom windows from {@code max(2, …)}) and a 1.1.5 client crashes on a
-     * ContainerOpen with id 1; 119-122 are the off-hand / armor / creative / hotbar windows. 10 is safe
-     * on every edition (Java accepts any container window id).
-     */
-    private static final int CHEST_WINDOW_ID = 10;
 
     @Override
     public boolean onUseBlock(PlayerConnection connection, int x, int y, int z) {
-        CorePlayer clicker = playerRegistry.getByConnectionOrNull(connection);
-        // Let listeners gate the right-click on any block. Cancelling consumes the click — no chest opens
-        // and no block is placed against it — so a plugin can protect a block or handle it itself.
-        if (clicker != null && eventBus.hasListeners(PlayerInteractBlockEvent.class)) {
-            int state = defaultWorld.getBlockId(x, y, z);
-            if (eventBus.post(new PlayerInteractBlockEvent(clicker, x, y, z, state)).isCancelled()) {
-                return true; // consumed: suppress both the chest open and any placement
-            }
-        }
-        if (Blocks.idOf(defaultWorld.getBlockId(x, y, z)) != Blocks.CHEST) {
-            return false; // not interactable — let the caller place the held block
-        }
-        // A chest: consume the right-click (so no block is placed on it) and open it. Works in creative
-        // too — the creative inventory is mirrored server-side via onCreativeSetSlot, so the chest's
-        // player-inventory half is tracked.
-        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
-        if (player != null) {
-            Container chest = defaultWorld.getChestContainer(x, y, z);
-            player.openContainer(CHEST_WINDOW_ID, chest);
-            connection.openContainer(CHEST_WINDOW_ID, "Chest", 27, x, y, z);
-            sendChestContents(player, connection);
-        }
-        return true;
+        return containers.onUseBlock(connection, x, y, z);
     }
 
     @Override
     public boolean onChestInteract(PlayerConnection connection, int x, int y, int z, int heldSlot) {
-        if (Blocks.idOf(defaultWorld.getBlockId(x, y, z)) != Blocks.CHEST) {
-            return false; // not a chest — let the caller place the held block
-        }
-        // Click-transfer chest (the retail 1.1.5 client crashes on a real chest window): a plain
-        // right-click withdraws the first stack, a sneaking right-click deposits the held hotbar slot.
-        // Works in both modes — creative deposits its (infinite) held item without consuming it, and its
-        // held item is mirrored server-side from the client's MobEquipment (see PeSession). The click is
-        // always consumed so no block is placed on the chest.
-        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
-        if (player != null) {
-            Container chest = defaultWorld.getChestContainer(x, y, z);
-            boolean creative = player.getGameMode() == GameMode.CREATIVE;
-            if (player.isSneaking()) {
-                chestDeposit(player, chest, heldSlot, creative);
-            } else {
-                chestWithdraw(player, chest, creative);
-            }
-        }
-        return true; // it's a chest — always suppress the placement
-    }
-
-    /**
-     * Right-click transfer out of the chest, one stack per click. In <b>survival</b> the first non-empty
-     * stack moves into the player's inventory (as much as fits). In <b>creative</b> the player's inventory
-     * is infinite and client-managed, so handing real items over would let a deposit→withdraw cycle mint
-     * items (the reported duplication: deposit never consumes an infinite hand, so withdrawing the copy is
-     * pure gain). Instead a creative click just removes the stack from the chest — an edit of its contents.
-     */
-    private void chestWithdraw(CorePlayer player, Container chest, boolean creative) {
-        for (int i = 0; i < chest.size(); i++) {
-            if (chest.isEmpty(i)) {
-                continue;
-            }
-            int state = chest.stateAt(i);
-            int have = chest.countAt(i);
-            if (creative) {
-                chest.clear(i);                 // no real items to a creative player — just clear the stack
-                defaultWorld.markDirty();
-                player.sendMessage("{gray}Убрано из сундука ×" + have);
-                return;
-            }
-            int prev = -1, moved = 0;
-            for (int c = 0; c < have; c++) {
-                int slot = player.addToInventory(state);
-                if (slot < 0) break; // inventory full
-                if (slot != prev) {
-                    if (prev >= 0) player.syncSlot(prev);
-                    prev = slot;
-                }
-                moved++;
-            }
-            if (prev >= 0) player.syncSlot(prev);
-            if (moved > 0) {
-                chest.set(i, have - moved > 0 ? state : 0, have - moved);
-                defaultWorld.markDirty();
-                player.sendMessage("{gray}Взято из сундука ×" + moved
-                        + (moved < have ? " {dark_gray}(инвентарь полон)" : ""));
-            }
-            return; // one stack per click
-        }
-        player.sendMessage("{gray}Сундук пуст");
-    }
-
-    /**
-     * Deposit the player's held hotbar slot ({@code heldSlot}, 0-8) into the chest (as much as fits).
-     * The amount is exactly what the slot holds (in creative that comes from the client's MobEquipment
-     * mirror). In survival the deposited items are consumed from the slot; in {@code creative} the hand is
-     * infinite, so the slot is left untouched — but the count is honest, not a forced stack, so a
-     * deposit→withdraw cycle can't inflate.
-     */
-    private void chestDeposit(CorePlayer player, Container chest, int heldSlot, boolean creative) {
-        if (heldSlot < 0 || heldSlot >= 9) {
-            return;
-        }
-        Container inv = player.getInventory();
-        int state = inv.stateAt(heldSlot);
-        int have = inv.countAt(heldSlot);
-        if (state == 0 || have <= 0) {
-            player.sendMessage("{gray}В руке ничего нет");
-            return;
-        }
-        int moved = 0;
-        for (int c = 0; c < have; c++) {
-            if (chest.give(state, 0, chest.size()) < 0) break; // chest full
-            moved++;
-        }
-        if (moved > 0) {
-            if (!creative) { // survival consumes the deposited items; creative's are infinite
-                inv.set(heldSlot, have - moved > 0 ? state : 0, have - moved);
-                player.syncSlot(heldSlot);
-            }
-            defaultWorld.markDirty();
-            player.sendMessage("{gray}Положено в сундук ×" + moved
-                    + (moved < have ? " {dark_gray}(сундук полон)" : ""));
-        } else {
-            player.sendMessage("{gray}Сундук полон");
-        }
+        return containers.onChestInteract(connection, x, y, z, heldSlot);
     }
 
     @Override
     public void onChestClick(PlayerConnection connection, int windowSlot, int button, boolean shift) {
-        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
-        if (player == null || !player.hasContainerOpen()) {
-            return; // works in creative too — the chest window is server-authoritative in both modes
-        }
-        Container chest = player.getOpenContainer();
-        Container inv = player.getInventory();
-        // Chest-window layout: 0-26 the chest, 27-53 the player's main (core 9-35), 54-62 the hotbar (0-8).
-        boolean inChest = windowSlot >= 0 && windowSlot < 27;
-        Container target;
-        int index;
-        if (inChest) {
-            target = chest; index = windowSlot;
-        } else if (windowSlot >= 27 && windowSlot < 54) {
-            target = inv; index = 9 + (windowSlot - 27);
-        } else if (windowSlot >= 54 && windowSlot < 63) {
-            target = inv; index = windowSlot - 54;
-        } else {
-            target = null; index = -1; // outside / unmodelled — resync only
-        }
-        if (target != null) {
-            if (shift) {
-                // Quick-move across the two containers: chest → player storage, or player → chest.
-                if (inChest) {
-                    InventoryClick.shiftTo(chest, index, inv, 0, 36);
-                } else {
-                    InventoryClick.shiftTo(inv, index, chest, 0, 27);
-                }
-            } else {
-                InventoryClick.normal(target, player.getCursor(), index, button == 1);
-            }
-            defaultWorld.markDirty(); // a chest edit must be persisted by autosave / shutdown
-        }
-        sendChestContents(player, connection);
-    }
-
-    /**
-     * Push the open chest window's contents. The two editions frame it differently: <b>Java</b> puts the
-     * player inventory <em>inside</em> the chest window (27 chest + 27 main + 9 hotbar = 63 slots), and is
-     * server-authoritative (also resyncs the cursor); <b>Bedrock</b>'s chest window is just the 27 chest
-     * slots — the player inventory is the separate window 0 the client already owns.
-     */
-    private void sendChestContents(CorePlayer player, PlayerConnection connection) {
-        Container chest = player.getOpenContainer();
-        int windowId = player.getOpenWindowId();
-        if (connection.getProtocolVersion().isBedrock()) {
-            connection.setWindowItems(windowId, chest.states(), chest.counts());
-            return;
-        }
-        int[] ps = player.inventoryStates();
-        int[] pc = player.inventoryCounts();
-        int[] states = new int[63];
-        int[] counts = new int[63];
-        for (int i = 0; i < 27; i++) {                 // chest
-            states[i] = chest.stateAt(i);
-            counts[i] = chest.countAt(i);
-        }
-        for (int i = 0; i < 27; i++) {                 // player main (core 9-35)
-            states[27 + i] = ps[9 + i];
-            counts[27 + i] = pc[9 + i];
-        }
-        for (int i = 0; i < 9; i++) {                  // player hotbar (core 0-8)
-            states[54 + i] = ps[i];
-            counts[54 + i] = pc[i];
-        }
-        connection.setWindowItems(windowId, states, counts);
-        connection.setCursorItem(player.getCursor().state(), player.getCursor().count());
+        containers.onChestClick(connection, windowSlot, button, shift);
     }
 
     @Override
     public void onContainerSetSlot(PlayerConnection connection, int windowId, int slot, int state, int count) {
-        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
-        if (player == null || slot < 0) {
-            return;
-        }
-        // Bedrock is client-authoritative for an open chest window: it already moved the item and just
-        // tells us the new slot value.
-        if (player.hasContainerOpen() && windowId == player.getOpenWindowId()) {
-            Container chest = player.getOpenContainer();
-            if (slot < chest.size()) {
-                chest.set(slot, state, count);
-                defaultWorld.markDirty();
-            }
-        } else if (windowId == 0 && player.getGameMode() == GameMode.CREATIVE) {
-            // The player's own inventory (PE window 0: 0-8 hotbar, 9-35 main). Only trust the client's
-            // report in CREATIVE, where the inventory is client-authoritative and we merely mirror it so a
-            // chest deposit knows the held item. In SURVIVAL the server owns the inventory (mining, placing
-            // and chest transfers all flow through it), so a client echo must be IGNORED — otherwise the
-            // 1.1.5 client's ContainerSetSlot echo right after a chest deposit re-adds the just-moved stack,
-            // duplicating it (the item ends up in the chest AND back in the inventory).
-            Container inv = player.getInventory();
-            if (slot < 36) {
-                inv.set(slot, state, count);
-            }
-        }
+        containers.onContainerSetSlot(connection, windowId, slot, state, count);
+    }
+
+    @Override
+    public void onCreativeSetSlot(PlayerConnection connection, int coreSlot, int state, int count) {
+        containers.onCreativeSetSlot(connection, coreSlot, state, count);
     }
 
     @Override
@@ -1571,109 +910,13 @@ public class JedrockServer implements Server, ConnectionListener {
         CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
         if (player != null) {
             player.setHeldItemSlot(slot);
-            relayHeldItem(player);
+            broadcast.heldItem(player);
         }
     }
-
-    /**
-     * Show what {@code holder} is holding on every other player's copy of their avatar, cross-edition.
-     * Called when they switch hotbar slots and when the held stack itself changes (mine / place /
-     * script edit) — the holder's own client draws their hand from their inventory, so they're skipped.
-     */
-    public void relayHeldItem(CorePlayer holder) {
-        int state = holder.getHeldItem();
-        long entityId = holder.getEntityId();
-        for (CorePlayer other : playerRegistry.online()) {
-            if (other != holder) {
-                other.getConnection().showHeldItem(entityId, state);
-            }
-        }
-    }
-
-    /**
-     * Dress {@code wearer}'s avatar on every client, cross-edition. Other players get the packet that
-     * dresses an avatar; the wearer gets their own copy through a different one — JE reads its own
-     * armor from the inventory window, but a Bedrock client shows the wearer nothing unless the pieces
-     * are pushed to its dedicated armor window (which is why it's a separate call).
-     */
-    public void relayArmor(CorePlayer wearer) {
-        int helmet = wearer.getArmor(ArmorSlot.HELMET);
-        int chestplate = wearer.getArmor(ArmorSlot.CHESTPLATE);
-        int leggings = wearer.getArmor(ArmorSlot.LEGGINGS);
-        int boots = wearer.getArmor(ArmorSlot.BOOTS);
-        long entityId = wearer.getEntityId();
-        for (CorePlayer other : playerRegistry.online()) {
-            if (other != wearer) {
-                other.getConnection().showArmor(entityId, helmet, chestplate, leggings, boots);
-            }
-        }
-        wearer.getConnection().sendOwnArmor(helmet, chestplate, leggings, boots);
-    }
-
-    @Override
-    public void onCreativeSetSlot(PlayerConnection connection, int coreSlot, int state, int count) {
-        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
-        if (player == null || player.getGameMode() != GameMode.CREATIVE) {
-            return; // only a creative client sets slots this way — ignore an unexpected survival sender
-        }
-        Container inv = player.getInventory();
-        if (coreSlot >= 0 && coreSlot < inv.size()) {
-            inv.set(coreSlot, state, count); // mirror only; the creative client already shows it
-            // A creative player dragging armor into slots 36-39 dresses their avatar for everyone else;
-            // dropping something into the held slot redraws the hand the same way.
-            if (coreSlot >= ArmorSlot.HELMET.inventorySlot() && coreSlot <= ArmorSlot.BOOTS.inventorySlot()) {
-                relayArmor(player);
-            } else if (coreSlot == player.getHeldItemSlot()) {
-                relayHeldItem(player);
-            }
-        }
-    }
-
-    /** Bare-hand melee damage, in half-hearts (vanilla is 2 = one heart). */
-    private static final int ATTACK_DAMAGE = 2;
 
     @Override
     public void onAttack(PlayerConnection connection, long targetEntityId) {
-        CorePlayer attacker = playerRegistry.getByConnectionOrNull(connection);
-        if (attacker == null) {
-            return;
-        }
-        // Let listeners veto the interaction before anything acts on it — no damage, no puppet callback.
-        if (eventBus.hasListeners(PlayerInteractEntityEvent.class)
-                && eventBus.post(new PlayerInteractEntityEvent(attacker, targetEntityId)).isCancelled()) {
-            return;
-        }
-        CorePlayer victim = playerRegistry.getByEntityIdOrNull(targetEntityId);
-        if (victim == null) {
-            // Not a player — maybe a puppet. Fire its interaction hook (the seam the API subscribes to)
-            // and, as a visible demo, flash the puppet red on every client. A puppet has no health/damage.
-            CorePuppet puppet = puppets.get(targetEntityId);
-            if (puppet != null) {
-                puppet.fireInteract(attacker);
-                for (CorePlayer p : playerRegistry.online()) {
-                    p.getConnection().playHurtAnimation(targetEntityId);
-                }
-            }
-            return;
-        }
-        if (victim == attacker) {
-            return; // a self-hit — nothing to do
-        }
-        // Reach check (the blind judge): reject a hit from implausibly far — a reach hack — measured to
-        // the victim's cell. The attacker's own arm swing is relayed separately via onSwingArm.
-        Location a = attacker.getLocation();
-        Location v = victim.getLocation();
-        if (!judge.allowsInteraction(a.x(), a.y(), a.z(),
-                (int) Math.floor(v.x()), (int) Math.floor(v.y()), (int) Math.floor(v.z()))) {
-            return;
-        }
-        // Invulnerability frames: drop a hit landing inside the victim's half-second window, so a
-        // click-spamming attacker can't deal damage faster than vanilla.
-        if (victim.isOnHurtCooldown()) {
-            return;
-        }
-        hurt(victim, ATTACK_DAMAGE, DamageCause.ATTACK, "{gray}" + ChatText.escape(victim.getName())
-                + " was slain by " + ChatText.escape(attacker.getName()));
+        combat.onAttack(connection, targetEntityId);
     }
 
     @Override
@@ -1719,26 +962,13 @@ public class JedrockServer implements Server, ConnectionListener {
         String line = format.replace("%prefix%", sender.getPrefix())
                 .replace("%name%", nameToken).replace("%s", body);
         LOGGER.info("[chat] <" + sender.getName() + "> " + body);
-        broadcast(line, null); // relay to everyone, including the sender
-    }
-
-    /**
-     * Send a system message to every online player — each {@link PlayerConnection} serializes
-     * it in its own protocol, so a JE and a PE player see the same line. This is the core of
-     * cross-platform interaction. Optionally skips one player (e.g. the join announcement's subject).
-     */
-    private void broadcast(String message, Player except) {
-        for (Player p : playerRegistry.all()) {
-            if (p != except) {
-                p.sendMessage(message);
-            }
-        }
+        broadcast.message(line, null); // relay to everyone, including the sender
     }
 
     /** Broadcast a system line to every online player (used by {@code /say} and the console {@code say}). */
     @Override
     public void broadcast(String message) {
-        broadcast(message, null);
+        broadcast.message(message, null);
     }
 
     @Override
@@ -1758,12 +988,7 @@ public class JedrockServer implements Server, ConnectionListener {
      * @return {@code true} if the player was killed (survival), {@code false} if immune (creative)
      */
     public boolean kill(CorePlayer player) {
-        if (player.getGameMode() != GameMode.SURVIVAL) {
-            return false;
-        }
-        hurt(player, CorePlayer.MAX_HEALTH, DamageCause.KILL,
-                "{gray}" + ChatText.escape(player.getName()) + " died");
-        return true;
+        return combat.kill(player);
     }
 
     /**
@@ -1773,11 +998,7 @@ public class JedrockServer implements Server, ConnectionListener {
      * @return {@code true} if the player was healed (survival), {@code false} if not applicable (creative)
      */
     public boolean heal(CorePlayer player) {
-        if (player.getGameMode() != GameMode.SURVIVAL) {
-            return false;
-        }
-        player.setHealth(CorePlayer.MAX_HEALTH); // clamps + refreshes the client's health HUD
-        return true;
+        return combat.heal(player);
     }
 
     @Override

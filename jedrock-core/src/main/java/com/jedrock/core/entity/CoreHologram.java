@@ -3,7 +3,6 @@ package com.jedrock.core.entity;
 import com.jedrock.api.entity.Hologram;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
-import com.jedrock.core.JedrockServer;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -15,7 +14,7 @@ import java.util.UUID;
  * entity, and the whole stack hangs downwards from the hologram's location, so line 0 sits at the anchor
  * and the rest follow {@link #LINE_SPACING} apart.
  *
- * <p>Holds nothing but the text and where it hangs; the {@link JedrockServer} that owns it relays every
+ * <p>Holds nothing but the text and where it hangs; the {@link EntityDirector} that owns it relays every
  * change to viewers, and each edition renders a line with whatever it can make invisible.
  */
 public final class CoreHologram implements Hologram {
@@ -25,7 +24,7 @@ public final class CoreHologram implements Hologram {
 
     private final UUID uuid = UUID.randomUUID();
     private final long entityId = EntityIds.next();
-    private final JedrockServer server;
+    private final EntityDirector director;
 
     private volatile World world;
     private volatile Location location;
@@ -38,10 +37,10 @@ public final class CoreHologram implements Hologram {
     private volatile long[] lineIds = new long[0];
     private volatile String[] lines = new String[0];
 
-    public CoreHologram(World world, Location location, JedrockServer server, String... lines) {
+    public CoreHologram(World world, Location location, EntityDirector director, String... lines) {
         this.world = world;
         this.location = location;
-        this.server = server;
+        this.director = director;
         this.lines = lines.clone();
         this.lineIds = new long[lines.length];
         for (int i = 0; i < lineIds.length; i++) {
@@ -87,7 +86,7 @@ public final class CoreHologram implements Hologram {
     public void remove() {
         if (alive) {
             alive = false;
-            server.removeHologram(this); // relays the despawn of every line
+            director.removeHologram(this); // relays the despawn of every line
         }
     }
 
@@ -116,7 +115,7 @@ public final class CoreHologram implements Hologram {
             // Same shape: the line entities stay, only their text changes.
             for (int i = 0; i < lines.length; i++) {
                 if (!java.util.Objects.equals(old[i], lines[i])) {
-                    server.relayHologramLine(this, i);
+                    director.relayHologramLine(this, i);
                 }
             }
             return;
@@ -130,7 +129,7 @@ public final class CoreHologram implements Hologram {
             freshIds[i] = EntityIds.next();
         }
         this.lineIds = freshIds;
-        server.respawnHologram(this, oldIds);
+        director.respawnHologram(this, oldIds);
     }
 
     @Override
@@ -142,13 +141,13 @@ public final class CoreHologram implements Hologram {
         String[] updated = current.clone();
         updated[index] = text;
         this.lines = updated;
-        server.relayHologramLine(this, index);
+        director.relayHologramLine(this, index);
     }
 
     @Override
     public void teleport(Location to) {
         setLocation(to);
-        server.moveHologram(this);
+        director.moveHologram(this);
     }
 
     /** The entity id carrying each line, parallel to {@link #getLines()}. Core-internal. */

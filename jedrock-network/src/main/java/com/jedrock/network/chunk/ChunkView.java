@@ -53,18 +53,29 @@ public final class ChunkView {
             return false;
         });
 
-        // Load newly in-range chunks, ring by ring from the center outward.
+        // Load newly in-range chunks, ring by ring from the center outward. Each ring walks its
+        // perimeter directly — the two edge columns in full, the columns between them only top and
+        // bottom — rather than scanning the whole square and discarding the interior, which visited
+        // O(radius³) cells to reach the O(radius²) that exist (969 for the 289 of a radius-8 view).
+        // Same order as that scan, so pop-in still arrives nearest-first.
         for (int ring = 0; ring <= radius; ring++) {
             for (int cx = centerX - ring; cx <= centerX + ring; cx++) {
-                for (int cz = centerZ - ring; cz <= centerZ + ring; cz++) {
-                    if (Math.max(Math.abs(cx - centerX), Math.abs(cz - centerZ)) != ring) {
-                        continue; // only the current ring's perimeter
+                if (cx == centerX - ring || cx == centerX + ring) {
+                    for (int cz = centerZ - ring; cz <= centerZ + ring; cz++) {
+                        loadIfNew(cx, cz, sink);
                     }
-                    if (loaded.add(key(cx, cz))) {
-                        sink.load(cx, cz);
-                    }
+                } else {
+                    loadIfNew(cx, centerZ - ring, sink);
+                    loadIfNew(cx, centerZ + ring, sink);
                 }
             }
+        }
+    }
+
+    /** Send one chunk if this view doesn't already hold it. */
+    private void loadIfNew(int chunkX, int chunkZ, Sink sink) {
+        if (loaded.add(key(chunkX, chunkZ))) {
+            sink.load(chunkX, chunkZ);
         }
     }
 

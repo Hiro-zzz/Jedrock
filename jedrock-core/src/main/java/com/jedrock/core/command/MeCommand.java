@@ -4,7 +4,6 @@ import com.jedrock.api.command.CommandSender;
 import com.jedrock.core.JedrockServer;
 import com.jedrock.utils.text.ChatText;
 
-import java.util.List;
 
 /**
  * {@code /me <action>} — broadcast a third-person emote, e.g. {@code * Steve waves}. The sender's name is

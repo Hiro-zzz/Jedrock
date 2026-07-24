@@ -355,7 +355,11 @@ public class JedrockConnection implements Connection, PlayerConnection {
                     return;
                 }
             }
-            LOGGER.debug(() -> "Outgoing packet 0x" + Integer.toHexString(packet.getPacketId()));
+            // Every clientbound packet passes here (chunks, avatar moves, block changes) — gate the
+            // lambda rather than allocate one per send just to throw it away with debug off.
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("Outgoing packet 0x" + Integer.toHexString(packet.getPacketId()));
+            }
             send(buf); // ownership transferred to the pipeline
         } catch (Exception e) {
             buf.release();

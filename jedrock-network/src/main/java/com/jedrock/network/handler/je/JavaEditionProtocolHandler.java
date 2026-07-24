@@ -46,8 +46,12 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
         ByteBuf payload = packet.getPayload();
 
         try {
-            LOGGER.debug(() -> "Inbound 0x" + Integer.toHexString(id) +
-                    " (state=" + state + ", bytes=" + (payload != null ? payload.readableBytes() : 0) + ")");
+            // Runs for every inbound packet — movement alone is ~20/s per player — so the lambda is
+            // gated rather than handed to the supplier form, which would allocate it even with debug off.
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("Inbound 0x" + Integer.toHexString(id) +
+                        " (state=" + state + ", bytes=" + (payload != null ? payload.readableBytes() : 0) + ")");
+            }
 
             switch (state) {
                 case LOGIN -> handleLogin(id, packet, connection);
