@@ -44,6 +44,7 @@ import com.jedrock.api.world.World;
 import com.jedrock.core.command.ClearCommand;
 import com.jedrock.core.command.CommandManager;
 import com.jedrock.core.command.GameModeCommand;
+import com.jedrock.core.command.WeatherCommand;
 import com.jedrock.core.command.HealCommand;
 import com.jedrock.core.command.HelpCommand;
 import com.jedrock.core.command.KillCommand;
@@ -175,6 +176,7 @@ public class JedrockServer implements Server, ConnectionListener {
         commandManager.register(new MeCommand());
         commandManager.register(new MsgCommand());
         commandManager.register(new GameModeCommand());
+        commandManager.register(new WeatherCommand());
         commandManager.register(new TeleportCommand());
         commandManager.register(new TpHereCommand());
         commandManager.register(new TpAllCommand());

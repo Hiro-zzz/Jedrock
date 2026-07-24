@@ -38,6 +38,9 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Clear any title / subtitle shown. Default: a no-op. */
     default void clearTitle(JedrockConnection c) {}
 
+    /** Draw the given weather (Change Game State: rain begin/end + the thunder sky fade). Default: a no-op. */
+    default void sendWeather(JedrockConnection c, com.jedrock.api.world.Weather weather) {}
+
     /** Play a canonical sound at a position (this version's Named Sound Effect packet). Default: a no-op. */
     default void playSound(JedrockConnection c, com.jedrock.api.world.Sound sound,
                            double x, double y, double z, float volume, float pitch) {}

@@ -273,6 +273,30 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     }
 
     @Override
+    public void sendWeather(JedrockConnection c, com.jedrock.api.world.Weather weather) {
+        // Change Game State (0x2B at 1.8): reason 1 = end rain, 2 = begin rain, then the strengths —
+        // reason 7 is setRainStrength and 8 is setThunderStrength on the client, so full-strength
+        // values make the change visible instantly instead of ramping in (or, with 0s, not at all).
+        switch (weather) {
+            case CLEAR -> {
+                send(c, CB_CHANGE_GAME_STATE, b -> { b.writeByte(1); b.writeFloat(0f); });
+                send(c, CB_CHANGE_GAME_STATE, b -> { b.writeByte(7); b.writeFloat(0f); });
+                send(c, CB_CHANGE_GAME_STATE, b -> { b.writeByte(8); b.writeFloat(0f); });
+            }
+            case RAIN -> {
+                send(c, CB_CHANGE_GAME_STATE, b -> { b.writeByte(2); b.writeFloat(0f); });
+                send(c, CB_CHANGE_GAME_STATE, b -> { b.writeByte(7); b.writeFloat(1f); });
+                send(c, CB_CHANGE_GAME_STATE, b -> { b.writeByte(8); b.writeFloat(0f); });
+            }
+            case THUNDER -> {
+                send(c, CB_CHANGE_GAME_STATE, b -> { b.writeByte(2); b.writeFloat(0f); });
+                send(c, CB_CHANGE_GAME_STATE, b -> { b.writeByte(7); b.writeFloat(1f); });
+                send(c, CB_CHANGE_GAME_STATE, b -> { b.writeByte(8); b.writeFloat(1f); });
+            }
+        }
+    }
+
+    @Override
     public void playSound(JedrockConnection c, com.jedrock.api.world.Sound sound,
                           double x, double y, double z, float volume, float pitch) {
         // 1.8 Named Sound Effect (0x29): name, effect position as fixed-point ints (×8), volume float,

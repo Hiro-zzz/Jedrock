@@ -9,6 +9,19 @@ import io.netty.buffer.ByteBuf;
  */
 public final class ClientboundChangeGameState implements ClientboundPacket {
 
+    /** "End raining" — value unused. Same reason id on 1.8 and 1.12.2. */
+    public static final int REASON_END_RAIN = 1;
+    /** "Begin raining" — value unused. Same reason id on 1.8 and 1.12.2. */
+    public static final int REASON_BEGIN_RAIN = 2;
+    /**
+     * Rain strength (0..1). The client maps this reason straight to {@code setRainStrength} — begin
+     * raining alone only ramps in slowly, so send 1.0 for instantly visible rain (client-verified:
+     * sending 0 here after begin-rain silently kills the rain that was just started).
+     */
+    public static final int REASON_RAIN_STRENGTH = 7;
+    /** Thunder strength (0..1) — {@code setThunderStrength}: the darkened thunderstorm sky. */
+    public static final int REASON_THUNDER_STRENGTH = 8;
+
     /** "Change game mode" — the float value is the target {@link com.jedrock.api.player.GameMode} id. */
     public static final int REASON_CHANGE_GAMEMODE = 3;
 

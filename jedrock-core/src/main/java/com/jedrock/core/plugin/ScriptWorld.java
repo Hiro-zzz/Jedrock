@@ -4,6 +4,7 @@ import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.Particle;
 import com.jedrock.api.world.Sound;
+import com.jedrock.api.world.Weather;
 import com.jedrock.api.world.World;
 
 import java.util.Arrays;
@@ -131,6 +132,20 @@ public final class ScriptWorld {
     /** A burst: {@code count} particles scattered within ±{@code spread} blocks (PE caps the count per burst). */
     public void spawnParticle(String particle, double x, double y, double z, int count, double spread) {
         world.spawnParticle(parse(Particle.class, particle), x, y, z, count, spread);
+    }
+
+    /** The current weather, as a lower-case name: {@code 'clear'}, {@code 'rain'} or {@code 'thunder'}. */
+    public String getWeather() {
+        return world.getWeather().name().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Set the weather (case-insensitive: {@code 'clear'} / {@code 'rain'} / {@code 'thunder'}) —
+     * broadcast to every player, cross-edition, and pushed to later joiners. Purely cosmetic; it
+     * stays until set again (schedule your own cycle if you want one).
+     */
+    public void setWeather(String weather) {
+        world.setWeather(parse(Weather.class, weather));
     }
 
     /** Parse a case-insensitive enum name, failing with the full list of valid names — a script-friendly error. */
