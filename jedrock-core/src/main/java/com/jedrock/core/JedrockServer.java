@@ -122,6 +122,8 @@ public class JedrockServer implements Server, ConnectionListener {
             new PluginManager(eventBus, this, scheduler, commandManager, packetTaps, Path.of("plugins"));
     /** How often (ms) the background watcher polls the plugins folder for changed files to hot-reload. */
     private static final long PLUGIN_RELOAD_MILLIS = 1000L;
+    /** Where script state lives between restarts — a runtime file, next to ops.txt and permissions.txt. */
+    private static final Path PLUGIN_STORAGE_FILE = Path.of("plugin-storage.jdb");
 
     // In-memory state layer
     private final PlayerRegistry playerRegistry = new PlayerRegistry();
@@ -148,6 +150,7 @@ public class JedrockServer implements Server, ConnectionListener {
         this.name = config.name();
         this.defaultWorld = new CoreWorld("world", Dimension.OVERWORLD, config.seed());
         this.judge = new BlindJudge(config.judgeEnabled(), config.maxReach(), config.maxMoveDelta());
+        this.defaultWorld.setEventBus(eventBus); // so a weather change can be vetoed wherever it came from
         this.entities = new EntityDirector(playerRegistry, defaultWorld);
         this.containers = new ContainerService(playerRegistry, defaultWorld, eventBus, broadcast);
         this.combat = new CombatService(playerRegistry, defaultWorld, eventBus, broadcast, entities, judge);
@@ -354,6 +357,9 @@ public class JedrockServer implements Server, ConnectionListener {
         if (saveSeconds > 0) {
             long periodTicks = saveSeconds * TickUtil.TPS;
             scheduler.runTaskTimer(levels::autosave, periodTicks, periodTicks);
+            // Script state rides the same cadence — it is small, and a dirty flag skips an idle store.
+            scheduler.runTaskTimer(() -> plugins.storage().saveIfDirty(PLUGIN_STORAGE_FILE),
+                    periodTicks, periodTicks);
             LOGGER.info("World autosave enabled (every " + saveSeconds + "s)");
         }
 
@@ -366,6 +372,19 @@ public class JedrockServer implements Server, ConnectionListener {
         }
 
         LOGGER.info("Jedrock server started successfully. Type 'help' for console commands.");
+
+        // What plugins remembered last run, read before any script can ask for it.
+        try {
+            plugins.storage().load(PLUGIN_STORAGE_FILE);
+            if (plugins.storage().totalKeys() > 0) {
+                LOGGER.info("Loaded plugin storage from " + PLUGIN_STORAGE_FILE.toAbsolutePath()
+                        + " (" + plugins.storage().buckets().size() + " bucket(s), "
+                        + plugins.storage().totalKeys() + " key(s))");
+            }
+        } catch (java.io.IOException e) {
+            LOGGER.error("Failed to load plugin storage from " + PLUGIN_STORAGE_FILE.toAbsolutePath()
+                    + " — scripts start with empty storage and the file is left untouched", e);
+        }
 
         // Load script plugins before ServerStartEvent, so a plugin can subscribe to it. A background
         // watcher (off the game-loop thread — the poll blocks on disk I/O) hot-reloads a saved edit.
@@ -411,6 +430,8 @@ public class JedrockServer implements Server, ConnectionListener {
         // (their onDisable runs, their listeners are removed) before the world and loop go away.
         eventBus.post(new ServerStopEvent());
         plugins.unloadAll();
+        // After onDisable, so a script's last-moment write is included.
+        plugins.storage().saveIfDirty(PLUGIN_STORAGE_FILE);
 
         gameLoop.stop();
         networkServer.shutdown();
@@ -907,11 +928,7 @@ public class JedrockServer implements Server, ConnectionListener {
 
     @Override
     public void onHeldSlotChange(PlayerConnection connection, int slot) {
-        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
-        if (player != null) {
-            player.setHeldItemSlot(slot);
-            broadcast.heldItem(player);
-        }
+        containers.onHeldSlotChange(connection, slot);
     }
 
     @Override

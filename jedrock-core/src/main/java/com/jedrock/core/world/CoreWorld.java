@@ -1,6 +1,8 @@
 package com.jedrock.core.world;
 
 import com.jedrock.api.entity.Entity;
+import com.jedrock.api.event.EventBus;
+import com.jedrock.api.event.world.WeatherChangeEvent;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.world.BlockState;
 import com.jedrock.api.world.Blocks;
@@ -451,6 +453,19 @@ public final class CoreWorld implements World {
 
     private volatile com.jedrock.api.world.Weather weather = com.jedrock.api.world.Weather.CLEAR;
 
+    /**
+     * The event bus, or {@code null} until the server wires one (a bare world in a test posts nothing).
+     * The world otherwise knows nothing about events — block writes are announced through the change
+     * listener and their events are posted by the caller that decided on them. Weather is the exception
+     * for a plain reason: unlike a block edit, which arrives from one player through one handler, a
+     * weather change has several front doors and only this method is common to all of them.
+     */
+    private volatile EventBus events;
+
+    public void setEventBus(EventBus events) {
+        this.events = events;
+    }
+
     @Override
     public com.jedrock.api.world.Weather getWeather() {
         return weather;
@@ -460,6 +475,20 @@ public final class CoreWorld implements World {
     public void setWeather(com.jedrock.api.world.Weather weather) {
         if (weather == null || weather == this.weather) {
             return; // no change — don't re-send the sky to everyone
+        }
+        // Every way to change the sky — /weather, a script, the api — lands here, so this is the one
+        // place the event can see them all. Listeners may refuse the change or redirect it; nothing has
+        // been sent to a client yet, so a refusal leaves nothing to undo.
+        EventBus bus = this.events;
+        if (bus != null && bus.hasListeners(WeatherChangeEvent.class)) {
+            WeatherChangeEvent event = bus.post(new WeatherChangeEvent(this, this.weather, weather));
+            if (event.isCancelled()) {
+                return;
+            }
+            weather = event.getTo();
+            if (weather == this.weather) {
+                return; // redirected to the sky already showing — nothing to send
+            }
         }
         this.weather = weather;
         for (Player p : players) {

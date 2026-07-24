@@ -94,6 +94,9 @@ public final class PluginManager {
     private final Path pluginsDir;
     private volatile Thread watcher;
 
+    /** What plugins keep between restarts; shared by every script, bucketed per plugin name. */
+    private final PluginStorage storage = new PluginStorage();
+
     public PluginManager(EventBus eventBus, Server server, Scheduler scheduler, CommandManager commandManager,
                          PacketTapRegistry packetTaps, Path pluginsDir) {
         this.eventBus = eventBus;
@@ -106,6 +109,11 @@ public final class PluginManager {
 
     EventBus eventBus() {
         return eventBus;
+    }
+
+    /** The persistent store behind the {@code storage} global — loaded and saved by the server. */
+    public PluginStorage storage() {
+        return storage;
     }
 
     Scheduler scheduler() {
@@ -226,6 +234,8 @@ public final class PluginManager {
                     ScriptableObject.putProperty(scope, "entities",
                             Context.javaToJS(new ScriptEntities(this, plugin), scope));
                 }
+                ScriptableObject.putProperty(scope, "storage",
+                        Context.javaToJS(new ScriptStorage(storage, name, scope), scope));
                 ScriptableObject.putProperty(scope, "console",
                         Context.javaToJS(new ScriptConsole(name), scope));
 
@@ -531,6 +541,12 @@ public final class PluginManager {
             cx.setLanguageVersion(Context.VERSION_ES6); // arrow functions, let/const, template literals
             cx.setOptimizationLevel(-1);                // interpret, don't generate a class per script (hot reload)
             cx.setClassShutter(SHUTTER);
+            // Hand Java strings, numbers and booleans to scripts as JS primitives instead of wrapping
+            // them. Rhino wraps by default, and a wrapper is never === a literal: `player.getName() ===
+            // 'Alice'` and `storage.get('mode') === 'hard'` were both silently false, which is a bug that
+            // reads as a logic error and hides in whichever branch never runs. Command args were already
+            // hand-converted for exactly this reason (see callCommand); this makes it true everywhere.
+            cx.getWrapFactory().setJavaPrimitiveWrap(false);
             super.onContextCreated(cx);
         }
     }

@@ -1,5 +1,7 @@
 package com.jedrock.core.world;
 
+import com.jedrock.api.event.EventBus;
+import com.jedrock.api.event.world.WeatherChangeEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
@@ -64,6 +66,42 @@ class WorldWeatherTest {
 
         assertEquals(Weather.THUNDER, world.getWeather());
         assertEquals(List.of(Weather.RAIN, Weather.THUNDER), c.sent, "one push per actual change");
+    }
+
+    /** Every front door onto the sky goes through setWeather, so the event sees them all. */
+    @Test
+    void aListenerCanRefuseOrRedirectTheSky() {
+        EventBus events = new EventBus();
+        world.setEventBus(events);
+        WeatherConnection c = new WeatherConnection();
+        join(c);
+
+        List<WeatherChangeEvent> seen = new ArrayList<>();
+        events.register(WeatherChangeEvent.class, seen::add);
+        world.setWeather(Weather.THUNDER);
+        assertEquals(1, seen.size());
+        assertEquals(Weather.CLEAR, seen.get(0).getFrom());
+        assertEquals(Weather.THUNDER, seen.get(0).getTo());
+
+        // Refused: the sky is unchanged and nothing was sent, so there is nothing to undo.
+        events.register(WeatherChangeEvent.class, e -> e.setCancelled(true));
+        world.setWeather(Weather.CLEAR);
+        assertEquals(Weather.THUNDER, world.getWeather(), "the refused change never landed");
+        assertEquals(List.of(Weather.THUNDER), c.sent, "and no client was told about it");
+    }
+
+    @Test
+    void aRedirectedChangeSendsWhatTheListenerChose() {
+        EventBus events = new EventBus();
+        world.setEventBus(events);
+        WeatherConnection c = new WeatherConnection();
+        join(c);
+        events.register(WeatherChangeEvent.class, e -> e.setTo(Weather.RAIN)); // no thunder on this server
+
+        world.setWeather(Weather.THUNDER);
+
+        assertEquals(Weather.RAIN, world.getWeather());
+        assertEquals(List.of(Weather.RAIN), c.sent, "the client sees the redirect, not the request");
     }
 
     @Test

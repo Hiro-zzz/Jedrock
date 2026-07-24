@@ -84,6 +84,69 @@ unstable — anything may change between entries.
   `PeHeldItemEncodingTest` (both PE wire shapes), `EntityTypeIdsTest` (non-mob types have no mob id)
   and `ScriptEntitiesTest` (a prop is an entity like any other).
 
+### Added
+
+- **Persistent storage for scripts — the `storage` global.** The last thing the platform-API roadmap was
+  waiting on: until now a plugin's state died with the process, which ruled out scores, homes, statistics
+  and saved scenes — everything a server actually remembers.
+  Every plugin gets a private store: `get(key[, fallback])` / `set` / `has` / `remove` / `keys` / `size` /
+  `clear`, plus **`forPlayer(player)`**, a view of the same store narrowed to one player and keyed by uuid
+  so it follows a rename. Keys are bucketed per plugin *name*, which gives two properties worth stating:
+  two scripts can both keep a `count` without meeting, and data belongs to the name rather than to the
+  loaded instance, so a hot-reload — which tears down listeners, tasks, commands and entities — leaves the
+  memory alone.
+  Values are deliberately few. A string, a number and a boolean are stored as themselves; a JS object or
+  array is rendered through the script's own `JSON.stringify` and handed back through `JSON.parse`, so a
+  saved arrangement returns as a real value and not text that resembles one. Anything else — a function, a
+  Java object — is refused loudly rather than persisted as nonsense, and `set(key, null)` removes the key,
+  since there is no useful difference on disk between "absent" and "nothing". Nothing is executed to read
+  the file back.
+  Written the way the world is written: one DEFLATE stream in `plugin-storage.jdb`, a dirty flag so an
+  untouched store is never rewritten, and an atomic temp-and-move so a crash mid-write cannot destroy what
+  was already saved. Strings are length-prefixed UTF-8 rather than `writeUTF`, whose two-byte length caps
+  a value at 64 KB — small for a serialized scene, which is one of the things this exists to hold. Loaded
+  before any script can ask for it, flushed by the same autosave that persists the world, and once more at
+  shutdown *after* `onDisable`, so a script's parting write is included. `plugins` in the console now
+  reports the store's size. Try `/seen` and `/forget` in `plugins/example.js`.
+
+- **Scripts now see Java strings, numbers and booleans as JS primitives.** Found while building the store,
+  by the test for its most ordinary case — `storage.get('mode') === 'hard'` was false. Rhino wraps values
+  returned from Java by default, and a wrapper is never `===` a JS literal, so `player.getName() ===
+  'Alice'` and `e.getTo().name() === 'THUNDER'` were silently false too: a bug that reads as a logic error
+  and hides in whichever branch never runs. The script scope now disables primitive wrapping, which is
+  what the command-args path had already arranged by hand for exactly this reason — the comment there
+  spelled out the right answer, it just wasn't applied to the rest of the surface. The test added last
+  round to *document* the trap now asserts it is gone.
+
+- **Events for weather and equipment — the event model catches up with the features.** Three additions
+  close the gap the roadmap named: the sky and a player's gear could both be changed, but nothing could
+  subscribe to either.
+  **`WeatherChangeEvent`** carries `from` / `to`, and is both cancellable and redirectable (`setTo`) — a
+  server that wants rain but never thunder is four lines. It is posted by `CoreWorld.setWeather` itself
+  rather than by its callers, which is a deliberate exception to how block events work (those fire at the
+  handler that decided on the edit): a block edit arrives from one player through one handler, while a
+  weather change has three front doors — `/weather`, a script's `world.setWeather`, and the api — and only
+  the world is common to all of them. Nothing has been sent to a client when the event fires, so a refusal
+  leaves nothing to undo.
+  **`PlayerArmorChangeEvent`** fires per slot with the previous and next state, wherever the piece came
+  from: `Player.setArmor` from code, a creative client's drag into slots 36-39, or a survival window click.
+  The window paths compare the four worn slots before and after the click instead of predicting what the
+  click will do — what a click does depends on the cursor — and a refused change is written back and
+  corrected on the client by the resync that path already performs. Only snapshotted when something is
+  listening.
+  **`PlayerHeldItemChangeEvent`** fires on a real hotbar switch (not when the stack inside the held slot
+  changes — the player didn't choose that), carrying both slots and both items. Cancelling has the same
+  honest limit as the sneak toggle: the server refuses to *reflect* the switch — nothing that reads the
+  held item sees it and no other client redraws the hand — but the switcher's own hotbar stays where they
+  put it, because no edition here has a clientbound packet that moves it back. `onHeldSlotChange` moved
+  from `JedrockServer` into `ContainerService` on the way, where the rest of the equipment logic lives.
+  All three are scriptable by name (`events.on('WeatherChange', …)`), demonstrated in `plugins/example.js`.
+  **A Rhino trap is now pinned by a test**, because it cost this project a bug once already (script command
+  args) and every enum-carrying event walks into it: a `String` returned *from Java* is not `===` a JS
+  string literal, so `e.getTo().name() === 'THUNDER'` is silently false and the `if` around a listener's
+  real work never runs. Loose `==`, `String(…)`, and comparing the enum constants themselves all behave —
+  the test asserts all four outcomes at once so the guidance can't rot.
+
 ### Changed
 
 - **`JedrockServer` split into five collaborators (1822 → 1043 lines).** The class had accumulated every

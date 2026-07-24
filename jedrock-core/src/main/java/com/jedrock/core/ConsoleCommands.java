@@ -103,6 +103,9 @@ final class ConsoleCommands implements Runnable {
         List<String> names = server.getPlugins().pluginNames();
         LOGGER.info(names.isEmpty() ? "no plugins loaded" : "plugins (" + names.size() + "): "
                 + String.join(", ", names));
+        var storage = server.getPlugins().storage();
+        LOGGER.info("storage: " + storage.totalKeys() + " key(s) in " + storage.buckets().size()
+                + " bucket(s)" + (storage.isDirty() ? " (unsaved changes)" : ""));
     }
 
     /** {@code say <message>} — broadcast a server line to every online player, like the in-game {@code /say}. */
