@@ -32,6 +32,7 @@ final class McpeProtocol {
     static final int ID_RESPAWN = 0x2D;           // outbound: place the player after a death-screen respawn
     static final int ID_MOB_EQUIPMENT = 0x1F;     // both ways: the item in an entity's hand (held-item sync)
     static final int ID_MOB_ARMOR_EQUIPMENT = 0x20; // outbound: the four worn armor pieces, in one packet
+    static final int ID_ADD_ITEM_ENTITY = 0x0f;     // outbound: a dropped-item entity, carrying its item
     static final int ID_INTERACT = 0x21;          // inbound: attack / interact with an entity
     static final int ID_USE_ITEM = 0x23;          // Win10 1.1.5 carries block placement here
     static final int ID_PLAYER_ACTION = 0x24;
@@ -112,7 +113,10 @@ final class McpeProtocol {
     /** Entity metadata: DATA_FLAGS is a LONG property at index 0; sneak/sprint are bits of that long. */
     static final int DATA_FLAGS_INDEX = 0;
     static final int DATA_NAMETAG_INDEX = 4;   // string: the floating nametag above the entity
+    /** Int at index 2: a falling block's {@code id | (meta << 8)} (PMMP {@code DATA_VARIANT} — 0.14 uses 20). */
+    static final int DATA_VARIANT_INDEX = 2;
     static final int DATA_TYPE_LONG = 7;
+    static final int DATA_TYPE_INT = 2;
     static final int DATA_TYPE_STRING = 4;
     static final int DATA_FLAG_SNEAKING_BIT = 1;
     static final int DATA_FLAG_SPRINTING_BIT = 3;

@@ -30,14 +30,7 @@ public final class ClientboundSetSlot implements ClientboundPacket {
     public void write(ByteBuf buf) {
         buf.writeByte(windowId);
         buf.writeShort(windowSlot);
-        if (state == 0 || count <= 0) {
-            buf.writeShort(-1);        // empty slot
-        } else {
-            buf.writeShort((state >> 4) & 0xFFFF); // item id
-            buf.writeByte(count);
-            buf.writeShort(state & 0xF);           // damage = block meta
-            buf.writeByte(0);                      // no NBT
-        }
+        JeSlots.write(buf, state, count);
     }
 
     @Override

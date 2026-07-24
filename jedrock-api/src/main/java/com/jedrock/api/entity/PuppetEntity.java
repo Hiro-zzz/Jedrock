@@ -58,6 +58,25 @@ public interface PuppetEntity extends Entity {
     /** Set or clear one visual flag and relay the puppet's full flag set to every viewer. */
     void setFlag(PuppetFlag flag, boolean on);
 
+    /**
+     * Put an item (or a block — any canonical {@code (id << 4) | meta}) in the puppet's hand;
+     * {@code 0} empties it. Relayed to every viewer.
+     */
+    void setHeldItem(int state);
+
+    /** What the puppet holds, or {@code 0}. */
+    int getHeldItem();
+
+    /**
+     * Dress the puppet: put {@code state} in an armor slot ({@code 0} removes it). Blocks work as well
+     * as armor pieces — a block worn on the head, with {@link PuppetFlag#INVISIBLE} hiding the body,
+     * is a block posed at any angle and altitude, which no real block can be.
+     */
+    void setArmor(com.jedrock.api.player.ArmorSlot slot, int state);
+
+    /** What the puppet wears in {@code slot}, or {@code 0}. */
+    int getArmor(com.jedrock.api.player.ArmorSlot slot);
+
     /** Play the arm-swing animation on every viewer's client. */
     void swing();
 

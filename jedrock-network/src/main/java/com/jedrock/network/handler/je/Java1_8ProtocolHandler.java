@@ -284,6 +284,83 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
         sendEquipment(c, entityId, 0, state);
     }
 
+    /**
+     * Entity ids this connection renders as a worn prop, so {@link #moveEntity} can re-apply the same
+     * offset the spawn used. A handler instance is per-connection, so this needs no synchronisation
+     * beyond the channel thread that owns it.
+     */
+    private final java.util.Set<Long> wornProps = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * How far below the requested point each kind of stand is spawned so the thing it wears lands
+     * there — a stand's head height, and half that when the stand is small. Eyeball-tuned against a
+     * 1.8 client.
+     */
+    private static final double WORN_PROP_Y_OFFSET_SMALL = 0.7;
+    private static final double WORN_PROP_Y_OFFSET_FULL = 1.4;
+
+    /** Entity ids of props riding a full-size stand, so moves use the taller offset. */
+    private final java.util.Set<Long> fullSizeProps = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    @Override
+    public void spawnItemEntity(JedrockConnection c, long entityId, java.util.UUID uuid,
+                                double x, double y, double z, int state) {
+        // An item prop is the small model, so it rides a small stand — whose head renders what it
+        // wears at roughly half scale, the nearest 1.8 has to the item entity other versions use.
+        spawnWornProp(c, entityId, x, y, z, state, true);
+    }
+
+    @Override
+    public void spawnFallingBlock(JedrockConnection c, long entityId, java.util.UUID uuid,
+                                  double x, double y, double z, int state) {
+        // A block prop is meant to read full-size, so it rides a full-size stand.
+        spawnWornProp(c, entityId, x, y, z, state, false);
+    }
+
+    /**
+     * Render a prop the only way that holds still on 1.8: an invisible marker armor stand wearing the
+     * item or block on its head.
+     *
+     * <p>The obvious encodings — an item entity or a falling block — <em>fall</em> here, confirmed on a
+     * real client. A 1.8 client locally simulates the "simple" entity kinds (items, falling blocks,
+     * projectiles) instead of merely interpolating toward the positions the server sends, and 1.8 has
+     * no no-gravity metadata to switch that off (it arrived in 1.10). A living entity is not simulated
+     * that way, which is why the hologram armor stands have always held their place — so a prop rides
+     * one too. Later versions use the real item / falling-block entity with no-gravity set.
+     */
+    private void spawnWornProp(JedrockConnection c, long entityId, double x, double y, double z,
+                               int state, boolean small) {
+        wornProps.add(entityId);
+        if (!small) {
+            fullSizeProps.add(entityId);
+        }
+        int standFlags = ARMOR_STAND_MARKER | ARMOR_STAND_NO_BASE_PLATE | (small ? ARMOR_STAND_SMALL : 0);
+        send(c, CB_SPAWN_MOB, b -> {
+            ByteBufUtils.writeVarInt(b, (int) entityId);
+            b.writeByte(ARMOR_STAND_TYPE_ID);
+            b.writeInt(fixed(x)); b.writeInt(fixed(y - propOffset(entityId))); b.writeInt(fixed(z));
+            b.writeByte(0); b.writeByte(0); b.writeByte(0);      // yaw, pitch, head yaw
+            b.writeShort(0); b.writeShort(0); b.writeShort(0);   // velocity
+            writeMetaByte(b, META_INDEX_FLAGS, FLAG_INVISIBLE);  // the body never shows, only what it wears
+            writeMetaByte(b, META_INDEX_ARMOR_STAND_FLAGS, standFlags);
+            b.writeByte(META_END);
+        });
+        sendEquipment(c, entityId, 4, state); // slot 4 = the head at 1.8
+    }
+
+    /** How far a prop's stand sits below the point the caller asked for. */
+    private double propOffset(long entityId) {
+        return fullSizeProps.contains(entityId) ? WORN_PROP_Y_OFFSET_FULL : WORN_PROP_Y_OFFSET_SMALL;
+    }
+
+    @Override
+    public void moveEntity(JedrockConnection c, long entityId,
+                           double x, double y, double z, float yaw, float pitch) {
+        // A worn prop's body sits below the point the caller means, so a move has to keep that offset.
+        double bodyY = wornProps.contains(entityId) ? y - propOffset(entityId) : y;
+        moveAvatar(c, entityId, x, bodyY, z, yaw, pitch);
+    }
+
     @Override
     public void showArmor(JedrockConnection c, long entityId,
                           int helmet, int chestplate, int leggings, int boots) {
@@ -426,6 +503,8 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
 
     @Override
     public void removeEntity(JedrockConnection c, long entityId) {
+        wornProps.remove(entityId);
+        fullSizeProps.remove(entityId);
         send(c, CB_ENTITY_DESTROY, b -> { ByteBufUtils.writeVarInt(b, 1); ByteBufUtils.writeVarInt(b, (int) entityId); });
     }
 

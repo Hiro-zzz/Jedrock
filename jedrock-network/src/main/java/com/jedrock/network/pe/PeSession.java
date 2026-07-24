@@ -558,6 +558,44 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     }
 
     @Override
+    public void spawnItemEntity(long entityId, UUID uuid, double x, double y, double z, int state) {
+        sendGameBatch(b -> writeAddItemEntity(b, entityId, x, y, z, state));
+    }
+
+    /**
+     * Encode an AddItemEntity (0x0f) body, verbatim from PMMP at protocol 113: unique id (signed
+     * varlong) and runtime id (unsigned varlong) — both the entity id here — the item Slot, the
+     * position and a zero speed Vector3f, then metadata. The metadata carries the immobile flag, the
+     * same lever holograms use so a prop can never drift or be nudged.
+     */
+    static void writeAddItemEntity(ByteBuf b, long entityId, double x, double y, double z, int state) {
+        ByteBufUtils.writeVarInt(b, ID_ADD_ITEM_ENTITY);
+        ByteBufUtils.writeSignedVarLong(b, entityId);
+        ByteBufUtils.writeVarLong(b, entityId);
+        McpeCodec.writeSlot(b, state, state == 0 ? 0 : 1);
+        b.writeFloatLE((float) x); b.writeFloatLE((float) y); b.writeFloatLE((float) z);
+        b.writeFloatLE(0f); b.writeFloatLE(0f); b.writeFloatLE(0f); // speed: none, it's a prop
+        ByteBufUtils.writeVarInt(b, 1);                             // one metadata entry
+        writeFlagsEntry(b, BASE_ENTITY_FLAGS | (1L << DATA_FLAG_IMMOBILE_BIT));
+    }
+
+    @Override
+    public void spawnFallingBlock(long entityId, UUID uuid, double x, double y, double z, int state) {
+        // A falling block is an ordinary AddEntity of PMMP's FallingSand type; the block it renders
+        // rides in DATA_VARIANT (index 2 at protocol 113) as id | (meta << 8). Immobile, so it hangs.
+        int blockInfo = Blocks.idOf(state) | (Blocks.metaOf(state) << 8);
+        sendGameBatch(b -> writeAddEntity(b, entityId, EntityTypeIds.BEDROCK_FALLING_BLOCK,
+                x, y, z, 0f, 0f,
+                meta -> {
+                    ByteBufUtils.writeVarInt(meta, 2);                  // two metadata entries
+                    writeFlagsEntry(meta, BASE_ENTITY_FLAGS | (1L << DATA_FLAG_IMMOBILE_BIT));
+                    ByteBufUtils.writeVarInt(meta, DATA_VARIANT_INDEX);
+                    ByteBufUtils.writeVarInt(meta, DATA_TYPE_INT);
+                    ByteBufUtils.writeSignedVarInt(meta, blockInfo);
+                }));
+    }
+
+    @Override
     public void sendOwnArmor(int helmet, int chestplate, int leggings, int boots) {
         // PMMP's sendArmorContents sends the WEARER a ContainerSetContent for the armor window rather
         // than the MobArmorEquipment other players get — without it a Bedrock player sees everyone's

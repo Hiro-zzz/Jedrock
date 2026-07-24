@@ -259,6 +259,7 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     private static final int CB_NAMED_SOUND = 0x19;      // named sound effect (name + category + pos*8 + volume + pitch)
     private static final int CB_WORLD_PARTICLES = 0x22;  // particle burst (same body as 1.8's 0x2a)
     private static final int CB_ENTITY_EQUIPMENT = 0x3f; // eid (varint) + slot (varint, 0 = main hand) + item
+    private static final int CB_SPAWN_OBJECT = 0x00;     // non-mob entities: item stacks, falling blocks…
 
     @Override
     public void sendActionBar(JedrockConnection c, String text) {
@@ -285,6 +286,47 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
         // Entity Equipment (0x3f at 340): entity id (varint), equipment slot (varint, 0 = main hand),
         // then the standard Slot — ground truth minecraft-data packet_entity_equipment.
         sendEquipment(c, entityId, 0, state);
+    }
+
+    @Override
+    public void spawnItemEntity(JedrockConnection c, long entityId, java.util.UUID uuid,
+                                double x, double y, double z, int state) {
+        // Spawn Object (0x00 at 340): id, UUID, object type (2 = item stack), doubles, pitch/yaw angles,
+        // object data and a velocity vector (always present at 340) — minecraft-data packet_spawn_entity.
+        send(c, CB_SPAWN_OBJECT, b -> {
+            ByteBufUtils.writeVarInt(b, (int) entityId);
+            b.writeLong(uuid.getMostSignificantBits());
+            b.writeLong(uuid.getLeastSignificantBits());
+            b.writeByte(EntityTypeIds.JAVA_OBJECT_ITEM_STACK);
+            b.writeDouble(x); b.writeDouble(y); b.writeDouble(z);
+            b.writeByte(0); b.writeByte(0);                    // pitch, yaw
+            b.writeInt(1);                                     // object data (non-zero: has velocity)
+            b.writeShort(0); b.writeShort(0); b.writeShort(0); // velocity: none, it's a prop
+        });
+        // The spawn packet says "an item stack is here" but not which — that rides in the metadata.
+        // Item is index 6 at 1.12.2 (5 in 1.9, shifted by the no-gravity field 1.10 added at 5).
+        c.send(ClientboundEntityMetadata.item((int) entityId, state));
+    }
+
+    @Override
+    public void spawnFallingBlock(JedrockConnection c, long entityId, java.util.UUID uuid,
+                                  double x, double y, double z, int state) {
+        // Spawn Object type 70; the block rides in the object-data int as id | (meta << 12) — the
+        // pre-flattening packing ViaVersion's 1.13 converter reads back as ((d & 4095) << 4) | (d >> 12).
+        int objectData = Blocks.idOf(state) | (Blocks.metaOf(state) << 12);
+        send(c, CB_SPAWN_OBJECT, b -> {
+            ByteBufUtils.writeVarInt(b, (int) entityId);
+            b.writeLong(uuid.getMostSignificantBits());
+            b.writeLong(uuid.getLeastSignificantBits());
+            b.writeByte(EntityTypeIds.JAVA_OBJECT_FALLING_BLOCK);
+            b.writeDouble(x); b.writeDouble(y); b.writeDouble(z);
+            b.writeByte(0); b.writeByte(0);                    // pitch, yaw
+            b.writeInt(objectData);
+            b.writeShort(0); b.writeShort(0); b.writeShort(0); // velocity: none, it's a prop
+        });
+        // A falling block is one of the few entities the client animates on its own, so pin it: the
+        // no-gravity field (index 5, added in 1.10) is what keeps this prop from dropping.
+        c.send(ClientboundEntityMetadata.noGravity((int) entityId));
     }
 
     @Override

@@ -29,9 +29,24 @@ public final class EntityTypeIds {
             case PIG -> 90;
             case COW -> 92;
             case CHICKEN -> 93;
-            case PLAYER -> throw notAMob(type);
+            case PLAYER, ITEM, FALLING_BLOCK -> throw notAMob(type);
         };
     }
+
+    /**
+     * Java Edition's Spawn Object type for an {@link EntityType#ITEM} prop — item stacks are objects, not
+     * mobs, so they ride a different packet (1.8 {@code 0x0E} / 1.12.2 {@code 0x00}). Same id in both.
+     */
+    public static final int JAVA_OBJECT_ITEM_STACK = 2;
+
+    /**
+     * Java Edition's Spawn Object type for a falling block. Its object-data int carries the block as
+     * {@code id | (meta << 12)} — the packing ViaVersion's 1.13 converter reads back the other way.
+     */
+    public static final int JAVA_OBJECT_FALLING_BLOCK = 70;
+
+    /** The legacy MCPE entity id of a falling block (PMMP {@code FallingSand}, same at 0.14 and 1.1.5). */
+    public static final int BEDROCK_FALLING_BLOCK = 66;
 
     /** The legacy MCPE entity id (PE 1.1.5 / 0.14 AddEntity type field). */
     public static int bedrockId(EntityType type) {
@@ -42,12 +57,18 @@ public final class EntityTypeIds {
             case ZOMBIE -> 32;
             case CREEPER -> 33;
             case SKELETON -> 34;
+            // A dropped item is a real Bedrock entity type, but it spawns through AddItemEntity (which
+            // carries the item) rather than AddEntity, so callers never need this id.
+            case ITEM -> 64;
+            case FALLING_BLOCK -> BEDROCK_FALLING_BLOCK;
             case PLAYER -> throw notAMob(type);
         };
     }
 
     /** {@link EntityType#PLAYER} renders via the player-avatar path, not spawn-mob, so it has no mob id. */
     private static IllegalArgumentException notAMob(EntityType type) {
-        return new IllegalArgumentException(type + " renders as a player avatar, not a mob — no spawn-mob id");
+        return new IllegalArgumentException(type + " does not render as a mob (it spawns through its own "
+                + "packet — the avatar path for a player, the item-entity path for a prop), so it has no "
+                + "spawn-mob id");
     }
 }

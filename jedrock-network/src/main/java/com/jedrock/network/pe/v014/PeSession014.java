@@ -208,6 +208,24 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     }
 
     @Override
+    public void spawnItemEntity(long entityId, java.util.UUID uuid, double x, double y, double z, int state) {
+        // The 0.14 AddItemEntity carries no metadata, so immobility follows in its own SetEntityData —
+        // without it the client drifts the prop around instead of leaving it where it was placed.
+        sendWrapped(b -> Mcpe014Packets.addItemEntity(b, entityId, x, y, z, safeState(state)));
+        sendWrapped(b -> Mcpe014Packets.setEntityNoAi(b, entityId));
+    }
+
+    @Override
+    public void spawnFallingBlock(long entityId, java.util.UUID uuid, double x, double y, double z, int state) {
+        int id = Blocks.idOf(state);
+        if (!Pe014Blocks.supports(id)) {
+            return; // the same crash gate the chunks use: never send 0.14 a block it can't render
+        }
+        sendWrapped(b -> Mcpe014Packets.addFallingBlock(b, entityId, x, y, z,
+                id | (Blocks.metaOf(state) << 8)));
+    }
+
+    @Override
     public void showArmor(long entityId, int helmet, int chestplate, int leggings, int boots) {
         sendWrapped(b -> Mcpe014Packets.mobArmorEquipment(b, entityId,
                 safeState(helmet), safeState(chestplate), safeState(leggings), safeState(boots)));

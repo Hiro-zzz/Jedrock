@@ -44,6 +44,47 @@ class PeHeldItemEncodingTest {
     }
 
     @Test
+    void addItemEntity113CarriesTheItemAndPinsItInPlace() {
+        ByteBuf b = Unpooled.buffer();
+        PeSession.writeAddItemEntity(b, 7L, 1.5, 65.0, -2.5, Blocks.state(89, 0)); // floating glowstone
+
+        assertEquals(0x0f, ByteBufUtils.readVarInt(b), "packet id ADD_ITEM_ENTITY");
+        long zigzag = ByteBufUtils.readVarLong(b);
+        assertEquals(7L, (zigzag >>> 1) ^ -(zigzag & 1), "entity unique id (zigzag-encoded)");
+        assertEquals(7L, ByteBufUtils.readVarLong(b), "entity runtime id (plain)");
+        assertEquals(Blocks.state(89, 0), McpeCodec.readItemState(b), "the body is the item itself");
+        assertEquals(1.5f, b.readFloatLE(), "x");
+        assertEquals(65.0f, b.readFloatLE(), "y");
+        assertEquals(-2.5f, b.readFloatLE(), "z");
+        assertEquals(0f, b.readFloatLE(), "speed x — a prop never moves on its own");
+        assertEquals(0f, b.readFloatLE(), "speed y");
+        assertEquals(0f, b.readFloatLE(), "speed z");
+        assertEquals(1, ByteBufUtils.readVarInt(b), "one metadata entry: the flags");
+        b.release();
+    }
+
+    @Test
+    void addItemEntity014IsBigEndian() {
+        ByteBuf b = Unpooled.buffer();
+        Mcpe014Packets.addItemEntity(b, 7L, 1.5, 65.0, -2.5, Blocks.state(89, 0));
+
+        assertEquals(0x9a, b.readUnsignedByte(), "packet id ADD_ITEM_ENTITY (0.14)");
+        assertEquals(7L, b.readLong(), "eid (BE long)");
+        assertEquals(89, b.readShort(), "item id (BE short)");
+        assertEquals(1, b.readUnsignedByte(), "count");
+        assertEquals(0, b.readShort(), "meta");
+        assertEquals(0, b.readShort(), "nbt length");
+        assertEquals(1.5f, b.readFloat(), "x (BE float)");
+        assertEquals(65.0f, b.readFloat(), "y");
+        assertEquals(-2.5f, b.readFloat(), "z");
+        assertEquals(0f, b.readFloat(), "speed x");
+        assertEquals(0f, b.readFloat(), "speed y");
+        assertEquals(0f, b.readFloat(), "speed z");
+        assertFalse(b.isReadable(), "no metadata field at protocol 45 — immobility follows separately");
+        b.release();
+    }
+
+    @Test
     void mobArmorEquipment113CarriesFourSlotsHeadToFeet() {
         ByteBuf b = Unpooled.buffer();
         // A diamond helmet and iron boots, nothing in between.

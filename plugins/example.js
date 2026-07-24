@@ -375,6 +375,83 @@ commands.register('fx', function (player, args) {
 });
 
 // ============================================================================
+//  ENTITIES — programmable bodies. The server renders and relays them but
+//  simulates nothing: the onTick handler below IS the mob's brain. Everything
+//  spawned here is owned by this plugin and despawns on reload.
+// ============================================================================
+
+// /guard — a zombie that watches you, follows while you're close, and goes home when you leave.
+commands.register('guard', function (player, args) {
+    var here = player.getLocation();
+    var guard = entities.spawn('zombie', here.add(3, 0, 0));
+    guard.setNameTag('{red}Guard');
+    guard.set('home', guard.getLocation());
+
+    guard.onTick(function (e) {
+        var target = e.nearestPlayer(12);
+        if (target) {
+            e.lookAt(target);
+            if (e.distanceTo(target) > 2.5) e.moveToward(target.getLocation(), 0.12);
+        } else {
+            e.moveToward(e.get('home'), 0.08);   // drift back to its post
+        }
+    });
+
+    guard.onInteract(function (e, who) {
+        e.swing();
+        e.hurt();
+        who.sendMessage('{red}The guard glares at you, ' + who.getName() + '.');
+    });
+
+    player.sendMessage('{green}Guard posted. {gray}(' + entities.count() + ' entity(ies) from this plugin)');
+});
+
+// /decor — a small scene of item props: blocks and items posed where real blocks can't go.
+// Item entities are the decoration primitive — fractional positions, floating unsupported,
+// overlapping freely, and each one labelable and movable like any other entity.
+commands.register('decor', function (player, args) {
+    var loc = player.getLocation();
+    var x = Math.floor(loc.x()) + 0.5, y = loc.y(), z = Math.floor(loc.z()) + 0.5;
+
+    // A lantern hovering at head height — no block below it, no block it could ever occupy.
+    var lamp = entities.spawnItem(Blocks.state(89, 0), x + 2, y + 2.4, z);
+    lamp.setNameTag('{yellow}Lantern');
+
+    // A ring of gems at fractional radius: eight props inside one block's footprint.
+    for (var i = 0; i < 8; i++) {
+        var a = (Math.PI * 2 / 8) * i;
+        entities.spawnItem(Blocks.state(264, 0), x + Math.cos(a) * 1.2, y + 1.1, z + Math.sin(a) * 1.2);
+    }
+
+    // A slowly rising, spinning centrepiece — decoration doesn't have to hold still.
+    var core = entities.spawnItem(Blocks.state(133, 0), x, y + 1.0, z);
+    core.set('t', 0);
+    core.onTick(function (e) {
+        var t = e.get('t') + 1;
+        e.set('t', t);
+        e.moveTo(x, y + 1.0 + Math.sin(t / 20) * 0.35, z);
+    });
+
+    // A full-size block floating at half height — an arch a real block can't make.
+    entities.spawnBlock(Blocks.state(20, 0), x - 2, y + 2.5, z);
+
+    // The other way to pose a block: wear it. An invisible body holding the block on its head,
+    // which puts it at any height, any angle, with nothing underneath.
+    var pedestal = entities.spawn('zombie', x - 2, y, z + 2);
+    pedestal.setFlag('invisible', true);
+    pedestal.setArmor('helmet', Blocks.state(35, 14));
+
+    player.sendMessage('{green}Scene built {gray}(' + entities.count() + ' props; /despawn clears it)');
+});
+
+// /despawn — remove every entity this plugin spawned.
+commands.register('despawn', function (player, args) {
+    var n = entities.count();
+    entities.removeAll();
+    player.sendMessage('{gray}Removed {white}' + n + '{gray} entity(ies).');
+});
+
+// ============================================================================
 //  PACKETS — raw cross-edition wire tap. Counted here; reported by /teststats.
 // ============================================================================
 

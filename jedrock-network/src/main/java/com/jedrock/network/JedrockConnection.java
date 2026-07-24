@@ -132,6 +132,16 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void spawnItemEntity(long entityId, java.util.UUID uuid, double x, double y, double z, int state) {
+        protocolHandler.spawnItemEntity(this, entityId, uuid, x, y, z, state);
+    }
+
+    @Override
+    public void spawnFallingBlock(long entityId, java.util.UUID uuid, double x, double y, double z, int state) {
+        protocolHandler.spawnFallingBlock(this, entityId, uuid, x, y, z, state);
+    }
+
+    @Override
     public void playSound(com.jedrock.api.world.Sound sound, double x, double y, double z, float volume, float pitch) {
         protocolHandler.playSound(this, sound, x, y, z, volume, pitch);
     }

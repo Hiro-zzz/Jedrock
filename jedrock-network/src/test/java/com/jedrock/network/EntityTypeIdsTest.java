@@ -37,8 +37,8 @@ class EntityTypeIdsTest {
     @Test
     void everyMobTypeMapsOnBothEditions() {
         for (EntityType type : EntityType.values()) {
-            if (type.isPlayer()) {
-                continue; // PLAYER renders via the avatar path — it has no mob id
+            if (!type.isMob()) {
+                continue; // avatars and props spawn through their own packets, not spawn-mob — see below
             }
             assertTrue(EntityTypeIds.javaId(type) > 0, type + " has a Java id");
             assertTrue(EntityTypeIds.bedrockId(type) > 0, type + " has a Bedrock id");
@@ -46,10 +46,22 @@ class EntityTypeIdsTest {
     }
 
     @Test
-    void playerTypeHasNoMobId() {
-        // PLAYER must never reach the spawn-mob path (the server routes it through the avatar path instead);
-        // asking for its mob id is a bug, so it throws rather than returning a bogus number.
+    void nonMobTypesHaveNoJavaMobId() {
+        // Neither must ever reach the spawn-mob path: a PLAYER routes through the avatar path and an ITEM
+        // through Spawn Object, so asking for a mob id is a bug — it throws rather than return a bogus one.
         assertThrows(IllegalArgumentException.class, () -> EntityTypeIds.javaId(EntityType.PLAYER));
         assertThrows(IllegalArgumentException.class, () -> EntityTypeIds.bedrockId(EntityType.PLAYER));
+        assertThrows(IllegalArgumentException.class, () -> EntityTypeIds.javaId(EntityType.ITEM));
+    }
+
+    @Test
+    void thePropTypesHaveBedrockEntityIdsButJavaObjectTypes() {
+        // Bedrock's props are real entity types (the dropped item is the id holograms already hang on,
+        // the falling block is PMMP's FallingSand); on Java both are objects, not mobs, so they carry a
+        // Spawn Object type instead.
+        assertEquals(64, EntityTypeIds.bedrockId(EntityType.ITEM), "MCPE dropped-item entity id");
+        assertEquals(66, EntityTypeIds.bedrockId(EntityType.FALLING_BLOCK), "MCPE FallingSand id");
+        assertEquals(2, EntityTypeIds.JAVA_OBJECT_ITEM_STACK, "JE Spawn Object type for an item stack");
+        assertEquals(70, EntityTypeIds.JAVA_OBJECT_FALLING_BLOCK, "JE Spawn Object type for a falling block");
     }
 }

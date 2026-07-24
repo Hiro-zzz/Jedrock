@@ -28,6 +28,8 @@ final class ScriptPlugin {
     private final List<PacketTapRegistry.Registration> packetTaps = new ArrayList<>();
     /** Custom-event listeners this script registered; removed on teardown. */
     private final List<CustomEventBus.Registration> customListeners = new ArrayList<>();
+    /** Entities this script spawned; despawned on teardown so a reload doesn't orphan bodies. */
+    private final List<ScriptEntity> entities = new ArrayList<>();
     private final long lastModified;
     private volatile Function onDisable;
 
@@ -97,6 +99,27 @@ final class ScriptPlugin {
 
     List<CustomEventBus.Registration> customListeners() {
         return customListeners;
+    }
+
+    /** Remember a spawned entity so it can be despawned when the script is unloaded. */
+    void addEntity(ScriptEntity entity) {
+        synchronized (entities) {
+            entities.add(entity);
+        }
+    }
+
+    /** Forget an entity a script removed itself, so the list doesn't grow across a long session. */
+    void removeEntity(ScriptEntity entity) {
+        synchronized (entities) {
+            entities.remove(entity);
+        }
+    }
+
+    /** A snapshot of this script's entities — teardown iterates it while they remove themselves. */
+    List<ScriptEntity> entities() {
+        synchronized (entities) {
+            return List.copyOf(entities);
+        }
     }
 
     Function onDisable() {
