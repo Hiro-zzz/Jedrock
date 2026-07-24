@@ -258,6 +258,15 @@ public interface PlayerConnection {
     default void sendTabComplete(java.util.List<String> matches) {}
 
     /**
+     * Show / update the sidebar scoreboard: a title and lines (already rendered to legacy {@code §} form),
+     * top to bottom. Java draws it; every other edition ignores it. Default no-op.
+     */
+    default void setSidebar(String title, String[] lines) {}
+
+    /** Remove the sidebar scoreboard, if shown. Default no-op. */
+    default void clearSidebar() {}
+
+    /**
      * Draw {@code state} (canonical {@code (id << 4) | meta}, 0 = empty hand) in the hand of another
      * player's avatar — JE Entity Equipment / PE MobEquipment. Sent when the holder switches hotbar
      * slots, when the held stack changes, and once when the avatar spawns. Default no-op.

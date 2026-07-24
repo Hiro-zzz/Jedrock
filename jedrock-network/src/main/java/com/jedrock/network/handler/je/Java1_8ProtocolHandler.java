@@ -580,6 +580,63 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
         send(c, CB_TAB_COMPLETE, b -> JeTabComplete.write(b, matches));
     }
 
+    // ===== Sidebar scoreboard (1.8: Objective 0x3B, Score 0x3C, Display 0x3D) =====
+    // Same packets as 1.12.2 but the objective value is a plain legacy string with a "type" string
+    // (1.12.2 uses a JSON component + VarInt type), so the wire is spelled out here separately.
+
+    private JeScoreboard sidebar;
+
+    private JeScoreboard sidebar(JedrockConnection c) {
+        if (sidebar == null) {
+            sidebar = new JeScoreboard(new JeScoreboard.Wire() {
+                @Override public void objectiveCreate(String obj, String title) { objective(c, obj, 0, title); }
+                @Override public void objectiveUpdateTitle(String obj, String title) { objective(c, obj, 2, title); }
+                @Override public void objectiveRemove(String obj) { objective(c, obj, 1, ""); }
+                @Override public void displaySidebar(String obj) {
+                    send(c, CB_DISPLAY_OBJECTIVE, b -> { b.writeByte(1); ByteBufUtils.writeString(b, obj); });
+                }
+                @Override public void scoreSet(String entry, String obj, int value) {
+                    send(c, CB_UPDATE_SCORE, b -> {
+                        ByteBufUtils.writeString(b, entry);
+                        b.writeByte(0);                         // action 0 = create/update
+                        ByteBufUtils.writeString(b, obj);       // scoreName is always present
+                        ByteBufUtils.writeVarInt(b, value);
+                    });
+                }
+                @Override public void scoreRemove(String entry, String obj) {
+                    send(c, CB_UPDATE_SCORE, b -> {
+                        ByteBufUtils.writeString(b, entry);
+                        b.writeByte(1);                         // action 1 = remove (no value follows)
+                        ByteBufUtils.writeString(b, obj);
+                    });
+                }
+            });
+        }
+        return sidebar;
+    }
+
+    /** Scoreboard Objective (0x3B): name, mode; for create/update a plain display string + a type string. */
+    private void objective(JedrockConnection c, String name, int mode, String title) {
+        send(c, CB_SCOREBOARD_OBJECTIVE, b -> {
+            ByteBufUtils.writeString(b, name);
+            b.writeByte(mode);
+            if (mode == 0 || mode == 2) {
+                ByteBufUtils.writeString(b, title);   // 1.8 wants a plain legacy string here
+                ByteBufUtils.writeString(b, "integer");
+            }
+        });
+    }
+
+    @Override
+    public void setSidebar(JedrockConnection c, String title, String[] lines) {
+        sidebar(c).set(title, java.util.List.of(lines));
+    }
+
+    @Override
+    public void clearSidebar(JedrockConnection c) {
+        sidebar(c).clear();
+    }
+
     @Override
     public void setGameMode(JedrockConnection c, GameMode mode) {
         // Change Game State (0x2B): byte reason 3 = change game mode, float value = the mode id.

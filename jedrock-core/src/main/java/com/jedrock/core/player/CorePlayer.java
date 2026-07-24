@@ -561,6 +561,23 @@ public final class CorePlayer implements Player {
     }
 
     @Override
+    public void setSidebar(String title, java.util.List<String> lines) {
+        // Render the markup here (like sendTitle); the connection frames the legacy strings per version.
+        String renderedTitle = ChatText.toLegacy(title == null ? "" : title);
+        String[] rendered = new String[lines == null ? 0 : lines.size()];
+        for (int i = 0; i < rendered.length; i++) {
+            String line = lines.get(i);
+            rendered[i] = ChatText.toLegacy(line == null ? "" : line);
+        }
+        connection.setSidebar(renderedTitle, rendered);
+    }
+
+    @Override
+    public void clearSidebar() {
+        connection.clearSidebar();
+    }
+
+    @Override
     public boolean isOnline() {
         return connection.isActive();
     }

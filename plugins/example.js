@@ -341,6 +341,38 @@ commands.register('title', function (player, args) {
     player.sendActionBar('{aqua}action bar: {white}' + player.getName());
 });
 
+// /sb on|off — a live sidebar scoreboard (Java clients; Bedrock ignores it). setSidebar takes a title
+// and an array of lines (markup rendered per line); calling it again only sends what changed, so it's
+// cheap to refresh on a timer with no flicker. A per-player timer is kept in storage-free local state.
+var sbTasks = {};   // player uuid -> timer handle
+commands.register({
+    name: 'sb', description: 'Toggle a live sidebar', usage: '/sb <on|off>',
+    complete: function (player, args) { return args.length === 1 ? ['on', 'off'] : []; },
+    execute: function (player, args) {
+        var id = String(player.getUniqueId());
+        if (args[0] === 'off') {
+            if (sbTasks[id]) { sbTasks[id].cancel(); delete sbTasks[id]; }
+            player.clearSidebar();
+            player.sendMessage('{gray}Sidebar off.');
+            return;
+        }
+        var t = 0;
+        function draw() {
+            var loc = player.getLocation();
+            player.setSidebar('{gold}{bold}Jedrock', [
+                '{gray}Player: {white}' + player.getName(),
+                '{gray}Ping: {white}' + player.getPing() + 'ms',
+                '{gray}At: {white}' + Math.round(loc.x()) + ', ' + Math.round(loc.z()),
+                '{gray}Uptime: {white}' + (t++) + 's'
+            ]);
+        }
+        draw();
+        if (sbTasks[id]) sbTasks[id].cancel();
+        sbTasks[id] = scheduler.runTimer(draw, 20);   // redraw every second (20 ticks)
+        player.sendMessage('{green}Sidebar on. {gray}/sb off to hide.');
+    }
+});
+
 // /inv — exercise the scripting inventory API (survival: give / set / count / remove / clear).
 commands.register('inv', function (player, args) {
     var stone = Blocks.state(Blocks.STONE, 0);

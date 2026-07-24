@@ -223,6 +223,23 @@ public interface Player extends Entity, CommandSender {
     void clearTitle();
 
     /**
+     * Show a <b>sidebar scoreboard</b>: a title and lines of text, top to bottom, authored in the unified
+     * markup. Purely presentational — the server tracks no real scores; the lines are whatever you set,
+     * and calling this again replaces them (updating only what changed, so it's cheap on a timer).
+     *
+     * <p>Java only (1.8 and 1.12.2). Bedrock ignores it — its legacy clients either predate scoreboards
+     * (0.14) or aren't wired here yet (1.1.5). At most {@value com.jedrock.api.player.Player#SIDEBAR_MAX_LINES}
+     * lines are shown; the pre-1.13 client draws a small red number beside each line (the vanilla look).
+     */
+    void setSidebar(String title, java.util.List<String> lines);
+
+    /** Remove the sidebar scoreboard, if one is shown. */
+    void clearSidebar();
+
+    /** The most lines a {@link #setSidebar} sidebar shows; extra lines are dropped. */
+    int SIDEBAR_MAX_LINES = 16;
+
+    /**
      * @return true if the player is still connected
      */
     boolean isOnline();

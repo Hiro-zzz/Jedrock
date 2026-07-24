@@ -86,6 +86,20 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Sidebar scoreboard, Java (1.8 + 1.12.2).** `player.setSidebar(title, [lines])` / `clearSidebar()` — a
+  titled panel of text lines down the right of the screen, authored in the unified markup. Purely
+  presentational, true to the illusion: the server tracks no real scores; the lines are whatever you set,
+  and setting them again replaces them. It updates by **diffing** — the objective is created once, the
+  title retitled only when it changes, and only the score entries that actually changed are re-sent — so
+  refreshing on a timer costs a couple of packets and never flickers (the version-neutral diff lives in
+  `JeScoreboard`, unit-tested; the two versions differ only in the objective packet, a JSON component +
+  VarInt type at 1.12.2 vs a plain string + type string at 1.8). Duplicate lines are kept distinct by an
+  invisible trailing colour code per row, and up to 16 lines show. The pre-1.13 client draws a small red
+  number beside each line — the vanilla scoreboard look, unavoidable without the 1.13 number-format.
+  Bedrock ignores it: 0.14 predates scoreboards and 1.1.5 isn't wired here yet (a follow-up, against a real
+  client). Packet ids checked against minecraft-data (objective 0x42/0x3B, score 0x45/0x3C, display
+  0x3B/0x3D); on-client behaviour isn't verified here. Try `/sb on` in `plugins/example.js`.
+
 - **Typed command arguments and tab-completion.** Two things that fall out of one declaration, and the end
   of every command parsing its own `String[]` by hand.
   A command may describe its arguments as a list of typed `CommandArg` — a name, an `ArgType`, and
