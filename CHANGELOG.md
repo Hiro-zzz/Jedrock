@@ -86,6 +86,31 @@ unstable — anything may change between entries.
 
 ### Changed
 
+- **`JedrockServer` split into five collaborators (1822 → 1043 lines).** The class had accumulated every
+  responsibility that ever needed the roster, and its next feature would have made that worse. What came
+  out, each owning one thing and testable on its own: **`PlayerBroadcast`** — the single place that walks
+  the online roster and pushes (chat, avatar moves, pose, held item, armor, the hurt flash, the
+  server-authoritative reposition), so the "loop the players, skip the subject" pattern is written once
+  instead of nine times; **`EntityDirector`** — puppets and holograms, their spawn / relay / despawn and
+  the join-time catch-up; **`ContainerService`** — windows, chests, click-transfer and the creative
+  mirror, the one owner of the survival inventory; **`CombatService`** — fall, void and melee funnelled
+  into one damage path with the death and respawn that follow; **`LevelManager`** — the world's life on
+  disk (load, one-time bake, autosave, shutdown write). The server keeps the surface everything else
+  talks to (`Server`, `ConnectionListener`, its public accessors), so commands, scripts and the console
+  are untouched. `CorePuppet` / `CoreHologram` now hold the `EntityDirector` rather than the whole
+  server: an entity knows only its relay path. Seven `relayPuppet*` methods and fourteen imports left
+  with them, none of which had a caller outside the puppet itself.
+
+- **Hot-path allocations, four places.** A `LOGGER.debug(() -> …)` never *invokes* its lambda with debug
+  off, but a lambda that captures anything is still allocated on every call — and three of those sat on
+  per-packet paths (inbound JE, inbound PE-in-batch, and **every** outbound packet). A new
+  `JLogger.isDebugEnabled()` gates them, so a walking player no longer mints one object per packet in
+  each direction. `ChunkView.recenter` walked each ring by scanning the whole square and discarding the
+  interior — 969 visits for the 289 chunks of a radius-8 view; it now walks the perimeter directly, same
+  nearest-first order (pinned by a new test). `PlayerRegistry.all()` built a fresh unmodifiable wrapper
+  per call and now keeps one live view, and the world's change listener — which fires per written cell,
+  so a script `world.fill` pays for it thousands of times — iterates the typed roster instead.
+
 - The Java Edition **Slot** wire format now lives in one place (`JeSlots`) instead of being spelled out
   again in every packet that carries an item.
 

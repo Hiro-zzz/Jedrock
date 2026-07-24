@@ -21,6 +21,10 @@ public final class PlayerRegistry {
     private final ConcurrentHashMap<UUID, CorePlayer> byId = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, UUID> byName = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<PlayerConnection, UUID> byConnection = new ConcurrentHashMap<>();
+    /** Immutable api-facing view of {@link #byId}'s live values — see {@link #all()}. */
+    @SuppressWarnings("unchecked")
+    private final Collection<Player> allView =
+            Collections.unmodifiableCollection((Collection<Player>) (Collection<?>) byId.values());
 
     public void add(CorePlayer player) {
         byId.put(player.getUniqueId(), player);
@@ -103,8 +107,14 @@ public final class PlayerRegistry {
         return player;
     }
 
+    /**
+     * The online players as the api sees them. The wrapper is built once and kept: it is a view over
+     * the map's own live values, so it stays current, and callers on a per-packet path no longer mint
+     * a fresh unmodifiable wrapper each time they iterate. For core-internal loops prefer
+     * {@link #online()}, which skips the wrapper entirely and hands back typed {@link CorePlayer}s.
+     */
     public Collection<Player> all() {
-        return Collections.unmodifiableCollection(byId.values());
+        return allView;
     }
 
     public int size() {

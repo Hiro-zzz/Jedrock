@@ -2,9 +2,12 @@ package com.jedrock.network.chunk;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -45,6 +48,33 @@ class ChunkViewTest {
 
         assertEquals(loadsAfterFirst, sink.loads, "no extra loads");
         assertEquals(0, sink.unloads);
+    }
+
+    /**
+     * The window is streamed nearest-first — each chunk is at least as far from the centre as the one
+     * before it, so pop-in fills outward instead of arriving in an arbitrary order. Pins the perimeter
+     * walk that replaced the whole-square scan: same chunks, same order, a third of the iterations.
+     */
+    @Test
+    void loadsRingByRingFromTheCentreOutward() {
+        ChunkView view = new ChunkView(3);
+        List<int[]> order = new ArrayList<>();
+        view.recenter(10, -4, new ChunkView.Sink() {
+            @Override public void load(int cx, int cz) { order.add(new int[]{cx, cz}); }
+            @Override public void unload(int cx, int cz) { }
+        });
+
+        assertEquals(49, order.size(), "7x7 window");
+        assertArrayEquals(new int[]{10, -4}, order.get(0), "the centre chunk comes first");
+        int previousRing = 0;
+        Set<Long> seen = new HashSet<>();
+        for (int[] chunk : order) {
+            int ring = Math.max(Math.abs(chunk[0] - 10), Math.abs(chunk[1] + 4));
+            assertTrue(ring >= previousRing, "ring " + ring + " must not follow ring " + previousRing);
+            assertTrue(seen.add(RecordingSink.key(chunk[0], chunk[1])),
+                    "chunk " + chunk[0] + "," + chunk[1] + " sent twice");
+            previousRing = ring;
+        }
     }
 
     @Test

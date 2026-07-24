@@ -15,6 +15,18 @@ public interface JLogger {
 
     void debug(Supplier<String> messageSupplier);
 
+    /**
+     * Whether debug output would be emitted at all. The supplier form never <em>invokes</em> its
+     * lambda when debug is off, but a lambda that captures anything is still allocated at every call —
+     * so on a per-packet path, ask this first and skip the call entirely. Everywhere else the supplier
+     * form is the readable choice.
+     *
+     * <p>The default is the global switch; a backend that scopes debug by logger name narrows it.
+     */
+    default boolean isDebugEnabled() {
+        return Debug.enabled();
+    }
+
     void info(String message);
 
     void warn(String message);
@@ -57,6 +69,11 @@ public interface JLogger {
 
         SimpleConsoleLogger(String name) {
             this.name = name;
+        }
+
+        @Override
+        public boolean isDebugEnabled() {
+            return Debug.enabled(name);
         }
 
         @Override

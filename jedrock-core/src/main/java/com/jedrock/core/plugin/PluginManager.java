@@ -7,7 +7,6 @@ import com.jedrock.core.command.Command;
 import com.jedrock.core.command.CommandManager;
 import com.jedrock.core.net.PacketEvent;
 import com.jedrock.core.net.PacketTapRegistry;
-import com.jedrock.core.player.CorePlayer;
 import com.jedrock.gameloop.Scheduler;
 import com.jedrock.utils.JLogger;
 import org.mozilla.javascript.ClassShutter;

@@ -721,7 +721,10 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
                 }
                 ByteBuf pk = batch.readSlice(len);
                 int id = ByteBufUtils.readVarInt(pk);
-                LOGGER.debug(() -> "[PE] inbound packet id=0x" + Integer.toHexString(id));
+                // Per inner packet of every batch — gated, so debug-off costs no captured lambda.
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debug("[PE] inbound packet id=0x" + Integer.toHexString(id));
+                }
                 // Offer the raw packet to any tap; a cancel drops it before the session handles it.
                 if (listener != null && listener.hasPacketTaps()) {
                     byte[] body = new byte[pk.readableBytes()];

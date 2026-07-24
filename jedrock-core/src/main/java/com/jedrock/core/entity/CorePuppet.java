@@ -6,7 +6,6 @@ import com.jedrock.api.entity.PuppetFlag;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
-import com.jedrock.core.JedrockServer;
 
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -14,7 +13,7 @@ import java.util.function.Consumer;
 /**
  * A server-puppeteered visual entity — the illusionist's mob / NPC / hologram. It holds only presentational
  * state (type, position) and an optional interaction callback; it is never simulated. Movement and removal
- * relay to viewers through the {@link JedrockServer} that owns it. This is the primitive the platform API
+ * relay to viewers through the {@link EntityDirector} that owns it. This is the primitive the platform API
  * will drive.
  */
 public final class CorePuppet implements PuppetEntity {
@@ -23,7 +22,7 @@ public final class CorePuppet implements PuppetEntity {
     private final long entityId = EntityIds.next();
     private final EntityType type;
     private final String name;
-    private final JedrockServer server;
+    private final EntityDirector director;
 
     /**
      * The height a puppet "looks from" when aiming at something. Nominal and deliberately not per-type: the
@@ -41,17 +40,17 @@ public final class CorePuppet implements PuppetEntity {
     /** For an {@link EntityType#ITEM} prop: the canonical state its body renders. Unused otherwise. */
     private final int itemState;
 
-    public CorePuppet(EntityType type, String name, World world, Location location, JedrockServer server) {
-        this(type, name, world, location, server, 0);
+    public CorePuppet(EntityType type, String name, World world, Location location, EntityDirector director) {
+        this(type, name, world, location, director, 0);
     }
 
-    public CorePuppet(EntityType type, String name, World world, Location location, JedrockServer server,
+    public CorePuppet(EntityType type, String name, World world, Location location, EntityDirector director,
                       int itemState) {
         this.type = type;
         this.name = name;
         this.world = world;
         this.location = location;
-        this.server = server;
+        this.director = director;
         this.itemState = itemState;
     }
 
@@ -94,7 +93,7 @@ public final class CorePuppet implements PuppetEntity {
     public void remove() {
         if (alive) {
             alive = false;
-            server.removePuppet(this); // relays the despawn to every viewer
+            director.removePuppet(this); // relays the despawn to every viewer
         }
     }
 
@@ -128,7 +127,7 @@ public final class CorePuppet implements PuppetEntity {
     @Override
     public void setNameTag(String nameTag) {
         this.nameTag = nameTag;
-        server.relayPuppetNameTag(this); // relays the new text to every viewer
+        director.relayNameTag(this); // relays the new text to every viewer
     }
 
     /** Set the initial name tag before anyone can see the puppet — no relay, since it hasn't spawned. */
@@ -139,7 +138,7 @@ public final class CorePuppet implements PuppetEntity {
     @Override
     public void teleport(Location to) {
         setLocation(to);
-        server.movePuppet(this, to); // relays the move to every viewer
+        director.movePuppet(this, to); // relays the move to every viewer
     }
 
     @Override
@@ -169,7 +168,7 @@ public final class CorePuppet implements PuppetEntity {
     public void setFlag(PuppetFlag flag, boolean on) {
         // Every edition packs these into one field, so the whole set is what gets relayed.
         this.flags = on ? (flags | flag.bit()) : (flags & ~flag.bit());
-        server.relayPuppetFlags(this);
+        director.relayFlags(this);
     }
 
     /** The puppet's whole canonical flag mask — what the relay hands the network layer. */
@@ -184,7 +183,7 @@ public final class CorePuppet implements PuppetEntity {
     @Override
     public void setHeldItem(int state) {
         this.heldItem = state;
-        server.relayPuppetHeldItem(this);
+        director.relayHeldItem(this);
     }
 
     @Override
@@ -195,7 +194,7 @@ public final class CorePuppet implements PuppetEntity {
     @Override
     public void setArmor(com.jedrock.api.player.ArmorSlot slot, int state) {
         armor[slot.ordinal()] = state;
-        server.relayPuppetArmor(this);
+        director.relayArmor(this);
     }
 
     @Override
@@ -215,12 +214,12 @@ public final class CorePuppet implements PuppetEntity {
 
     @Override
     public void swing() {
-        server.relayPuppetSwing(this);
+        director.relaySwing(this);
     }
 
     @Override
     public void hurt() {
-        server.relayPuppetHurt(this);
+        director.relayHurt(this);
     }
 
     @Override

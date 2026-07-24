@@ -1,6 +1,5 @@
 package com.jedrock.core.plugin;
 
-import com.jedrock.core.command.Command;
 import org.mozilla.javascript.Context;
 import org.mozilla.javascript.Function;
 import org.mozilla.javascript.NativeArray;
