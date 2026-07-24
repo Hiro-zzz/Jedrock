@@ -63,6 +63,8 @@ public final class Java1_8Protocol {
     public static final int SB_CLICK_WINDOW = 0x0E;         // mode is a BYTE in 1.8 (VarInt only from 1.9)
     public static final int SB_CONFIRM_TRANSACTION = 0x0F;  // client's ack — ignored
     public static final int SB_CREATIVE_ACTION = 0x10;      // creative set-slot (slot short + item)
+    public static final int SB_TAB_COMPLETE = 0x14;         // serverbound Tab-Complete request (text + flags)
+    public static final int CB_TAB_COMPLETE = 0x3A;         // clientbound Tab-Complete: VarInt count + strings
 
     // ===== 1.8 entity metadata (old format): header = (type << 5) | index, list ends with 0x7F =====
     // Type ids are 1.8's own (byte 0, short 1, int 2, float 3, string 4, …) — 1.12.2 renumbered them.

@@ -92,6 +92,11 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
         } else if (id == SB_CHAT) {
             String message = ByteBufUtils.readString(in);
             if (listener != null && !message.isEmpty()) listener.onChat(connection, message);
+        } else if (id == SB_TAB_COMPLETE) {
+            // Tab-Complete (0x14 at 47): text so far (with its leading '/'); the trailing hasPosition /
+            // position fields are left unread — the line is all we need.
+            String text = ByteBufUtils.readString(in);
+            if (listener != null) listener.onTabComplete(connection, text);
         } else if (id == SB_ARM_ANIMATION) {
             if (listener != null) listener.onSwingArm(connection);
         } else if (id == SB_USE_ENTITY) {
@@ -567,6 +572,12 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
             b.writeFloat(yaw); b.writeFloat(pitch);
             b.writeByte(0);
         });
+    }
+
+    @Override
+    public void sendTabComplete(JedrockConnection c, java.util.List<String> matches) {
+        // Tab-Complete (0x3A at 47): the shared JE body — VarInt count + strings, same as 1.12.2.
+        send(c, CB_TAB_COMPLETE, b -> JeTabComplete.write(b, matches));
     }
 
     @Override

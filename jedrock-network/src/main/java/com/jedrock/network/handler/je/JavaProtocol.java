@@ -110,6 +110,9 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Reposition this client's own player (the blind judge snapping an illegal move back). */
     void teleportSelf(JedrockConnection c, double x, double y, double z, float yaw, float pitch);
 
+    /** Send tab-completion matches for the token the client is completing, in this version's packet format. */
+    default void sendTabComplete(JedrockConnection c, java.util.List<String> matches) {}
+
     /** Switch this client's own game mode live (HUD + fly ability), in this version's packet format. */
     void setGameMode(JedrockConnection c, GameMode mode);
 
