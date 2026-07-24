@@ -281,9 +281,25 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     public void showHeldItem(JedrockConnection c, long entityId, int state) {
         // Entity Equipment (0x04 at 47): entity id (varint), equipment slot (short, 0 = held), then
         // the standard Slot — ground truth minecraft-data packet_entity_equipment.
+        sendEquipment(c, entityId, 0, state);
+    }
+
+    @Override
+    public void showArmor(JedrockConnection c, long entityId,
+                          int helmet, int chestplate, int leggings, int boots) {
+        // At 1.8 the Entity Equipment slots run 0 = held, then 1-4 feet-to-head. (1.9 inserted the
+        // off-hand at 1 and pushed armor to 2-5 — ground truth ViaVersion's 1.9→1.8 slot transform.)
+        sendEquipment(c, entityId, 1, boots);
+        sendEquipment(c, entityId, 2, leggings);
+        sendEquipment(c, entityId, 3, chestplate);
+        sendEquipment(c, entityId, 4, helmet);
+    }
+
+    /** One Entity Equipment packet: entity id (varint), equipment slot (short at 1.8), then the Slot. */
+    private static void sendEquipment(JedrockConnection c, long entityId, int equipmentSlot, int state) {
         send(c, CB_ENTITY_EQUIPMENT, b -> {
             ByteBufUtils.writeVarInt(b, (int) entityId);
-            b.writeShort(0);
+            b.writeShort(equipmentSlot);
             JeInventoryCodec.writeSlot(b, state, state == 0 ? 0 : 1);
         });
     }

@@ -552,6 +552,42 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         b.writeByte(0);
     }
 
+    @Override
+    public void showArmor(long entityId, int helmet, int chestplate, int leggings, int boots) {
+        sendGameBatch(b -> writeMobArmorEquipment(b, entityId, helmet, chestplate, leggings, boots));
+    }
+
+    @Override
+    public void sendOwnArmor(int helmet, int chestplate, int leggings, int boots) {
+        // PMMP's sendArmorContents sends the WEARER a ContainerSetContent for the armor window rather
+        // than the MobArmorEquipment other players get — without it a Bedrock player sees everyone's
+        // armor but their own. Body per protocol 113: windowId, targetEid, slot count, slots, then a
+        // hotbar-link count of 0 (links are only written for the inventory window).
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_CONTENT);
+            ByteBufUtils.writeVarInt(b, WINDOW_ID_ARMOR);
+            ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);
+            ByteBufUtils.writeVarInt(b, 4);
+            for (int state : new int[]{helmet, chestplate, leggings, boots}) {
+                McpeCodec.writeSlot(b, state, state == 0 ? 0 : 1);
+            }
+            ByteBufUtils.writeVarInt(b, 0);
+        });
+    }
+
+    /**
+     * Encode a MobArmorEquipment (0x20) body, verbatim from PMMP at protocol 113: entity runtime id
+     * (unsigned varlong) then exactly four Slots, head-to-feet. One packet dresses the whole avatar.
+     */
+    static void writeMobArmorEquipment(ByteBuf b, long entityRuntimeId,
+                                       int helmet, int chestplate, int leggings, int boots) {
+        ByteBufUtils.writeVarInt(b, ID_MOB_ARMOR_EQUIPMENT);
+        ByteBufUtils.writeVarLong(b, entityRuntimeId);
+        for (int state : new int[]{helmet, chestplate, leggings, boots}) {
+            McpeCodec.writeSlot(b, state, state == 0 ? 0 : 1);
+        }
+    }
+
     /** Encode an Animate packet body (protocol 113): action (putVarInt), then entity runtime id. */
     static void writeAnimate(ByteBuf b, int action, long entityRuntimeId) {
         ByteBufUtils.writeVarInt(b, ID_ANIMATE);

@@ -158,25 +158,35 @@ public final class CorePlayer implements Player {
     }
 
     /**
-     * Notified whenever the item in this player's hand may have changed — the server wires this to
-     * relay the new item onto every other client's copy of the avatar.
+     * Notified whenever this player's visible equipment may have changed — the server wires this to
+     * redraw the hand or the armor on every other client's copy of the avatar. Split in two so a
+     * hotbar switch doesn't re-send the armor (and vice versa).
      */
-    @FunctionalInterface
-    public interface HeldItemListener {
+    public interface EquipmentListener {
         void heldItemChanged(CorePlayer player);
+
+        void armorChanged(CorePlayer player);
     }
 
-    private volatile HeldItemListener heldItemListener;
+    private volatile EquipmentListener equipmentListener;
 
-    public void setHeldItemListener(HeldItemListener listener) {
-        this.heldItemListener = listener;
+    public void setEquipmentListener(EquipmentListener listener) {
+        this.equipmentListener = listener;
     }
 
     /** Fire the held-item hook (no-op before the server wires it, e.g. in tests). */
     private void heldItemMayHaveChanged() {
-        HeldItemListener listener = heldItemListener;
+        EquipmentListener listener = equipmentListener;
         if (listener != null) {
             listener.heldItemChanged(this);
+        }
+    }
+
+    /** Fire the armor hook (no-op before the server wires it, e.g. in tests). */
+    private void armorMayHaveChanged() {
+        EquipmentListener listener = equipmentListener;
+        if (listener != null) {
+            listener.armorChanged(this);
         }
     }
 
@@ -188,10 +198,15 @@ public final class CorePlayer implements Player {
         }
     }
 
-    /** Push the whole inventory to the client (a reset — join, respawn, game-mode switch). */
+    /**
+     * Push the whole inventory to the client (a reset — join, respawn, game-mode switch). Both
+     * equipment hooks fire: a full resync can have changed the hand and the armor, and on Bedrock the
+     * armor slots aren't part of this packet, so they need their own push.
+     */
     public void syncInventory() {
         connection.setInventory(inventory.states(), inventory.counts());
         heldItemMayHaveChanged();
+        armorMayHaveChanged();
     }
 
     // ===== Inventory API (scripting-facing; operates on the 36 storage slots 0-35) =====
@@ -415,6 +430,32 @@ public final class CorePlayer implements Player {
     @Override
     public int getHeldItem() {
         return inventory.stateAt(heldSlot);
+    }
+
+    @Override
+    public int getArmor(com.jedrock.api.player.ArmorSlot slot) {
+        return inventory.stateAt(slot.inventorySlot());
+    }
+
+    /** Whether any piece is worn — lets a caller skip an all-empty armor packet. */
+    public boolean hasArmor() {
+        for (com.jedrock.api.player.ArmorSlot slot : com.jedrock.api.player.ArmorSlot.values()) {
+            if (getArmor(slot) != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Wear (or, with state 0, remove) a piece. The armor slots sit past the 36 storage slots, so this
+     * is the only way in; the change syncs to the wearer's own inventory view and, through the
+     * equipment hook, onto everyone else's copy of their avatar.
+     */
+    @Override
+    public void setArmor(com.jedrock.api.player.ArmorSlot slot, int state) {
+        inventory.set(slot.inventorySlot(), state, state == 0 ? 0 : 1);
+        syncInventory(); // refreshes the wearer's own view and fires the equipment hooks
     }
 
     /** Chat display name; null = none set, so getDisplayName falls back to the real name. */

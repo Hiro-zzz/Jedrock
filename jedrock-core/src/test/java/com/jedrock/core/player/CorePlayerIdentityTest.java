@@ -1,5 +1,6 @@
 package com.jedrock.core.player;
 
+import com.jedrock.api.player.ArmorSlot;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.core.world.CoreWorld;
@@ -9,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** The identity QoL surface: the chat display name (set / fallback / reset) and the ping default. */
 class CorePlayerIdentityTest {
@@ -82,19 +85,51 @@ class CorePlayerIdentityTest {
         assertEquals(3, p.getHeldItemSlot(), "an out-of-range switch is ignored");
     }
 
+    /** Counts the two equipment hooks separately. */
+    private static class CountingEquipment implements CorePlayer.EquipmentListener {
+        int held;
+        int armor;
+        @Override public void heldItemChanged(CorePlayer player) { held++; }
+        @Override public void armorChanged(CorePlayer player) { armor++; }
+    }
+
     @Test
     void theHeldItemHookFiresOnlyForTheHand() {
         CorePlayer p = player(new NoopConnection());
-        int[] fired = {0};
-        p.setHeldItemListener(who -> fired[0]++);
+        CountingEquipment hooks = new CountingEquipment();
+        p.setEquipmentListener(hooks);
 
         p.setItem(0, com.jedrock.api.world.Blocks.state(1, 0), 1); // the held slot → relay
-        assertEquals(1, fired[0], "changing the hand notifies");
+        assertEquals(1, hooks.held, "changing the hand notifies");
 
         p.setItem(5, com.jedrock.api.world.Blocks.state(1, 0), 1); // another slot → silent
-        assertEquals(1, fired[0], "a change elsewhere in the inventory does not");
+        assertEquals(1, hooks.held, "a change elsewhere in the inventory does not");
 
         p.clearInventory(); // a full resync always notifies (the hand may have emptied)
-        assertEquals(2, fired[0]);
+        assertEquals(2, hooks.held);
+        assertEquals(1, hooks.armor, "only the full resync re-pushes armor, per-slot writes don't");
+    }
+
+    @Test
+    void armorIsWornReadBackAndNotifiesSeparately() {
+        CorePlayer p = player(new NoopConnection());
+        CountingEquipment hooks = new CountingEquipment();
+        p.setEquipmentListener(hooks);
+        int diamondHelmet = com.jedrock.api.world.Blocks.state(310, 0);
+
+        assertFalse(p.hasArmor(), "nothing worn to begin with");
+        p.setArmor(ArmorSlot.HELMET, diamondHelmet);
+
+        assertEquals(diamondHelmet, p.getArmor(ArmorSlot.HELMET));
+        assertEquals(0, p.getArmor(ArmorSlot.BOOTS), "the other pieces stay empty");
+        assertTrue(p.hasArmor());
+        assertEquals(1, hooks.armor, "wearing a piece notifies the armor hook");
+
+        // Armor lives past the 36 storage slots, so the storage API can't see or clobber it.
+        assertEquals(36, p.getInventorySize());
+        assertEquals(0, p.getItem(ArmorSlot.HELMET.inventorySlot()), "out of the storage API's range");
+
+        p.clearArmor();
+        assertFalse(p.hasArmor(), "cleared");
     }
 }

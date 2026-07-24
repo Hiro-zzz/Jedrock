@@ -44,6 +44,13 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Draw an item in another avatar's hand (this version's Entity Equipment packet). Default: a no-op. */
     default void showHeldItem(JedrockConnection c, long entityId, int state) {}
 
+    /**
+     * Draw the four worn armor pieces on another avatar (head-to-feet). Each version numbers the
+     * Entity Equipment slots differently, so this is per-protocol. Default: a no-op.
+     */
+    default void showArmor(JedrockConnection c, long entityId,
+                           int helmet, int chestplate, int leggings, int boots) {}
+
     /** Play a canonical sound at a position (this version's Named Sound Effect packet). Default: a no-op. */
     default void playSound(JedrockConnection c, com.jedrock.api.world.Sound sound,
                            double x, double y, double z, float volume, float pitch) {}

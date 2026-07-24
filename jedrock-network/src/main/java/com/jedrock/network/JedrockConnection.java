@@ -127,6 +127,11 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void showArmor(long entityId, int helmet, int chestplate, int leggings, int boots) {
+        protocolHandler.showArmor(this, entityId, helmet, chestplate, leggings, boots);
+    }
+
+    @Override
     public void playSound(com.jedrock.api.world.Sound sound, double x, double y, double z, float volume, float pitch) {
         protocolHandler.playSound(this, sound, x, y, z, volume, pitch);
     }

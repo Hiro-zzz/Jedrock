@@ -333,6 +333,21 @@ commands.register('pillar', function (player, args) {
     player.sendMessage('{green}Wool pillar at {white}' + x + ',' + base + ',' + z);
 });
 
+// /armor [off] — dress yourself in diamond; everyone sees it on your avatar, cross-edition.
+var ArmorSlot = Packages.com.jedrock.api.player.ArmorSlot;
+commands.register('armor', function (player, args) {
+    if (args.length > 0 && args[0] === 'off') {
+        player.clearArmor();
+        player.sendMessage('{gray}Armor removed.');
+        return;
+    }
+    player.setArmor(ArmorSlot.HELMET, Blocks.state(310, 0));
+    player.setArmor(ArmorSlot.CHESTPLATE, Blocks.state(311, 0));
+    player.setArmor(ArmorSlot.LEGGINGS, Blocks.state(312, 0));
+    player.setArmor(ArmorSlot.BOOTS, Blocks.state(313, 0));
+    player.sendMessage('{aqua}Full diamond! {gray}(others see it; /armor off to remove)');
+});
+
 // /nick [name…] — a coloured chat nickname (displayName demo); no args resets it.
 commands.register('nick', function (player, args) {
     if (args.length === 0) {

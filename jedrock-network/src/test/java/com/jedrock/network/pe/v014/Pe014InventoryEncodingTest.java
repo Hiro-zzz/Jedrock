@@ -52,6 +52,28 @@ class Pe014InventoryEncodingTest {
     }
 
     @Test
+    void ownArmorGoesToTheArmorWindow() {
+        // The wearer's own copy is a ContainerSetContent for window 0x78 — not the MobArmorEquipment
+        // other players get. Without it a Bedrock player sees everyone's armor but their own.
+        ByteBuf b = Unpooled.buffer();
+        Mcpe014Packets.ownArmor(b, Blocks.state(310, 0), 0, 0, 0);
+
+        assertEquals(Mcpe014Packets.ID_CONTAINER_SET_CONTENT, b.readUnsignedByte(), "packet id");
+        assertEquals(Mcpe014Packets.WINDOW_ID_ARMOR, b.readUnsignedByte(), "the armor window (0x78)");
+        assertEquals(4, b.readShort(), "exactly four pieces");
+        assertEquals(310, b.readShort(), "helmet id");
+        b.readUnsignedByte();                 // count
+        b.readShort();                        // meta
+        b.readShort();                        // nbt len
+        assertEquals(0, b.readShort(), "chestplate = air");
+        assertEquals(0, b.readShort(), "leggings = air");
+        assertEquals(0, b.readShort(), "boots = air");
+        assertEquals(0, b.readShort(), "hotbar-link count (links exist only for window 0)");
+        assertFalse(b.isReadable(), "no trailing bytes");
+        b.release();
+    }
+
+    @Test
     void containerSetSlotMatchesPmmpShape() {
         ByteBuf b = Unpooled.buffer();
         Mcpe014Packets.containerSetSlot(b, 0, 4, Blocks.state(276, 0), 1); // a diamond sword to slot 4

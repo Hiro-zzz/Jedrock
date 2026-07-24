@@ -31,6 +31,7 @@ final class McpeProtocol {
     static final int ID_SET_HEALTH = 0x2A;        // outbound: set the player's health (0..20)
     static final int ID_RESPAWN = 0x2D;           // outbound: place the player after a death-screen respawn
     static final int ID_MOB_EQUIPMENT = 0x1F;     // both ways: the item in an entity's hand (held-item sync)
+    static final int ID_MOB_ARMOR_EQUIPMENT = 0x20; // outbound: the four worn armor pieces, in one packet
     static final int ID_INTERACT = 0x21;          // inbound: attack / interact with an entity
     static final int ID_USE_ITEM = 0x23;          // Win10 1.1.5 carries block placement here
     static final int ID_PLAYER_ACTION = 0x24;
@@ -79,6 +80,7 @@ final class McpeProtocol {
 
     // --- Inventory window ids (ContainerSetContent targets) ---
     static final int WINDOW_ID_PLAYER = 0;     // the player's own inventory
+    static final int WINDOW_ID_ARMOR = 120;    // the wearer's own armor slots (ContainerIds::ARMOR)
     static final int WINDOW_ID_CREATIVE = 121; // the creative menu's item palette
 
     // --- AdventureSettings flags (protocol 113) ---

@@ -86,6 +86,24 @@ public interface Player extends Entity, CommandSender {
         return getItem(getHeldItemSlot());
     }
 
+    /** The canonical item state worn in {@code slot} (0 = nothing). */
+    default int getArmor(ArmorSlot slot) {
+        return 0;
+    }
+
+    /**
+     * Wear {@code state} (0 = remove) in {@code slot}. Visible on this player's avatar to everyone,
+     * cross-edition; the server simulates no protection. Default: a no-op.
+     */
+    default void setArmor(ArmorSlot slot, int state) {}
+
+    /** Remove every worn piece. */
+    default void clearArmor() {
+        for (ArmorSlot slot : ArmorSlot.values()) {
+            setArmor(slot, 0);
+        }
+    }
+
     /** Play a canonical sound to this player only, at their own position (a private UI ding). */
     default void playSound(com.jedrock.api.world.Sound sound) {
         playSound(sound, 1.0f, 1.0f);
