@@ -6,9 +6,11 @@ import com.jedrock.core.JedrockServer;
 import com.jedrock.utils.JLogger;
 import com.jedrock.utils.text.ChatText;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -98,5 +100,69 @@ public final class CommandManager {
             LOGGER.warn("Command /" + label + " from " + sender.getName() + " failed: " + e);
             sender.sendMessage("{red}Command failed: " + ChatText.escape(String.valueOf(e.getMessage())));
         }
+    }
+
+    /**
+     * Tab-completion for a partially typed command line ({@code rawLine} includes the leading {@code /}).
+     * The single entry point the wire calls; the result is a list of completions for the token under the
+     * cursor.
+     *
+     * <ul>
+     *   <li>Still on the command name (no space yet) → matching command labels, each with its {@code /},
+     *       and only ones the sender may actually run (permission-gated, like {@code /help}).</li>
+     *   <li>Past the name → the command's own {@link Command#complete} for the argument being typed,
+     *       again gated on permission and player-only status so a console or an unprivileged sender is
+     *       offered nothing it couldn't use.</li>
+     * </ul>
+     *
+     * <p>A trailing space matters: {@code "/tp "} is completing the (empty) first argument, not the name,
+     * so the split preserves that empty token.
+     */
+    public List<String> complete(CommandSender sender, String rawLine) {
+        String line = rawLine.startsWith("/") ? rawLine.substring(1) : rawLine;
+        // Split keeping a trailing empty token — the partial the user is about to type after a space.
+        String[] tokens = line.split("\\s+", -1);
+
+        if (tokens.length <= 1) {
+            // Completing the command name itself. Suggest labels the sender may run, each with its slash.
+            String partial = tokens.length == 0 ? "" : tokens[0].toLowerCase(Locale.ROOT);
+            List<String> out = new ArrayList<>();
+            for (Command command : commands.values()) {
+                if (!canUse(sender, command)) {
+                    continue;
+                }
+                for (String label : labelsOf(command)) {
+                    if (label.startsWith(partial)) {
+                        out.add("/" + label);
+                    }
+                }
+            }
+            return out;
+        }
+
+        Command command = get(tokens[0]);
+        if (command == null || !canUse(sender, command)) {
+            return List.of(); // unknown, or the sender couldn't run it — offer nothing
+        }
+        String[] args = Arrays.copyOfRange(tokens, 1, tokens.length);
+        return command.complete(server, sender, args);
+    }
+
+    /** Whether {@code sender} could actually run {@code command} — permission and player-only, as dispatch checks. */
+    private static boolean canUse(CommandSender sender, Command command) {
+        if (command.permission() != null && !sender.hasPermission(command.permission())) {
+            return false;
+        }
+        return !command.playerOnly() || sender instanceof Player;
+    }
+
+    /** A command's name followed by its aliases, all lower-cased — the labels it answers to. */
+    private static List<String> labelsOf(Command command) {
+        List<String> labels = new ArrayList<>();
+        labels.add(command.name().toLowerCase(Locale.ROOT));
+        for (String alias : command.aliases()) {
+            labels.add(alias.toLowerCase(Locale.ROOT));
+        }
+        return labels;
     }
 }

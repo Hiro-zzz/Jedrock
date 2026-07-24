@@ -251,6 +251,13 @@ public interface PlayerConnection {
     default void sendWeather(com.jedrock.api.world.Weather weather) {}
 
     /**
+     * Send tab-completion matches for a partially typed command line — the completions the client offers
+     * for the token under the cursor. Java sends a serverbound request and shows these; Bedrock completes
+     * client-side from its command manifest and never asks, so this is a no-op there. Default no-op.
+     */
+    default void sendTabComplete(java.util.List<String> matches) {}
+
+    /**
      * Draw {@code state} (canonical {@code (id << 4) | meta}, 0 = empty hand) in the hand of another
      * player's avatar — JE Entity Equipment / PE MobEquipment. Sent when the holder switches hotbar
      * slots, when the held stack changes, and once when the avatar spawns. Default no-op.

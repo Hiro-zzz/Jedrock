@@ -8,15 +8,17 @@ import com.jedrock.core.player.CorePlayer;
 import com.jedrock.utils.text.ChatText;
 
 import java.util.List;
-import java.util.Optional;
 
 /**
  * {@code /gamemode <mode> [player]} (alias {@code /gm}) — switch a player's game mode live. The mode
- * accepts a name, a one-letter shorthand or a numeric id (see {@link GameMode#fromString}). With no
+ * accepts a name, a one-letter shorthand or a numeric id (see {@link GameMode#fromString}); with no
  * player it targets the sender. The switch flips the client's HUD and flight ability on the wire (MCPE
  * 0.14 is the one exception — it applies on next join and says so).
+ *
+ * <p>Declared as typed arguments, so the core parses the mode and the optional player (and rejects a bad
+ * mode) before {@link #run}, and tab-completion offers the four mode names and the online roster.
  */
-public final class GameModeCommand implements Command {
+public final class GameModeCommand extends ArgCommand {
 
     @Override
     public String name() {
@@ -34,8 +36,10 @@ public final class GameModeCommand implements Command {
     }
 
     @Override
-    public String usage() {
-        return "/gamemode <survival|creative|s|c|0|1> [player]";
+    public List<CommandArg> arguments() {
+        return List.of(
+                CommandArg.required("mode", ArgType.GAME_MODE),
+                CommandArg.optional("player", ArgType.PLAYER));
     }
 
     @Override
@@ -44,22 +48,14 @@ public final class GameModeCommand implements Command {
     }
 
     @Override
-    public void execute(JedrockServer server, CommandSender sender, String[] args) {
-        if (args.length == 0) {
-            sender.sendMessage("{red}Usage: " + usage());
-            return;
-        }
-        GameMode mode = GameMode.fromString(args[0]);
-        if (mode == null) {
-            sender.sendMessage("{red}Unknown game mode: {white}" + ChatText.escape(args[0]));
-            return;
-        }
+    protected void run(JedrockServer server, CommandSender sender, CommandContext ctx) {
+        GameMode mode = ctx.getGameMode("mode");
 
         CorePlayer target;
-        if (args.length >= 2) {
-            Optional<Player> found = server.getPlayer(args[1]);
-            if (found.isEmpty() || !(found.get() instanceof CorePlayer cp)) {
-                sender.sendMessage("{red}Player not found: {white}" + ChatText.escape(args[1]));
+        if (ctx.has("player")) {
+            Player named = ctx.getPlayer("player");
+            if (!(named instanceof CorePlayer cp)) {
+                sender.sendMessage("{red}Player not found: {white}" + ChatText.escape(named.getName()));
                 return;
             }
             target = cp;

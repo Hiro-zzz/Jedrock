@@ -86,6 +86,37 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Typed command arguments and tab-completion.** Two things that fall out of one declaration, and the end
+  of every command parsing its own `String[]` by hand.
+  A command may describe its arguments as a list of typed `CommandArg` — a name, an `ArgType`, and
+  required/optional. `ArgType` is the single thing that both parses a token into a value and suggests
+  completions for a partial one: `WORD`, `GREEDY` (the trailing message), `INTEGER`, `NUMBER`, `BOOLEAN`,
+  `PLAYER` (resolves against and completes the online roster), `GAME_MODE` (the lenient parse `/gamemode`
+  always had, plus name suggestions), and `choice(…)` for a fixed literal set — a new one is parse-or-throw
+  plus an optional suggestion list, a few lines. `ArgCommand` builds on it: a subclass gives `arguments()`
+  and `run()`, and the tokens are validated once — missing required, a type's own rejection message, extra
+  tokens past a non-greedy tail, a greedy final arg swallowing the rest — before the body runs, with a
+  usage line generated from the signature. `/gamemode` is migrated to it as the showcase.
+  **Tab-completion** has one entry point, `CommandManager.complete(sender, line)`: still on the name, it
+  offers matching labels (each with its slash) the sender may actually run, permission- and
+  player-only-gated like `/help`; past the name, it asks the command, whose default derives suggestions
+  from `arguments()`. `tp` keeps its hand-written parse (it takes `<player>` **or** `<x> <y> <z>`, which one
+  signature can't say) but gets a completion override; weather, msg, heal, kill, tphere, op and deop
+  declare their arguments for completion only.
+  **On the wire (Java only):** a client's serverbound Tab-Complete (`0x01` at 1.12.2, `0x14` at 1.8) is
+  decoded to `ConnectionListener.onTabComplete`, the core completes it — only a real command line, only for
+  a registered player, so an unauthenticated socket can't enumerate commands — and answers with clientbound
+  Tab-Complete (`0x0E` / `0x3A`, a shared `JeTabComplete` body since the format is identical across the
+  legacy versions). The parse/completion layer takes the api `Server`, not the concrete `JedrockServer` —
+  it needs only the roster, which keeps it testable without a live server. Bedrock is untouched: it
+  completes client-side from the AvailableCommands manifest it already gets, and the retail 1.1.5 client's
+  known bugs are reason enough not to enrich that manifest.
+  **Scripts** get completion too: a command's optional `complete(player, args)` returns candidates the core
+  narrows to the partial, so a script returns its whole list (`/kit` in `plugins/example.js`); a completer
+  that throws yields no suggestions rather than breaking the client's typing. The byte layout is tested,
+  and the core logic end-to-end; the packet ids and serverbound layout come from the historical protocol
+  tables, and behaviour on a live client isn't verified here.
+
 - **Persistent storage for scripts — the `storage` global.** The last thing the platform-API roadmap was
   waiting on: until now a plugin's state died with the process, which ruled out scores, homes, statistics
   and saved scenes — everything a server actually remembers.

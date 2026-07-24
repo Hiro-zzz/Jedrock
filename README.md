@@ -164,6 +164,18 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   shown via the `%prefix%` slot in the chat format. Manage it live with `/perm` (create/delete groups, grant
   or deny nodes, set inheritance, prefix and the default group, assign players) — every change persists.
   Guarded commands are gated on their node, and `/help` hides what the sender can't run.
+- ✅ **Typed command arguments and tab-completion.** A command can declare its arguments as typed
+  `CommandArg`s instead of parsing a raw `String[]`: a name, an `ArgType` (`WORD`, `GREEDY`, `INTEGER`,
+  `NUMBER`, `BOOLEAN`, `PLAYER`, `GAME_MODE`, `choice(…)`), and required/optional. The core then parses
+  the tokens once — with uniform error messages, a usage line generated from the signature, and the same
+  "player not found" / "not a whole number" reported everywhere — before the command body runs (`ArgCommand`;
+  `/gamemode` is migrated to it). The same declaration drives **tab-completion**: a Java client's
+  serverbound Tab-Complete is answered with the online roster for a `PLAYER` argument, a `choice`'s
+  literals, or matching command names (permission-gated, so a sender is only offered what it can run),
+  encoded per version (1.12.2 `0x0E`, 1.8 `0x3A`). Scripts get it too — a command's optional
+  `complete(player, args)` returns candidates the core narrows to the partial (`/kit` in `plugins/example.js`).
+  Bedrock keeps its client-side completion from the AvailableCommands manifest, so this is a Java-side
+  feature; the retail 1.1.5 client's known bugs are reason enough not to enrich that manifest.
 - ✅ **Player-facing UI — titles, subtitles and the action bar.** `player.sendTitle(title, subtitle[, fadeIn,
   stay, fadeOut])`, `sendActionBar(text)` and `clearTitle()` show a large centred title or a line above the
   hotbar, authored in the unified markup and rendered per edition: the JE Title packet (id 0x45 on 1.8, 0x48
@@ -566,7 +578,9 @@ simulation stays out (see non-goals).
   **equipment** (`PlayerArmorChange` and `PlayerHeldItemChange`, whatever the piece came from — a creative
   drag, a survival window click, or `setArmor` from code). And **script state now survives a restart** —
   the `storage` global, the last thing this section was waiting on (see [What works today](#what-works-today)).
-  What it still wants: **typed command arguments** and tab-completion.
+  **Typed command arguments and tab-completion** landed too — a command declares its arguments and the core
+  parses them and completes them (Java clients), scripts included. What it still wants: **scoreboards, boss
+  bars and Bedrock forms**.
 - **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
   **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
   cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry
@@ -597,8 +611,8 @@ simulation stays out (see non-goals).
   equipment relay** (what a player holds and wears, on avatars and puppets alike), **titles / action
   bars**, **sounds and particles**, **weather**, `getPing` and chat **display names**, and a fuller
   **command framework** (a `CommandSender` abstraction, a unified console, op + group **permissions**).
-  Still open: **typed command args and tab-completion**, the rest of the illusion toolkit (**scoreboards,
-  boss bars, Bedrock forms**), and a **sharper judge** (per-axis limits, interaction ray-casts).
+  Typed command args and tab-completion have since landed. Still open: the rest of the illusion toolkit
+  (**scoreboards, boss bars, Bedrock forms**), and a **sharper judge** (per-axis limits, interaction ray-casts).
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
   runtime world simulation or physics, no 1.13+ flattening. Knockback is deliberately excluded for the
   same reason — the server simulates no physics. Custom logic that wants any of these lives in a script

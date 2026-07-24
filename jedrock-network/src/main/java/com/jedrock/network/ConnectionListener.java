@@ -185,6 +185,15 @@ public interface ConnectionListener {
      */
     default void onFall(PlayerConnection connection, float fallDistance) {}
 
+    /**
+     * A client asked to complete a partially typed command line ({@code partialLine} includes the leading
+     * {@code /}, and its last whitespace token is what the cursor is on). The core resolves the matches
+     * and pushes them back with {@link PlayerConnection#sendTabComplete}. Java clients send this
+     * (serverbound Tab-Complete); Bedrock does its own client-side completion from the AvailableCommands
+     * manifest, so it never calls this. Fires on an I/O thread. Default no-op.
+     */
+    default void onTabComplete(PlayerConnection connection, String partialLine) {}
+
     /** Name, help text and aliases of one in-game command — all an edition needs to advertise it. */
     record CommandInfo(String name, String description, List<String> aliases) {}
 

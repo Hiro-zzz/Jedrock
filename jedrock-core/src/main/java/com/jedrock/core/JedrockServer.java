@@ -937,6 +937,24 @@ public class JedrockServer implements Server, ConnectionListener {
     }
 
     @Override
+    public void onTabComplete(PlayerConnection connection, String partialLine) {
+        // Only complete an actual command line — a bare chat word gets no command suggestions. The sender
+        // may be the console-equivalent nobody (a not-yet-registered connection) — resolve to a player, or
+        // offer nothing rather than leak commands to an unauthenticated socket.
+        if (partialLine == null || !partialLine.startsWith("/")) {
+            return;
+        }
+        CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
+        if (player == null) {
+            return;
+        }
+        List<String> matches = commandManager.complete(player, partialLine);
+        if (!matches.isEmpty()) {
+            connection.sendTabComplete(matches);
+        }
+    }
+
+    @Override
     public void onChat(PlayerConnection connection, String message) {
         CorePlayer sender = playerRegistry.getByConnectionOrNull(connection);
         if (sender == null) {

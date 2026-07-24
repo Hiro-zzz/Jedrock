@@ -34,6 +34,13 @@ public final class DeopCommand implements Command {
     }
 
     @Override
+    public java.util.List<CommandArg> arguments() {
+        // Declared for tab-completion only; execute() below still parses the raw args.
+        return java.util.List.of(
+                CommandArg.required("player", ArgType.PLAYER));
+    }
+
+    @Override
     public void execute(JedrockServer server, CommandSender sender, String[] args) {
         if (args.length == 0) {
             sender.sendMessage("{red}Usage: " + usage());

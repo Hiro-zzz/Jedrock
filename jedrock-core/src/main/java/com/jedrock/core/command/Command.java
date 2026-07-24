@@ -1,5 +1,6 @@
 package com.jedrock.core.command;
 
+import com.jedrock.api.Server;
 import com.jedrock.api.command.CommandSender;
 import com.jedrock.core.JedrockServer;
 
@@ -31,6 +32,30 @@ public interface Command {
 
     /** Usage hint shown by {@code /help} and on bad input (e.g. {@code "/gamemode <mode> [player]"}). */
     String usage();
+
+    /**
+     * The command's declared arguments, in order, or an empty list for a command that parses its own raw
+     * {@code String[]} (the historical style). Declaring them lets the core parse the tokens once (see
+     * {@link ArgCommand}) and drive {@linkplain #complete tab-completion} for free. Default: none.
+     */
+    default List<CommandArg> arguments() {
+        return List.of();
+    }
+
+    /**
+     * Tab-completion suggestions for the argument currently being typed. {@code args} is every token after
+     * the label, with the <em>last</em> element being the partial token under the cursor (possibly empty
+     * when the user just pressed space). Return bare tokens for that partial; the caller filters nothing
+     * further.
+     *
+     * <p>The default derives suggestions from {@link #arguments()} — the online roster for a
+     * {@link ArgType#PLAYER}, the literals of a {@link ArgType#choice}, and so on — so a command that
+     * declares its arguments gets completion without writing any. A raw-args command may override this to
+     * offer its own.
+     */
+    default List<String> complete(Server server, CommandSender sender, String[] args) {
+        return CommandCompletion.forArguments(arguments(), server, sender, args);
+    }
 
     /** {@code true} if only a player may run this (needs a self location / inventory); the console can't. */
     default boolean playerOnly() {

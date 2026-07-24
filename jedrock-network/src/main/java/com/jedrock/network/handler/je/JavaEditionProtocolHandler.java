@@ -128,6 +128,13 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
             if (connection.getListener() != null) {
                 connection.getListener().onUseItem(connection, true);
             }
+        } else if (id == SB_TAB_COMPLETE) {
+            // Tab-Complete (0x01 at 340): the first field is the text so far (with its leading '/'); the
+            // trailing assumeCommand / position fields are unread — we only need the line to complete.
+            String text = lazy.materialize(ByteBufUtils::readString);
+            if (connection.getListener() != null) {
+                connection.getListener().onTabComplete(connection, text);
+            }
         } else if (id == ServerboundHeldItemChange.PACKET_ID) {
             ServerboundHeldItemChange h = lazy.materialize(ServerboundHeldItemChange::fromBuffer);
             if (h.slot >= 0 && h.slot < 9) {
@@ -259,6 +266,8 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
 
     /** 1.12.2 Title packet (id 0x48 — NOT 0x4B, which is another packet): actions 0 title, 1 subtitle,
      *  2 action-bar, 3 times, 4 hide, 5 reset. Verified against minecraft-data for protocol 340. */
+    private static final int SB_TAB_COMPLETE = 0x01;    // serverbound Tab-Complete request (text + flags)
+    private static final int CB_TAB_COMPLETE = 0x0E;    // clientbound Tab-Complete: VarInt count + strings
     private static final int CB_TITLE = 0x48;
     private static final int CB_NAMED_SOUND = 0x19;      // named sound effect (name + category + pos*8 + volume + pitch)
     private static final int CB_WORLD_PARTICLES = 0x22;  // particle burst (same body as 1.8's 0x2a)
@@ -472,6 +481,12 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     @Override
     public void teleportSelf(JedrockConnection c, double x, double y, double z, float yaw, float pitch) {
         c.send(new ClientboundPlayerPositionAndLook(x, y, z, yaw, pitch));
+    }
+
+    @Override
+    public void sendTabComplete(JedrockConnection c, java.util.List<String> matches) {
+        // Tab-Complete (0x0E at 340): VarInt count + strings, the shared JE body.
+        send(c, CB_TAB_COMPLETE, b -> JeTabComplete.write(b, matches));
     }
 
     @Override

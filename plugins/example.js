@@ -17,8 +17,9 @@
 //                custom event to every listener and returns it (read data / isCancelled back).
 //   scheduler  — run code later, in ticks (20/sec): run / runLater / runTimer, each returning a handle with
 //                .cancel(). setTimeout / setInterval / clearTimeout / clearInterval work too (milliseconds).
-//   commands   — commands.register(name, fn)  OR  register({name, aliases, description, usage, execute}).
-//                The handler gets (player, args); args is a JS array. Shows up in /help.
+//   commands   — commands.register(name, fn)  OR  register({name, aliases, description, usage, execute, complete}).
+//                The handler gets (player, args); args is a JS array. Shows up in /help. An optional
+//                `complete(player, args)` returns tab-completion candidates (Java clients) — see /kit.
 //   packets    — the raw cross-edition wire tap: onReceive(fn) / onSend(fn) see every packet
 //                ({getId, getBytes, getLength, getProtocol, getPlayer, cancel}); send(player, id, bytes) injects.
 //   console    — console.log / .warn / .error, prefixed with this file's name.
@@ -277,6 +278,26 @@ commands.register({
     execute: function (player, args) {
         if (args.length === 0) { player.sendMessage('{red}Usage: /broadcast <message>'); return; }
         server.broadcast('{gold}[Announce] {yellow}' + args.join(' '));
+    }
+});
+
+// /kit <name> — shows off tab-completion (Java clients): the `complete` function returns the candidates
+// for the token being typed, and the core narrows them to what's been typed so far. Try "/kit " + TAB.
+var KITS = ['starter', 'pvp', 'builder'];
+commands.register({
+    name: 'kit',
+    description: 'Grab a starter kit',
+    usage: '/kit <name>',
+    execute: function (player, args) {
+        if (args.length === 0 || KITS.indexOf(args[0]) < 0) {
+            player.sendMessage('{red}Usage: /kit <' + KITS.join('|') + '>');
+            return;
+        }
+        player.sendMessage('{green}Here is the {white}' + args[0] + '{green} kit (pretend).');
+    },
+    complete: function (player, args) {
+        // Only suggest for the first argument; return the whole list — the core filters by the partial.
+        return args.length === 1 ? KITS : [];
     }
 });
 

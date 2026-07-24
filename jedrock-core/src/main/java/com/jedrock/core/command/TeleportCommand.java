@@ -48,6 +48,13 @@ public final class TeleportCommand implements Command {
     }
 
     @Override
+    public List<String> complete(com.jedrock.api.Server server, CommandSender sender, String[] args) {
+        // Two forms — <player> or <x> <y> <z> — so a single argument signature can't describe it; the
+        // first token can start a player name, and the coordinate form has nothing to suggest.
+        return args.length == 1 ? ArgType.PLAYER.complete(server, sender, args[0]) : List.of();
+    }
+
+    @Override
     public void execute(JedrockServer server, CommandSender sender, String[] args) {
         CorePlayer self = (CorePlayer) sender; // playerOnly() guarantees a player
         Location here = self.getLocation();

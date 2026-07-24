@@ -21,16 +21,21 @@ import java.util.Locale;
  *       player.sendMessage('{green}Healed.');
  *   });
  *
- *   // Full: an options object with help text and aliases.
+ *   // Full: an options object with help text, aliases and tab-completion.
  *   commands.register({
- *       name: 'kit', aliases: ['starter'], description: 'Grab a starter kit', usage: '/kit',
- *       execute: function (player, args) { ... }
+ *       name: 'kit', aliases: ['starter'], description: 'Grab a starter kit', usage: '/kit <name>',
+ *       execute: function (player, args) { ... },
+ *       complete: function (player, args) { return ['starter', 'pvp', 'builder']; }
  *   });
  * }</pre>
  *
  * The handler gets the sender as an api {@code Player} and {@code args} — a JS array of the words after the
  * label ({@code args.length}, {@code args[0]}, {@code args.join(' ')} all work). The command shows up in
  * {@code /help}, so give it a description and usage. Handlers run under the script lock, like event listeners.
+ *
+ * <p>An optional {@code complete(player, args)} supplies tab-completion (Java clients): {@code args} is the
+ * words typed so far with the last one the partial under the cursor, and it returns an array of candidates.
+ * The core narrows them to the partial, so a script can just return its whole list.
  */
 public final class ScriptCommands {
 
@@ -50,7 +55,7 @@ public final class ScriptCommands {
         if (handler == null) {
             throw new IllegalArgumentException("commands.register('" + name + "', …) needs a function");
         }
-        add(name, "", "/" + name.toLowerCase(Locale.ROOT), List.of(), handler);
+        add(name, "", "/" + name.toLowerCase(Locale.ROOT), List.of(), handler, null);
     }
 
     /** Register a command from an options object: {@code {name, description, usage, aliases, execute}}. */
@@ -68,12 +73,14 @@ public final class ScriptCommands {
         }
         String description = str(options, "description", "");
         String usage = str(options, "usage", "/" + name.toLowerCase(Locale.ROOT));
-        add(name, description, usage, aliasesOf(options), handler);
+        Function completer = get(options, "complete") instanceof Function c ? c : null;
+        add(name, description, usage, aliasesOf(options), handler, completer);
     }
 
-    private void add(String name, String description, String usage, List<String> aliases, Function handler) {
+    private void add(String name, String description, String usage, List<String> aliases, Function handler,
+                     Function completer) {
         ScriptCommand command = new ScriptCommand(manager, plugin, name.toLowerCase(Locale.ROOT),
-                description, usage, aliases, handler);
+                description, usage, aliases, handler, completer);
         manager.commandManager().register(command);
         plugin.addCommand(command);
     }

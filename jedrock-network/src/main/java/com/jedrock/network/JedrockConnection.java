@@ -122,6 +122,11 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void sendTabComplete(java.util.List<String> matches) {
+        protocolHandler.sendTabComplete(this, matches);
+    }
+
+    @Override
     public void showHeldItem(long entityId, int state) {
         protocolHandler.showHeldItem(this, entityId, state);
     }
