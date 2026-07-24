@@ -79,14 +79,14 @@ class PluginManagerTest {
     }
 
     /**
-     * A Rhino trap worth pinning, because it has already cost this project one bug (script command args)
-     * and every enum-carrying event walks into it: a {@code String} returned <em>from Java</em> is not
-     * strictly equal to a JS string literal, so {@code e.getTo().name() === 'THUNDER'} is silently false
-     * and the {@code if} around a listener's real work never runs. Loose {@code ==}, an explicit
-     * {@code String(…)} cast, and comparing the enum constants themselves all behave.
+     * The Rhino trap this project used to have, now closed and pinned so it stays closed: a {@code String}
+     * returned <em>from Java</em> was wrapped, and a wrapper is never {@code ===} a JS literal, so
+     * {@code e.getTo().name() === 'THUNDER'} was silently false and the {@code if} around a listener's
+     * real work never ran. The script scope now disables primitive wrapping, so all four comparisons
+     * agree — which is what a script author expects and what the command-args path already did by hand.
      */
     @Test
-    void aJavaStringFromAnEnumIsNotStrictlyEqualToAJsString(@TempDir Path dir) {
+    void aJavaStringFromAnEnumComparesStrictlyEqualToAJsString(@TempDir Path dir) {
         EventBus bus = new EventBus();
         PluginManager plugins = manager(bus, dir);
         plugins.loadSource("cmp.js",
@@ -101,8 +101,8 @@ class PluginManagerTest {
         PlayerChatEvent event = new PlayerChatEvent(null, "");
         bus.post(event);
 
-        assertEquals("strict=false loose=true cast=true enum=true", event.getMessage(),
-                "=== against a Java string is the trap; the other three are the ways out");
+        assertEquals("strict=true loose=true cast=true enum=true", event.getMessage(),
+                "a Java-returned string reaches scripts as a JS primitive, so === behaves");
     }
 
     @Test

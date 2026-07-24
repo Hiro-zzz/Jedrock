@@ -3,10 +3,15 @@
 // ============================================================================
 //
 // Drop a .js file in this folder and it loads on start; save an edit and it hot-reloads within a second,
-// no restart. Six globals are in scope:
+// no restart. Nine globals are in scope:
 //
 //   server     — the server: players, worlds, broadcast, puppets, holograms, status.
-//   events     — events.on(name, fn): subscribe to a built-in event (25 below) OR a custom, script-defined
+//   world      — the shared world: getBlock / setBlock / fill / getHighestY / getBiome / spawn / weather /
+//                playSound / spawnParticle. Edits render live on every client, cross-edition.
+//   entities   — spawn and drive puppets, props and labels; group() builds a scene. See /guard and /decor.
+//   storage    — the only thing that survives a restart: get / set / has / remove / keys / size / clear,
+//                plus forPlayer(p) for per-player state. Strings, numbers, booleans, objects and arrays.
+//   events     — events.on(name, fn): subscribe to a built-in event (28 below) OR a custom, script-defined
 //                one (any other name). Built-in handlers get the real Java event (getters/setters, cancel);
 //                custom handlers get {getName, getData, cancel, isCancelled}. events.emit(name, data) fires a
 //                custom event to every listener and returns it (read data / isCancelled back).
@@ -28,6 +33,38 @@ console.log('test plugin loading — wiring every hook');
 
 // Live counters, reported by /teststats.
 var stats = { events: {}, packetsIn: 0, packetsOut: 0 };
+
+// ============================================================================
+//  STORAGE — the only state that outlives the process (and a hot-reload).
+// ============================================================================
+
+// Counting boots is the smallest thing that proves it: this survives a restart, the counters above don't.
+storage.set('boots', storage.get('boots', 0) + 1);
+console.log('this is boot #' + storage.get('boots'));
+
+// /seen — per-player state, keyed by uuid so it follows a rename. Objects and arrays are stored as JSON
+// and handed back as real values, so `.when` below is a number, not a string that looks like one.
+commands.register('seen', function (player, args) {
+    var mine = storage.forPlayer(player);
+    var last = mine.get('lastSeen');                     // undefined on a first visit
+    if (last) {
+        var ago = Math.round((Date.now() - last.when) / 1000);
+        player.sendMessage('{gray}Last seen {white}' + ago + 's{gray} ago, at '
+            + last.x + ', ' + last.y + ', ' + last.z);
+    } else {
+        player.sendMessage('{gray}First time here — noted.');
+    }
+    var at = player.getLocation();
+    mine.set('lastSeen', { when: Date.now(), x: Math.round(at.x()), y: Math.round(at.y()), z: Math.round(at.z()) });
+    mine.set('visits', (mine.get('visits', 0)) + 1);
+    player.sendMessage('{gray}Visits: {white}' + mine.get('visits'));
+});
+
+// /forget — clears just this player's slice; the plugin's own keys (like 'boots') are untouched.
+commands.register('forget', function (player, args) {
+    storage.forPlayer(player).clear();
+    player.sendMessage('{gray}Forgotten.');
+});
 function bump(name) { stats.events[name] = (stats.events[name] || 0) + 1; }
 
 // ============================================================================
@@ -166,12 +203,10 @@ events.on('WeatherChange', function (e) {               // from / to; setTo redi
     bump('WeatherChange');
     // Every way in lands here: /weather, world.setWeather, or the Java api. Nothing has been sent to a
     // client yet, so cancelling leaves no trace — and setTo redirects instead of refusing.
-    // CAREFUL: a String that came from Java is NOT === a JS string, so `e.getTo().name() === 'THUNDER'`
-    // is silently false. Compare the enum constants (below), use ==, or wrap in String(...).
-    if (e.getTo() == Weather.THUNDER) {
+    if (e.getTo().name() === 'THUNDER') {               // strings from Java compare with === as you'd expect
         e.setTo(Weather.RAIN);                          // no storms on this server
     }
-    console.log('sky:', String(e.getFrom().name()), '->', String(e.getTo().name()));
+    console.log('sky:', e.getFrom().name(), '->', e.getTo().name());
 });
 
 // ============================================================================

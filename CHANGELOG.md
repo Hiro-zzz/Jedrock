@@ -86,6 +86,38 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Persistent storage for scripts — the `storage` global.** The last thing the platform-API roadmap was
+  waiting on: until now a plugin's state died with the process, which ruled out scores, homes, statistics
+  and saved scenes — everything a server actually remembers.
+  Every plugin gets a private store: `get(key[, fallback])` / `set` / `has` / `remove` / `keys` / `size` /
+  `clear`, plus **`forPlayer(player)`**, a view of the same store narrowed to one player and keyed by uuid
+  so it follows a rename. Keys are bucketed per plugin *name*, which gives two properties worth stating:
+  two scripts can both keep a `count` without meeting, and data belongs to the name rather than to the
+  loaded instance, so a hot-reload — which tears down listeners, tasks, commands and entities — leaves the
+  memory alone.
+  Values are deliberately few. A string, a number and a boolean are stored as themselves; a JS object or
+  array is rendered through the script's own `JSON.stringify` and handed back through `JSON.parse`, so a
+  saved arrangement returns as a real value and not text that resembles one. Anything else — a function, a
+  Java object — is refused loudly rather than persisted as nonsense, and `set(key, null)` removes the key,
+  since there is no useful difference on disk between "absent" and "nothing". Nothing is executed to read
+  the file back.
+  Written the way the world is written: one DEFLATE stream in `plugin-storage.jdb`, a dirty flag so an
+  untouched store is never rewritten, and an atomic temp-and-move so a crash mid-write cannot destroy what
+  was already saved. Strings are length-prefixed UTF-8 rather than `writeUTF`, whose two-byte length caps
+  a value at 64 KB — small for a serialized scene, which is one of the things this exists to hold. Loaded
+  before any script can ask for it, flushed by the same autosave that persists the world, and once more at
+  shutdown *after* `onDisable`, so a script's parting write is included. `plugins` in the console now
+  reports the store's size. Try `/seen` and `/forget` in `plugins/example.js`.
+
+- **Scripts now see Java strings, numbers and booleans as JS primitives.** Found while building the store,
+  by the test for its most ordinary case — `storage.get('mode') === 'hard'` was false. Rhino wraps values
+  returned from Java by default, and a wrapper is never `===` a JS literal, so `player.getName() ===
+  'Alice'` and `e.getTo().name() === 'THUNDER'` were silently false too: a bug that reads as a logic error
+  and hides in whichever branch never runs. The script scope now disables primitive wrapping, which is
+  what the command-args path had already arranged by hand for exactly this reason — the comment there
+  spelled out the right answer, it just wasn't applied to the rest of the surface. The test added last
+  round to *document* the trap now asserts it is gone.
+
 - **Events for weather and equipment — the event model catches up with the features.** Three additions
   close the gap the roadmap named: the sky and a player's gear could both be changed, but nothing could
   subscribe to either.

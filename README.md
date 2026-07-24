@@ -230,14 +230,30 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   plugin's ticking costs one scheduled task. Try `/guard`.
 
 - ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
-  backend, not the compiled core: a script gets eight globals — `server` / `events` / `scheduler` /
-  `commands` / `packets` / `world` / `entities` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
+  backend, not the compiled core: a script gets nine globals — `server` / `events` / `scheduler` /
+  `commands` / `packets` / `world` / `entities` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
   name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
   work (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too
   — `player.isOp()`, `player.hasPermission('node')`, `player.getPrefix()`. A saved edit reloads within a
   second. Rhino (~1.5 MB, pure Java, zero transitive deps) was chosen over GraalJS for weight; it lives only
   in `core`. See `plugins/example.js`.
+
+- ✅ **Persistent script storage — the one thing that outlives the process.** A ninth global, `storage`,
+  gives every plugin a private key/value store that survives a restart *and* a hot-reload: `get(key[,
+  fallback])` / `set` / `has` / `remove` / `keys` / `size` / `clear`, plus `forPlayer(player)` for the
+  shape most script state actually has (keyed by uuid, so it follows a rename). Strings, numbers and
+  booleans are stored as themselves; a JS object or array goes through the script's own `JSON.stringify`
+  and comes back through `JSON.parse`, so a saved arrangement returns as a real value rather than text
+  that looks like one — and a function is refused loudly instead of persisted as nonsense. Data is
+  bucketed per plugin name, so two scripts can both keep a `count` without meeting, and editing a script
+  never costs it its memory. Written like the world is: a compact DEFLATE file (`plugin-storage.jdb`),
+  atomic temp-and-move, a dirty flag that skips rewriting an untouched store, flushed by the same autosave
+  and once more at shutdown. Try `/seen` and `/forget` in `plugins/example.js`. It also closed a real
+  scripting-layer bug on the way: a `String` returned *from Java* used to reach scripts wrapped, and a
+  wrapper is never `===` a JS literal, so `player.getName() === 'Alice'` was silently false. Script scopes
+  now hand Java strings, numbers and booleans over as JS primitives — which the command-args path had
+  already done by hand for exactly this reason.
 
 - ✅ **World-interaction API.** The shared world is editable from code exactly like a player edits it:
   `CoreWorld` publishes every committed block write to a change listener the server wires to all online
@@ -541,15 +557,16 @@ simulation stays out (see non-goals).
   hot-reloadable **JavaScript** plugins (`plugins/*.js`) on a **Rhino** backend, not the compiled core.
   Rhino (`rhino-runtime`, ~1.5 MB, pure Java, zero transitive deps) was chosen over GraalJS (tens of MB
   incl. ICU4J) to keep the tree lean; it lives only in `core`, so the `api` stays runtime-neutral. That
-  gate is what the rest of the roadmap waited on, and the surface behind it has kept growing — eight
+  gate is what the rest of the roadmap waited on, and the surface behind it has kept growing — nine
   globals now (`server` / `events` / `scheduler` / `commands` / `packets` / `world` / `entities` /
-  `console`), covering custom events, `/slash` commands, scheduling, raw packet taps, block editing,
+  `storage` / `console`), covering custom events, `/slash` commands, scheduling, raw packet taps, block editing,
   weather, sounds and particles, and **programmable entities** (see [What works today](#what-works-today)).
   The event model has since caught up with the newer features: **weather** (`WeatherChange`, cancellable and
   redirectable, posted by the world itself so `/weather`, a script and the api all pass through it) and
   **equipment** (`PlayerArmorChange` and `PlayerHeldItemChange`, whatever the piece came from — a creative
-  drag, a survival window click, or `setArmor` from code). What it still wants: **persistent storage** for
-  scripts (state dies with a restart today).
+  drag, a survival window click, or `setArmor` from code). And **script state now survives a restart** —
+  the `storage` global, the last thing this section was waiting on (see [What works today](#what-works-today)).
+  What it still wants: **typed command arguments** and tab-completion.
 - **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
   **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
   cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry

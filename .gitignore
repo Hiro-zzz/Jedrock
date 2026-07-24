@@ -46,3 +46,6 @@ build/
 # Server operator list and group permissions, written at runtime.
 /ops.txt
 /permissions.txt
+# What script plugins remembered between restarts, written at runtime.
+/plugin-storage.jdb
+/plugin-storage.jdb.tmp
