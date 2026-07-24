@@ -8,6 +8,18 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **`Player.getPing()` + chat display names.** Two small QoL API surfaces. *Ping:* JE measures the
+  keep-alive round trip (the ~15 s cadence doubles as a ping probe, recorded when the response lands
+  — the 1.8 handler previously swallowed the response silently); both Bedrock eras read RakNet's own
+  per-session estimate for free; `-1` until known. *Display name:* `getDisplayName()` /
+  `setDisplayName(name)` — a chat-facing nickname that may carry the unified `{color}` / Markdown
+  markup. The chat format's `%name%` now renders the display name; a script-set nickname is authored
+  text and renders **raw** (like the group prefix — coloured nicks are the point), while the default
+  (the real, client-controlled name) stays escaped, so the injection guard holds exactly where the
+  input is untrusted. Identity is untouched everywhere else — commands, tab list, joins, permissions
+  all use the real name. Scripts reach both for free; `/nick` demo + ping in `/test` in
+  `plugins/example.js`. Tested in `CorePlayerIdentityTest`.
+
 - **PE 0.14 creative inventory grew ~100 → ~209 states.** The palette now mirrors the block half of
   PocketMine-MP's own 0.14 creative list (`resources/creativeitems.json` in the 0.14 tree) — the exact
   207 id/meta entries PMMP served to real protocol-45 clients, so every one is battle-tested against

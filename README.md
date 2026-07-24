@@ -172,7 +172,11 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   feedback — the server asks the client to draw text. Handy QoL came with it: `Server.getPlayer(UUID)`,
   `Player.teleport(x, y, z[, yaw, pitch])`, `World.getHighestBlockY(x, z)`, `World.setSpawnLocation(...)`, and
   a full **inventory API** for scripts — `getItem` / `setItem` / `giveItem(state, count)` / `removeItem` /
-  `countItem` / `clearInventory` over the 36 storage slots, each change synced to the client.
+  `countItem` / `clearInventory` over the 36 storage slots, each change synced to the client. Later joined
+  by `Player.getPing()` (JE: the keep-alive round trip; Bedrock: RakNet's own estimate) and **chat display
+  names** — `setDisplayName('{gold}Nick')` restyles `%name%` in chat (authored markup renders raw; the
+  default, client-controlled name stays escaped), while identity everywhere else keeps the real name.
+  Try `/nick` in `plugins/example.js`.
 - ✅ **Damage — fall, void and PvP, cross-edition.** Survival players take damage, all funnelled through one
   server-authoritative path. **Fall damage** works on every edition: Java and PE 0.14 have no client
   fall-report packet, so the server tracks the descent and applies it on landing; PE 1.1.5 reports its own

@@ -370,6 +370,20 @@ public final class CorePlayer implements Player {
         return name;
     }
 
+    /** Chat display name; null = none set, so getDisplayName falls back to the real name. */
+    private volatile String displayName;
+
+    @Override
+    public String getDisplayName() {
+        String shown = displayName;
+        return shown != null ? shown : name;
+    }
+
+    @Override
+    public void setDisplayName(String displayName) {
+        this.displayName = (displayName == null || displayName.isBlank()) ? null : displayName;
+    }
+
     @Override
     public World getWorld() {
         return world;

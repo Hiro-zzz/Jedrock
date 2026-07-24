@@ -157,6 +157,12 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     }
 
     @Override
+    public int getPing() {
+        // RakNet keeps its own connected-ping estimate per session — no game-layer probe needed.
+        return (int) Math.min(Integer.MAX_VALUE, session.getPing());
+    }
+
+    @Override
     public void playSound(com.jedrock.api.world.Sound sound, double x, double y, double z, float volume, float pitch) {
         int evid = PeEffects.levelEventSound113(sound);
         if (evid >= 0) {

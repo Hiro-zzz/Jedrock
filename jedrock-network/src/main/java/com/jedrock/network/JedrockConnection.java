@@ -471,6 +471,25 @@ public class JedrockConnection implements Connection, PlayerConnection {
         this.lastKeepAliveSent = time;
     }
 
+    /** Measured keep-alive round trip, ms; -1 until the first response lands. */
+    private volatile int pingMs = -1;
+
+    /**
+     * The client answered a keep-alive: the gap since the last one we sent is the round trip. JE
+     * clients answer promptly, so the keep-alive cadence (~15 s) doubles as a ping probe.
+     */
+    public void onKeepAliveResponse() {
+        long sent = lastKeepAliveSent;
+        if (sent > 0) {
+            pingMs = (int) Math.min(Integer.MAX_VALUE, System.currentTimeMillis() - sent);
+        }
+    }
+
+    @Override
+    public int getPing() {
+        return pingMs;
+    }
+
     @Override
     public boolean isOpen() {
         return open.get() && channel.isOpen();

@@ -161,8 +161,10 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
             if (coreSlot >= 0 && listener != null) {
                 listener.onCreativeSetSlot(connection, coreSlot, state, count);
             }
+        } else if (id == SB_KEEP_ALIVE) {
+            connection.onKeepAliveResponse(); // the round trip is the player's ping
         }
-        // SB_KEEP_ALIVE / SB_HELD_ITEM / SB_CONFIRM_TRANSACTION — accepted, nothing to do.
+        // SB_HELD_ITEM / SB_CONFIRM_TRANSACTION — accepted, nothing to do.
     }
 
     /** 1.8 block placement: face 255 is a use-item; otherwise place the held block at face offset. */

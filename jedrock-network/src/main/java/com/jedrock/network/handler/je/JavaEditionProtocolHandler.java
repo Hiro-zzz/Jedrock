@@ -89,6 +89,7 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     private void handlePlay(int id, LazyPacket lazy, JedrockConnection connection) {
         if (id == ServerboundKeepAlive.PACKET_ID) {
             ServerboundKeepAlive ka = lazy.materialize(ServerboundKeepAlive::fromBuffer);
+            connection.onKeepAliveResponse(); // the round trip is the player's ping
             LOGGER.debug(() -> "KeepAlive response: " + ka.keepAliveId);
         } else if (id == ServerboundChatMessage.PACKET_ID) {
             ServerboundChatMessage chat = lazy.materialize(ServerboundChatMessage::fromBuffer);

@@ -220,6 +220,14 @@ public interface PlayerConnection {
                                double x, double y, double z, int count, double spread) {}
 
     /**
+     * Round-trip latency to the client in milliseconds, or {@code -1} while unknown. JE connections
+     * measure the keep-alive round trip; Bedrock connections read RakNet's own estimate.
+     */
+    default int getPing() {
+        return -1;
+    }
+
+    /**
      * Close the connection.
      */
     void close(String reason);

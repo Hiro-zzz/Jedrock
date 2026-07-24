@@ -203,6 +203,12 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     }
 
     @Override
+    public int getPing() {
+        // RakNet keeps its own connected-ping estimate per session — no game-layer probe needed.
+        return (int) Math.min(Integer.MAX_VALUE, session.getPing());
+    }
+
+    @Override
     public void playSound(com.jedrock.api.world.Sound sound, double x, double y, double z, float volume, float pitch) {
         // 0.14 has LevelEvent only; sounds it predates map to the closest available id (see PeEffects).
         // The data field carries pitch×1000 (PMMP GenericSound, identical in the 0.14 tree); no volume slot.

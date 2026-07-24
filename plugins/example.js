@@ -169,7 +169,9 @@ commands.register('test', function (player, args) {
 
     player.sendMessage('{gold}== Player ==');
     player.sendMessage(' name={white}' + player.getName() + '{gray} id={white}' + player.getEntityId());
-    player.sendMessage(' address={white}' + player.getAddress());
+    player.sendMessage(' address={white}' + player.getAddress()
+        + '{gray} ping={white}' + player.getPing() + 'ms');
+    player.sendMessage(' displayName={white}' + player.getDisplayName());
     player.sendMessage(' health={white}' + player.getHealth() + '/' + player.getMaxHealth()
         + '{gray} gamemode={white}' + player.getGameMode().name());
     player.sendMessage(' pose: sneak={white}' + player.isSneaking()
@@ -327,6 +329,18 @@ commands.register('pillar', function (player, args) {
     var meta = args.length > 0 ? parseInt(args[0], 10) || 0 : 14; // default red wool
     for (var i = 0; i < 4; i++) world.setBlock(x, base + i, z, Blocks.WOOL, meta);
     player.sendMessage('{green}Wool pillar at {white}' + x + ',' + base + ',' + z);
+});
+
+// /nick [name…] — a coloured chat nickname (displayName demo); no args resets it.
+commands.register('nick', function (player, args) {
+    if (args.length === 0) {
+        player.setDisplayName(null);
+        player.sendMessage('{gray}Nickname reset to {white}' + player.getName());
+    } else {
+        var nick = args.join(' ');
+        player.setDisplayName('{gold}' + nick + '{reset}');
+        player.sendMessage('{green}You now chat as {gold}' + nick);
+    }
 });
 
 // /fx [boom] — sounds + particles at your feet, rendered per edition (effects API demo).
