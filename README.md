@@ -81,9 +81,16 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
 - ✅ **Bedrock creative inventory + flight** — the PE creative menu is filled via `ContainerSetContent`:
   **1.1.5** (protocol-113, 0x34) gets a variant-rich legacy palette (~170 states — every wool /
   terracotta / carpet colour, wood and stone type), and **0.14** (protocol-45, 0xb9), which previously
-  had no creative menu, gets its own narrower, 0.14-safe block set (the old client crashes on an id it
-  can't render). The player can fly (fixed `AdventureSettings`), and a movement-speed attribute kills the
-  runaway acceleration.
+  had no creative menu, gets a palette that **mirrors PocketMine-MP's own 0.14 creative list**
+  (~323 states: stone/quartz variants, all stairs and slabs, fences + gates, trapdoors, walls, flowers,
+  saplings, carpets, torch, ladder, spawner… plus the item half — all five tool/weapon tiers, four
+  armor sets, bow, food and materials) — every id/meta battle-tested against this exact client
+  generation, because the old client crashes on an id it can't render; anything item-shaped sent to
+  0.14 passes one crash gate that turns an unknown id into an empty slot. Items are inert (held /
+  stored — no durability, crafting or eating; a door doesn't place). The **player-inventory sync**
+  (window 0 + the hotbar-link table) landed with it, so the inventory API (`giveItem`, `/inv`, survival
+  pickup) now works on 0.14 too. The player can fly (fixed `AdventureSettings`), and a movement-speed
+  attribute kills the runaway acceleration.
 - ✅ **Block metadata (variants)** — the world stores a packed `(id << 4) | meta` state per cell, so
   wool colours, wood/stone types and the like are preserved and rendered distinctly on both editions.
   Placement reads the variant from the held item (JE creative damage, Bedrock item aux); chunks carry

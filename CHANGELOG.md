@@ -8,6 +8,37 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **PE 0.14 creative inventory grew ~100 → ~209 states.** The palette now mirrors the block half of
+  PocketMine-MP's own 0.14 creative list (`resources/creativeitems.json` in the 0.14 tree) — the exact
+  207 id/meta entries PMMP served to real protocol-45 clients, so every one is battle-tested against
+  the client generation that crashes on an unknown id — plus the two extras (farmland, note block)
+  validated against a real client earlier. New in the menu: stone variants (granite / diorite /
+  andesite + polished), stone bricks, podzol, redstone ore, all twelve stairs, stone + wooden slabs,
+  fences with wood-type metas + all six fence gates, both trapdoors, cobblestone walls, lily pad,
+  vines, ladder, torch, flowers, saplings, tall grass / fern / dead bush, mushrooms, hay bale, all
+  sixteen carpets, monster spawner, enchanting table, stonecutter, end portal frame and the anvil.
+  Since `supports()` derives from the palette, the 0.14 **chunk serializer now renders these blocks
+  too** when a Java / 1.1.5 player places them, instead of filtering them to air — cross-play parity
+  widened. (The wood-slab legacy hole at `44:2` is skipped exactly as PMMP skips it.) Pinned in
+  `Pe014BlocksTest` (≥320 states, carpet/fence metas, all stairs, the 44:2 hole, exotics still rejected).
+
+- **PE 0.14 weapons, tools & items + a working inventory API.** Two finds fixed together:
+  `PeSession014` never implemented `setInventory` / `setInventorySlot` (silent no-op defaults), so the
+  whole inventory API — scripts' `giveItem` / `setItem` / `clearInventory`, survival mining pickup, the
+  `/inv` demo — did nothing on a 0.14 client. Both now speak the PMMP wire shape: window-0
+  `ContainerSetContent` with the 36 storage slots **and the 9-entry `i + 9` hotbar-link table** (without
+  which the client leaves its hotbar HUD empty), and single-slot `ContainerSetSlot` for live HUD
+  refreshes (`Pe014InventoryEncodingTest`). On top of that the 0.14 creative menu gains the **item half
+  of PMMP's own 0.14 list** (`Pe014Items`, ~114 entries): all five tool/weapon tiers, the four armor
+  sets, bow/rod/shears/clock/compass, food, and materials — minus exactly one PMMP entry, the spawn egg
+  (`383:17`), whose meta overflows the canonical 4-bit state. (1.1.5 already had its richer item menu.)
+  Items are **inert** (held / stacked / chest-stored; no durability, crafting or eating), and a
+  "placeable" item (door, bed) doesn't place — the 0.14 use-item path now also **corrects the client's
+  optimistic ghost** with the true block instead of silently dropping the attempt. Every item-shaped
+  slot sent to 0.14 passes one crash gate (`safeState`): a block outside the renderable set or an item
+  outside the classic set (a 1.1.5 ender pearl in a shared chest, a JE elytra) renders as an empty slot
+  instead of crashing the old client.
+
 - **Sounds and particles, cross-edition.** Canonical `Sound` (12: click, door, fizz, bow, teleport,
   anvils, explode, levelup, pop, orb, note) and `Particle` (20: poof, huge explosion, bubble, splash,
   crit, smokes, drips, villager moods, note, portal, enchantment, flame, lava, redstone, snowball,
