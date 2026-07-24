@@ -373,9 +373,15 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         if (listener.onUseBlock(this, x, y, z)) {
             return;
         }
-        if (face < 6 && state != Blocks.AIR && Blocks.isKnown(Blocks.idOf(state))) {
-            listener.onBlockChange(this,
-                    x + FACE_DX[face], y + FACE_DY[face], z + FACE_DZ[face], state);
+        if (face < 6 && state != Blocks.AIR) {
+            int tx = x + FACE_DX[face], ty = y + FACE_DY[face], tz = z + FACE_DZ[face];
+            if (Blocks.isKnown(Blocks.idOf(state))) {
+                listener.onBlockChange(this, tx, ty, tz, state);
+            } else {
+                // An item "placement" (a door, a bed…): nothing places server-side — items are inert —
+                // but the client may have drawn something optimistically, so correct it with the truth.
+                sendBlockChange(tx, ty, tz, world.getBlockId(tx, ty, tz));
+            }
         }
     }
 
@@ -403,6 +409,18 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         sendWrapped(b -> Mcpe014Packets.containerOpen(b, windowId, 0, slots, x, y, z));
     }
 
+    /**
+     * The crash gate for anything item-shaped sent to the 0.14 client (inventory, chests): a block id
+     * outside the renderable set — or an item id outside the classic 0.14 set — becomes air. A richer
+     * edition's exotics (an ender pearl from the 1.1.5 menu, an elytra from a JE client) thus show as
+     * an empty slot here instead of crashing this client.
+     */
+    private static int safeState(int state) {
+        int id = Blocks.idOf(state);
+        boolean renderable = id <= Blocks.MAX_LEGACY_ID ? Pe014Blocks.supports(id) : Pe014Items.supports(id);
+        return renderable ? state : Blocks.AIR;
+    }
+
     @Override
     public void setWindowItems(int windowId, int[] states, int[] counts) {
         // ContainerSetContent (0xb9) for the chest window (just its own slots; the player inventory is
@@ -412,11 +430,27 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
             b.writeByte(windowId);
             b.writeShort(states.length);
             for (int i = 0; i < states.length; i++) {
-                int state = Pe014Blocks.supports(Blocks.idOf(states[i])) ? states[i] : Blocks.AIR;
-                Mcpe014Packets.writeSlot(b, state, counts[i]);
+                Mcpe014Packets.writeSlot(b, safeState(states[i]), counts[i]);
             }
             b.writeShort(0); // hotbar-link count
         });
+    }
+
+    @Override
+    public void setInventory(int[] states, int[] counts) {
+        // The player's own inventory (window 0) with the 9-entry hotbar-link table — the core's 36
+        // storage slots (0-8 hotbar / 9-35 main) map 1:1 onto the 0.14 window.
+        int[] safe = new int[states.length];
+        for (int i = 0; i < states.length; i++) {
+            safe[i] = safeState(states[i]);
+        }
+        sendWrapped(b -> Mcpe014Packets.playerInventory(b, safe, counts));
+    }
+
+    @Override
+    public void setInventorySlot(int slot, int state, int count) {
+        sendWrapped(b -> Mcpe014Packets.containerSetSlot(
+                b, Mcpe014Packets.WINDOW_ID_PLAYER, slot, safeState(state), count));
     }
 
     /** The client moved an item in a container (inbound ContainerSetSlot 0xb7 — client-authoritative). */

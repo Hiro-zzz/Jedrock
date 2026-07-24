@@ -27,18 +27,50 @@ class Pe014BlocksTest {
     @Test
     void paletteIsConservativeSafeAndSupported() {
         int[] palette = Pe014Blocks.creativePalette();
-        assertTrue(palette.length > 50, "a usable 0.14 palette (" + palette.length + ")");
+        // The palette mirrors PMMP's own 0.14 creativeitems.json: 207 block entries + 2 client-validated
+        // extras + ~114 item entries — a real 0.14 creative menu's worth.
+        assertTrue(palette.length >= 320, "the PMMP-mirrored 0.14 palette (" + palette.length + ")");
 
         Set<Integer> states = new HashSet<>();
         for (int state : palette) {
             int id = Blocks.idOf(state);
-            assertTrue(id >= 1 && id <= 255, "id in the legacy byte range: " + id);
-            assertTrue(Pe014Blocks.supports(id), "every menu block is also world-supported: " + id);
+            if (id <= Blocks.MAX_LEGACY_ID) {
+                assertTrue(Pe014Blocks.supports(id), "every menu block is also world-supported: " + id);
+            } else {
+                assertTrue(Pe014Items.supports(id), "every menu item is in the 0.14-safe item set: " + id);
+                assertFalse(Pe014Blocks.supports(id), "the chunk gate stays block-only: " + id);
+            }
             assertTrue(states.add(state), "no duplicate state: " + state);
         }
         for (int meta = 0; meta < 16; meta++) {
             assertTrue(states.contains(Blocks.state(35, meta)), "wool colour meta " + meta);
+            assertTrue(states.contains(Blocks.state(171, meta)), "carpet colour meta " + meta);
         }
+        for (int meta = 0; meta < 6; meta++) {
+            assertTrue(states.contains(Blocks.state(85, meta)), "fence wood type meta " + meta);
+        }
+        for (int stairs : new int[]{53, 67, 108, 109, 114, 128, 134, 135, 136, 156, 163, 164}) {
+            assertTrue(states.contains(Blocks.state(stairs, 0)), "stairs id " + stairs);
+        }
+        assertTrue(states.contains(Blocks.state(44, 0)) && !states.contains(Blocks.state(44, 2)),
+                "stone slabs present, but not meta 2 (the legacy wood-slab hole PMMP also skips)");
+    }
+
+    @Test
+    void itemHalfIsTheBattleTestedClassicSet() {
+        Set<Integer> items = new HashSet<>();
+        for (int state : Pe014Items.creativeItems()) {
+            int id = Blocks.idOf(state);
+            assertTrue(id > Blocks.MAX_LEGACY_ID && id < 512, "an item id: " + id);
+            assertTrue(items.add(state), "no duplicate item state: " + state);
+        }
+        for (int classic : new int[]{267, 276, 261, 310, 364, 260, 331, 280}) { // iron/diamond sword, bow,
+            assertTrue(Pe014Items.supports(classic), "classic item " + classic);  // armor, steak, apple…
+        }
+        assertTrue(!items.contains(Blocks.state(383, 1)) && !Pe014Items.supports(383),
+                "the spawn egg is dropped (its meta 17 overflows the 4-bit canonical state)");
+        assertTrue(!Pe014Items.supports(368) && !Pe014Items.supports(369),
+                "1.1.5-only items (ender pearl, blaze rod) stay out of the 0.14 set");
     }
 
     @Test

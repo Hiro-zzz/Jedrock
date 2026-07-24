@@ -111,6 +111,7 @@ public final class Mcpe014Packets {
 
     // ContainerSetContent window ids (PocketMine protocol 45: SPECIAL_INVENTORY=0, SPECIAL_CREATIVE=0x79).
     public static final int WINDOW_ID_CREATIVE = 0x79;
+    public static final int WINDOW_ID_PLAYER = 0;      // the player's own inventory window
 
     // FullChunkData order.
     public static final int ORDER_COLUMNS = 0;
@@ -414,6 +415,38 @@ public final class Mcpe014Packets {
             writeSlot(b, state, count);
         }
         b.writeShort(0); // hotbar-link count (none)
+    }
+
+    /**
+     * ContainerSetContent (0xb9) for the player's own inventory (window 0), PMMP-shaped
+     * ({@code PlayerInventory::sendContents} in the 0.14 tree): window id, short count = the 36
+     * storage slots, the slots, then the 9-entry hotbar-link table — short count 9 followed by int
+     * links {@code i + 9} (the identity map PMMP sends the holder). Without the links the client
+     * fills storage but leaves its hotbar HUD empty.
+     */
+    public static void playerInventory(ByteBuf b, int[] states, int[] counts) {
+        b.writeByte(ID_CONTAINER_SET_CONTENT);
+        b.writeByte(WINDOW_ID_PLAYER);
+        b.writeShort(states.length);
+        for (int i = 0; i < states.length; i++) {
+            writeSlot(b, states[i], counts[i]);
+        }
+        b.writeShort(9);
+        for (int i = 0; i < 9; i++) {
+            b.writeInt(i + 9);
+        }
+    }
+
+    /**
+     * ContainerSetSlot (0xb7) outbound — one slot update, which refreshes the hotbar HUD live.
+     * PMMP-shaped: window id (byte), slot (short), hotbarSlot (short, 0 — PMMP's default), item.
+     */
+    public static void containerSetSlot(ByteBuf b, int windowId, int slot, int state, int count) {
+        b.writeByte(ID_CONTAINER_SET_SLOT);
+        b.writeByte(windowId);
+        b.writeShort(slot);
+        b.writeShort(0);
+        writeSlot(b, state, count);
     }
 
     /**
