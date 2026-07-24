@@ -31,6 +31,7 @@ public final class Mcpe014Packets {
     public static final int ID_MOVE_PLAYER = 0x9d;
     public static final int ID_REMOVE_BLOCK = 0x9e;
     public static final int ID_UPDATE_BLOCK = 0x9f;
+    public static final int ID_LEVEL_EVENT = 0xa2;  // outbound: world effects — 1000-series sounds, 0x4000|particle
     public static final int ID_ENTITY_EVENT = 0xa4; // outbound: one-shot entity event (hurt animation etc.)
     public static final int ID_INTERACT = 0xa9;    // inbound: attack / interact with an entity
     public static final int ID_USE_ITEM = 0xaa;
@@ -188,6 +189,21 @@ public final class Mcpe014Packets {
         b.writeByte(ID_ENTITY_EVENT);
         b.writeLong(eid);
         b.writeByte(event);
+    }
+
+    /**
+     * LevelEvent (0xa2) — a world effect at a position: a 1000-series sound id, or
+     * {@code 0x4000 | particle type} for one particle. Layout, verbatim from the 0.14-era PMMP
+     * {@code LevelEventPacket}: event id (short), position (3 × float), data (int — pitch×1000 for
+     * sounds, 0 for particles). All big-endian, like the rest of the 0.14 wire.
+     */
+    public static void levelEvent(ByteBuf b, int evid, double x, double y, double z, int data) {
+        b.writeByte(ID_LEVEL_EVENT);
+        b.writeShort(evid);
+        b.writeFloat((float) x);
+        b.writeFloat((float) y);
+        b.writeFloat((float) z);
+        b.writeInt(data);
     }
 
     /** FullChunkData header; append the {@code data} blob after this. */

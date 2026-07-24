@@ -51,6 +51,17 @@ public interface Player extends Entity, CommandSender {
         teleport(new Location(getWorld(), x, y, z, yaw, pitch));
     }
 
+    /** Play a canonical sound to this player only, at their own position (a private UI ding). */
+    default void playSound(com.jedrock.api.world.Sound sound) {
+        playSound(sound, 1.0f, 1.0f);
+    }
+
+    /** As {@link #playSound(com.jedrock.api.world.Sound)} with explicit volume and pitch (both 1 = normal). */
+    default void playSound(com.jedrock.api.world.Sound sound, float volume, float pitch) {
+        Location at = getLocation();
+        getConnection().playSound(sound, at.x(), at.y(), at.z(), volume, pitch);
+    }
+
     GameMode getGameMode();
 
     void setGameMode(GameMode gameMode);

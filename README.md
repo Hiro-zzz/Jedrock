@@ -218,6 +218,14 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   (or the 0–255 Y range) are dropped at the storage boundary, so no API path can grow the world past its
   edge. Try `/deck` and `/pillar` in `plugins/example.js`.
 
+- ✅ **Sounds and particles, cross-edition.** Canonical `Sound` (12) and `Particle` (20) enums render
+  natively on every protocol: JE uses Named Sound Effect with each era's own sound names and the shared
+  World Particles id table; PE 1.1.5 uses LevelEvent 1000-series ids (plus LevelSoundEvent for explode /
+  level-up / note); PE 0.14 uses its big-endian LevelEvent with its own particle table — sounds it
+  predates fall back to the closest available id, so a call always makes *a* sound. The API is
+  `world.playSound(...)` / `world.spawnParticle(...)` (broadcast) and `player.playSound(...)` (a private
+  ding); scripts pass names: `world.spawnParticle('heart', x, y, z, 12, 0.8)`. Try `/fx boom`.
+
 Not yet: a real chest <em>window</em> on Bedrock 1.1.5 (click-transfer is the interim), cross-edition skin
 fidelity (a signed-texture limit, see above), knockback (deliberately — the server simulates no physics).
 See [Roadmap](#roadmap).

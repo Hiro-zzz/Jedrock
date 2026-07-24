@@ -157,6 +157,70 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     }
 
     @Override
+    public void playSound(com.jedrock.api.world.Sound sound, double x, double y, double z, float volume, float pitch) {
+        int evid = PeEffects.levelEventSound113(sound);
+        if (evid >= 0) {
+            // LevelEvent sounds carry pitch in the data field ×1000 (PMMP GenericSound); no volume slot.
+            int data = Math.round(pitch * 1000f);
+            sendGameBatch(b -> writeLevelEvent(b, evid, x, y, z, data));
+        } else {
+            int soundId = PeEffects.levelSound113(sound);
+            sendGameBatch(b -> writeLevelSoundEvent(b, soundId, x, y, z));
+        }
+    }
+
+    /** PE draws one particle per LevelEvent packet — cap a burst so a script can't flood the wire. */
+    private static final int MAX_PARTICLE_BURST = 32;
+
+    @Override
+    public void spawnParticle(com.jedrock.api.world.Particle particle, double x, double y, double z,
+                              int count, double spread) {
+        int evid = PeEffects.ADD_PARTICLE_MASK | PeEffects.particle113(particle);
+        int n = Math.min(Math.max(1, count), MAX_PARTICLE_BURST);
+        java.util.concurrent.ThreadLocalRandom rnd = java.util.concurrent.ThreadLocalRandom.current();
+        for (int i = 0; i < n; i++) {
+            final double px = x + offset(rnd, spread), py = y + offset(rnd, spread), pz = z + offset(rnd, spread);
+            sendGameBatch(b -> writeLevelEvent(b, evid, px, py, pz, 0));
+        }
+    }
+
+    /** A uniform scatter in ±spread (0 spread → exactly at the point). */
+    private static double offset(java.util.concurrent.ThreadLocalRandom rnd, double spread) {
+        return spread <= 0 ? 0 : (rnd.nextDouble() * 2.0 - 1.0) * spread;
+    }
+
+    /**
+     * Write one LevelEvent (0x1a) packet. Layout, verbatim from PMMP {@code LevelEventPacket} at
+     * protocol 113: event id (signed varint — a 1000-series sound or {@code 0x4000 | particle type}),
+     * position (Vector3f = 3 LE floats), data (signed varint — pitch×1000 for sounds, 0 for particles).
+     */
+    static void writeLevelEvent(ByteBuf b, int evid, double x, double y, double z, int data) {
+        ByteBufUtils.writeVarInt(b, ID_LEVEL_EVENT);
+        ByteBufUtils.writeSignedVarInt(b, evid);
+        b.writeFloatLE((float) x);
+        b.writeFloatLE((float) y);
+        b.writeFloatLE((float) z);
+        ByteBufUtils.writeSignedVarInt(b, data);
+    }
+
+    /**
+     * Write one LevelSoundEvent (0x19) packet. Layout, verbatim from PMMP {@code LevelSoundEventPacket}
+     * at protocol 113: sound (byte), position (Vector3f), extraData (signed varint, -1 = none), pitch
+     * (signed varint, 1 = normal), isBabyMob (bool), disableRelativeVolume (bool).
+     */
+    static void writeLevelSoundEvent(ByteBuf b, int soundId, double x, double y, double z) {
+        ByteBufUtils.writeVarInt(b, ID_LEVEL_SOUND_EVENT);
+        b.writeByte(soundId);
+        b.writeFloatLE((float) x);
+        b.writeFloatLE((float) y);
+        b.writeFloatLE((float) z);
+        ByteBufUtils.writeSignedVarInt(b, -1);
+        ByteBufUtils.writeSignedVarInt(b, 1);
+        b.writeBoolean(false);
+        b.writeBoolean(false);
+    }
+
+    @Override
     public void addToTab(UUID uuid, String name) {
         // The PE pause-menu list is fed by showPlayer's PlayerList entry (it needs an entity id +
         // skin, which this signature doesn't carry). No separate tab packet.

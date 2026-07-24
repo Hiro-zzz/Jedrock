@@ -117,6 +117,16 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void playSound(com.jedrock.api.world.Sound sound, double x, double y, double z, float volume, float pitch) {
+        protocolHandler.playSound(this, sound, x, y, z, volume, pitch);
+    }
+
+    @Override
+    public void spawnParticle(com.jedrock.api.world.Particle particle, double x, double y, double z, int count, double spread) {
+        protocolHandler.spawnParticle(this, particle, x, y, z, count, spread);
+    }
+
+    @Override
     public void sendActionBar(String text) {
         protocolHandler.sendActionBar(this, text);
     }

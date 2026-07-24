@@ -329,6 +329,20 @@ commands.register('pillar', function (player, args) {
     player.sendMessage('{green}Wool pillar at {white}' + x + ',' + base + ',' + z);
 });
 
+// /fx [boom] — sounds + particles at your feet, rendered per edition (effects API demo).
+commands.register('fx', function (player, args) {
+    var loc = player.getLocation();
+    var x = loc.x(), y = loc.y(), z = loc.z();
+    if (args.length > 0 && args[0] === 'boom') {
+        world.playSound('explode', x, y, z);                     // everyone hears it
+        world.spawnParticle('huge_explosion', x, y + 1, z);
+    } else {
+        world.playSound('levelup', x, y, z);
+        world.spawnParticle('villager_happy', x, y + 1, z, 12, 0.8); // a 12-sparkle burst, ±0.8
+    }
+    player.sendMessage('{green}fx! {gray}(try /fx boom)');
+});
+
 // ============================================================================
 //  PACKETS — raw cross-edition wire tap. Counted here; reported by /teststats.
 // ============================================================================

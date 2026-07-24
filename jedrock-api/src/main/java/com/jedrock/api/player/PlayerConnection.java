@@ -203,6 +203,23 @@ public interface PlayerConnection {
     void sendBlockChange(int x, int y, int z, int state);
 
     /**
+     * Ask this client to play a canonical {@link com.jedrock.api.world.Sound} at a world position.
+     * Volume and pitch are best-effort — JE honours both; the PE eras carry pitch only (and not on
+     * every sound). Default no-op so a minimal connection compiles.
+     */
+    default void playSound(com.jedrock.api.world.Sound sound,
+                           double x, double y, double z, float volume, float pitch) {}
+
+    /**
+     * Ask this client to draw a burst of {@code count} canonical
+     * {@link com.jedrock.api.world.Particle}s around a world position, scattered within roughly
+     * {@code spread} blocks. JE draws the burst from one packet; the PE eras get one packet per
+     * particle, so implementations cap the count. Default no-op.
+     */
+    default void spawnParticle(com.jedrock.api.world.Particle particle,
+                               double x, double y, double z, int count, double spread) {}
+
+    /**
      * Close the connection.
      */
     void close(String reason);
