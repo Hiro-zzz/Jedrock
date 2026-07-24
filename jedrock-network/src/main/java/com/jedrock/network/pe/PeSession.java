@@ -162,6 +162,26 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         return (int) Math.min(Integer.MAX_VALUE, session.getPing());
     }
 
+    /** LevelEvent rain/thunder intensity — the mid value the era's servers used; stops send 0. */
+    private static final int WEATHER_INTENSITY = 10000;
+
+    @Override
+    public void sendWeather(com.jedrock.api.world.Weather weather) {
+        // LevelEvent 3001 start rain / 3002 start thunder / 3003 stop rain / 3004 stop thunder.
+        // Weather events carry no coordinates (PMMP: "Weather effects don't have coordinates").
+        switch (weather) {
+            case CLEAR -> sendGameBatch(
+                    b -> writeLevelEvent(b, 3003, 0, 0, 0, 0),
+                    b -> writeLevelEvent(b, 3004, 0, 0, 0, 0));
+            case RAIN -> sendGameBatch(
+                    b -> writeLevelEvent(b, 3001, 0, 0, 0, WEATHER_INTENSITY),
+                    b -> writeLevelEvent(b, 3004, 0, 0, 0, 0));
+            case THUNDER -> sendGameBatch(
+                    b -> writeLevelEvent(b, 3001, 0, 0, 0, WEATHER_INTENSITY),
+                    b -> writeLevelEvent(b, 3002, 0, 0, 0, WEATHER_INTENSITY));
+        }
+    }
+
     @Override
     public void playSound(com.jedrock.api.world.Sound sound, double x, double y, double z, float volume, float pitch) {
         int evid = PeEffects.levelEventSound113(sound);

@@ -8,6 +8,22 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Weather, cross-edition.** One `Weather` enum (`CLEAR` / `RAIN` / `THUNDER`) on the world — pure
+  client-side scenery in the illusionist model: no timer, no simulation, it stays until set again.
+  `World.getWeather()` / `setWeather(...)` broadcast a change to every player (deduped — setting the
+  same sky twice sends nothing) and a **late joiner walks into the current sky** (pushed from
+  `CoreWorld.addPlayer`; clear needs no push, it's the client default). Per edition: **JE** (1.8 +
+  1.12.2, same reason semantics) uses Change Game State — begin/end rain plus explicit strengths, since
+  on these clients reason 7 is `setRainStrength` and 8 is `setThunderStrength`: full 1.0 makes the
+  change visible instantly instead of the slow vanilla ramp (the first cut sent 7 = 0 after begin-rain,
+  which silently killed the rain it had just started — caught on a live client); **PE both eras** use the
+  LevelEvent 3001-series (start/stop rain/thunder — weather landed in PE 0.12, and the ids are present
+  in both era's packet tables), no coordinates, intensity 10000 on starts. New `/weather
+  <clear|rain|thunder>` command (`jedrock.command.weather`, console-friendly, no argument reports the
+  state); scripts get `world.getWeather()` / `world.setWeather('rain')` (case-insensitive, invalid
+  names list the valid set). Rain renders as snow in cold biomes — the client decides by biome, which
+  is exactly the illusion working. Tested in `WorldWeatherTest` (broadcast, dedupe, late-joiner push).
+
 - **`Player.getPing()` + chat display names.** Two small QoL API surfaces. *Ping:* JE measures the
   keep-alive round trip (the ~15 s cadence doubles as a ping probe, recorded when the response lands
   — the 1.8 handler previously swallowed the response silently); both Bedrock eras read RakNet's own

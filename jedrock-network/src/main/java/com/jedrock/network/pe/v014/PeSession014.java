@@ -208,6 +208,28 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         return (int) Math.min(Integer.MAX_VALUE, session.getPing());
     }
 
+    /** LevelEvent rain/thunder intensity — the mid value the era's servers used; stops send 0. */
+    private static final int WEATHER_INTENSITY = 10000;
+
+    @Override
+    public void sendWeather(com.jedrock.api.world.Weather weather) {
+        // Same LevelEvent 3001-series as 1.1.5 (weather landed in PE 0.12), big-endian at protocol 45.
+        switch (weather) {
+            case CLEAR -> {
+                sendWrapped(b -> Mcpe014Packets.levelEvent(b, 3003, 0, 0, 0, 0));
+                sendWrapped(b -> Mcpe014Packets.levelEvent(b, 3004, 0, 0, 0, 0));
+            }
+            case RAIN -> {
+                sendWrapped(b -> Mcpe014Packets.levelEvent(b, 3001, 0, 0, 0, WEATHER_INTENSITY));
+                sendWrapped(b -> Mcpe014Packets.levelEvent(b, 3004, 0, 0, 0, 0));
+            }
+            case THUNDER -> {
+                sendWrapped(b -> Mcpe014Packets.levelEvent(b, 3001, 0, 0, 0, WEATHER_INTENSITY));
+                sendWrapped(b -> Mcpe014Packets.levelEvent(b, 3002, 0, 0, 0, WEATHER_INTENSITY));
+            }
+        }
+    }
+
     @Override
     public void playSound(com.jedrock.api.world.Sound sound, double x, double y, double z, float volume, float pitch) {
         // 0.14 has LevelEvent only; sounds it predates map to the closest available id (see PeEffects).

@@ -229,6 +229,12 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   (or the 0–255 Y range) are dropped at the storage boundary, so no API path can grow the world past its
   edge. Try `/deck` and `/pillar` in `plugins/example.js`.
 
+- ✅ **Weather, cross-edition.** `/weather clear|rain|thunder` (or `world.setWeather('rain')` from a
+  script) changes the sky for every player — JE via Change Game State (+ the darkness fade for
+  thunder), both PE eras via the LevelEvent 3001-series. Pure scenery: no timer, no simulation; a late
+  joiner walks into the current sky, and cold biomes render the same rain as snow because the client
+  decides — the illusion doing its job.
+
 - ✅ **Sounds and particles, cross-edition.** Canonical `Sound` (12) and `Particle` (20) enums render
   natively on every protocol: JE uses Named Sound Effect with each era's own sound names and the shared
   World Particles id table; PE 1.1.5 uses LevelEvent 1000-series ids (plus LevelSoundEvent for explode /

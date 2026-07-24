@@ -437,9 +437,33 @@ public final class CoreWorld implements World {
 
     public void addPlayer(Player player) {
         players.add(player);
+        // A late joiner walks into the weather everyone else already sees.
+        if (weather != com.jedrock.api.world.Weather.CLEAR) {
+            player.getConnection().sendWeather(weather);
+        }
     }
 
     public void removePlayer(Player player) {
         players.remove(player);
+    }
+
+    // ===== Weather (client-side scenery — one enum, no simulation) =====
+
+    private volatile com.jedrock.api.world.Weather weather = com.jedrock.api.world.Weather.CLEAR;
+
+    @Override
+    public com.jedrock.api.world.Weather getWeather() {
+        return weather;
+    }
+
+    @Override
+    public void setWeather(com.jedrock.api.world.Weather weather) {
+        if (weather == null || weather == this.weather) {
+            return; // no change — don't re-send the sky to everyone
+        }
+        this.weather = weather;
+        for (Player p : players) {
+            p.getConnection().sendWeather(weather);
+        }
     }
 }

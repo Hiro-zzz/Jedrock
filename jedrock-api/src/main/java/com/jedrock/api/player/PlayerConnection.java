@@ -228,6 +228,12 @@ public interface PlayerConnection {
     }
 
     /**
+     * Ask this client to draw the given weather (rain / thunder sky / clear). Sent on every change and
+     * once to a late joiner. Default no-op so a minimal connection compiles.
+     */
+    default void sendWeather(com.jedrock.api.world.Weather weather) {}
+
+    /**
      * Close the connection.
      */
     void close(String reason);

@@ -275,6 +275,30 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     }
 
     @Override
+    public void sendWeather(JedrockConnection c, com.jedrock.api.world.Weather weather) {
+        // Same reason semantics as 1.8: 1 = end rain, 2 = begin rain, then the strengths — reason 7
+        // is setRainStrength and 8 is setThunderStrength on the client, so full-strength values make
+        // the change visible instantly instead of ramping in (or, with 0s, not at all).
+        switch (weather) {
+            case CLEAR -> {
+                c.send(new ClientboundChangeGameState(ClientboundChangeGameState.REASON_END_RAIN, 0f));
+                c.send(new ClientboundChangeGameState(ClientboundChangeGameState.REASON_RAIN_STRENGTH, 0f));
+                c.send(new ClientboundChangeGameState(ClientboundChangeGameState.REASON_THUNDER_STRENGTH, 0f));
+            }
+            case RAIN -> {
+                c.send(new ClientboundChangeGameState(ClientboundChangeGameState.REASON_BEGIN_RAIN, 0f));
+                c.send(new ClientboundChangeGameState(ClientboundChangeGameState.REASON_RAIN_STRENGTH, 1f));
+                c.send(new ClientboundChangeGameState(ClientboundChangeGameState.REASON_THUNDER_STRENGTH, 0f));
+            }
+            case THUNDER -> {
+                c.send(new ClientboundChangeGameState(ClientboundChangeGameState.REASON_BEGIN_RAIN, 0f));
+                c.send(new ClientboundChangeGameState(ClientboundChangeGameState.REASON_RAIN_STRENGTH, 1f));
+                c.send(new ClientboundChangeGameState(ClientboundChangeGameState.REASON_THUNDER_STRENGTH, 1f));
+            }
+        }
+    }
+
+    @Override
     public void playSound(JedrockConnection c, com.jedrock.api.world.Sound sound,
                           double x, double y, double z, float volume, float pitch) {
         // 1.12.2 Named Sound Effect (0x19): name, sound category (varint, 0 = master), effect position

@@ -155,6 +155,20 @@ public interface World {
     }
 
     /**
+     * The current weather. The default is an eternally clear minimal world; a real world overrides
+     * both weather methods to store the state and broadcast changes.
+     */
+    default Weather getWeather() {
+        return Weather.CLEAR;
+    }
+
+    /**
+     * Set the weather, visible to every player in this world (and pushed to later joiners). Purely
+     * cosmetic — no timer, no simulation; it stays until set again. Default: a no-op.
+     */
+    default void setWeather(Weather weather) {}
+
+    /**
      * Play a canonical {@link Sound} at a position, audible to every player in this world — each
      * client renders it in its own protocol. Volume and pitch are best-effort per edition (1 = normal).
      */
