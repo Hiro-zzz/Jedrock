@@ -208,6 +208,18 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     }
 
     @Override
+    public void showArmor(long entityId, int helmet, int chestplate, int leggings, int boots) {
+        sendWrapped(b -> Mcpe014Packets.mobArmorEquipment(b, entityId,
+                safeState(helmet), safeState(chestplate), safeState(leggings), safeState(boots)));
+    }
+
+    @Override
+    public void sendOwnArmor(int helmet, int chestplate, int leggings, int boots) {
+        sendWrapped(b -> Mcpe014Packets.ownArmor(b,
+                safeState(helmet), safeState(chestplate), safeState(leggings), safeState(boots)));
+    }
+
+    @Override
     public int getPing() {
         // RakNet keeps its own connected-ping estimate per session — no game-layer probe needed.
         return (int) Math.min(Integer.MAX_VALUE, session.getPing());

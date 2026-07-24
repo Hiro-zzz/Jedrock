@@ -229,10 +229,13 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   (or the 0–255 Y range) are dropped at the storage boundary, so no API path can grow the world past its
   edge. Try `/deck` and `/pillar` in `plugins/example.js`.
 
-- ✅ **Held items, cross-edition.** The block or weapon in your hotbar is drawn in your avatar's hand on
-  every other client — JE Entity Equipment, both PE eras' MobEquipment — updating when you switch slots
-  *and* when the stack itself changes (mine, place, a script `setItem`), plus once when an avatar spawns
-  so nobody appears empty-handed. Scripts read `player.getHeldItemSlot()` / `getHeldItem()`.
+- ✅ **Held items and armor, cross-edition.** The block or weapon in your hotbar is drawn in your
+  avatar's hand on every other client — JE Entity Equipment, both PE eras' MobEquipment — updating when
+  you switch slots *and* when the stack itself changes (mine, place, a script `setItem`), plus once when
+  an avatar spawns so nobody appears empty-handed. **Worn armor** renders the same way
+  (`player.setArmor(ArmorSlot.HELMET, …)`, or just drag it into your armor slots in creative): JE numbers
+  its equipment slots differently before and after 1.9, while both PE eras dress the avatar with a single
+  `MobArmorEquipment`. Visual only — no protection is simulated. Try `/armor`.
 
 - ✅ **Weather, cross-edition.** `/weather clear|rain|thunder` (or `world.setWeather('rain')` from a
   script) changes the sky for every player — JE via Change Game State (+ the darkness fade for

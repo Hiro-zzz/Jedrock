@@ -33,6 +33,7 @@ import com.jedrock.api.event.server.ServerStartEvent;
 import com.jedrock.api.event.server.ServerStopEvent;
 import com.jedrock.api.event.server.ServerTickEvent;
 import com.jedrock.api.event.world.WorldSaveEvent;
+import com.jedrock.api.player.ArmorSlot;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.player.PlayerConnection;
@@ -803,7 +804,18 @@ public class JedrockServer implements Server, ConnectionListener {
         CorePlayer player = new CorePlayer(uuid, username, connection, defaultWorld, spawn,
                 gameModeFor(uuid), eventBus);
         player.setPermissions(opList, permissions); // isOp/hasPermission/getPrefix resolve against these
-        player.setHeldItemListener(this::relayHeldItem); // a changed hand redraws on every other client
+        // Changed equipment redraws on every other client's copy of this avatar.
+        player.setEquipmentListener(new CorePlayer.EquipmentListener() {
+            @Override
+            public void heldItemChanged(CorePlayer p) {
+                relayHeldItem(p);
+            }
+
+            @Override
+            public void armorChanged(CorePlayer p) {
+                relayArmor(p);
+            }
+        });
 
         playerRegistry.add(player);
         defaultWorld.addPlayer(player);
@@ -847,10 +859,15 @@ public class JedrockServer implements Server, ConnectionListener {
             if (other instanceof CorePlayer oc && (oc.isSneaking() || oc.isSprinting() || oc.isUsingItem())) {
                 connection.setPose(other.getEntityId(), oc.isSneaking(), oc.isSprinting(), oc.isUsingItem());
             }
-            // …and whatever they're holding, so a spawned avatar isn't empty-handed until they switch.
+            // …and whatever they're holding and wearing, so a spawned avatar isn't bare until it changes.
             int otherHeld = other.getHeldItem();
             if (otherHeld != Blocks.AIR) {
                 connection.showHeldItem(other.getEntityId(), otherHeld);
+            }
+            if (other instanceof CorePlayer oc && oc.hasArmor()) {
+                connection.showArmor(other.getEntityId(),
+                        oc.getArmor(ArmorSlot.HELMET), oc.getArmor(ArmorSlot.CHESTPLATE),
+                        oc.getArmor(ArmorSlot.LEGGINGS), oc.getArmor(ArmorSlot.BOOTS));
             }
             other.getConnection().showPlayer(uuid, username, player.getEntityId(),
                     spawn.x(), spawn.y(), spawn.z(), spawn.yaw(), spawn.pitch());
@@ -1507,6 +1524,26 @@ public class JedrockServer implements Server, ConnectionListener {
         }
     }
 
+    /**
+     * Dress {@code wearer}'s avatar on every client, cross-edition. Other players get the packet that
+     * dresses an avatar; the wearer gets their own copy through a different one — JE reads its own
+     * armor from the inventory window, but a Bedrock client shows the wearer nothing unless the pieces
+     * are pushed to its dedicated armor window (which is why it's a separate call).
+     */
+    public void relayArmor(CorePlayer wearer) {
+        int helmet = wearer.getArmor(ArmorSlot.HELMET);
+        int chestplate = wearer.getArmor(ArmorSlot.CHESTPLATE);
+        int leggings = wearer.getArmor(ArmorSlot.LEGGINGS);
+        int boots = wearer.getArmor(ArmorSlot.BOOTS);
+        long entityId = wearer.getEntityId();
+        for (CorePlayer other : playerRegistry.online()) {
+            if (other != wearer) {
+                other.getConnection().showArmor(entityId, helmet, chestplate, leggings, boots);
+            }
+        }
+        wearer.getConnection().sendOwnArmor(helmet, chestplate, leggings, boots);
+    }
+
     @Override
     public void onCreativeSetSlot(PlayerConnection connection, int coreSlot, int state, int count) {
         CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
@@ -1516,6 +1553,13 @@ public class JedrockServer implements Server, ConnectionListener {
         Container inv = player.getInventory();
         if (coreSlot >= 0 && coreSlot < inv.size()) {
             inv.set(coreSlot, state, count); // mirror only; the creative client already shows it
+            // A creative player dragging armor into slots 36-39 dresses their avatar for everyone else;
+            // dropping something into the held slot redraws the hand the same way.
+            if (coreSlot >= ArmorSlot.HELMET.inventorySlot() && coreSlot <= ArmorSlot.BOOTS.inventorySlot()) {
+                relayArmor(player);
+            } else if (coreSlot == player.getHeldItemSlot()) {
+                relayHeldItem(player);
+            }
         }
     }
 

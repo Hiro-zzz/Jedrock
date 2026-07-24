@@ -284,9 +284,25 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     public void showHeldItem(JedrockConnection c, long entityId, int state) {
         // Entity Equipment (0x3f at 340): entity id (varint), equipment slot (varint, 0 = main hand),
         // then the standard Slot — ground truth minecraft-data packet_entity_equipment.
+        sendEquipment(c, entityId, 0, state);
+    }
+
+    @Override
+    public void showArmor(JedrockConnection c, long entityId,
+                          int helmet, int chestplate, int leggings, int boots) {
+        // Since 1.9 the slots are 0 = main hand, 1 = off hand, then 2-5 feet-to-head — the 1.8 numbering
+        // shifted by one when the off-hand landed (ground truth ViaVersion's 1.9→1.8 slot transform).
+        sendEquipment(c, entityId, 2, boots);
+        sendEquipment(c, entityId, 3, leggings);
+        sendEquipment(c, entityId, 4, chestplate);
+        sendEquipment(c, entityId, 5, helmet);
+    }
+
+    /** One Entity Equipment packet: entity id (varint), equipment slot (varint at 340), then the Slot. */
+    private static void sendEquipment(JedrockConnection c, long entityId, int equipmentSlot, int state) {
         send(c, CB_ENTITY_EQUIPMENT, b -> {
             ByteBufUtils.writeVarInt(b, (int) entityId);
-            ByteBufUtils.writeVarInt(b, 0);
+            ByteBufUtils.writeVarInt(b, equipmentSlot);
             JeInventoryCodec.writeSlot(b, state, state == 0 ? 0 : 1);
         });
     }

@@ -33,6 +33,8 @@ public final class Mcpe014Packets {
     public static final int ID_UPDATE_BLOCK = 0x9f;
     public static final int ID_LEVEL_EVENT = 0xa2;  // outbound: world effects — 1000-series sounds, 0x4000|particle
     public static final int ID_MOB_EQUIPMENT = 0xa7; // both ways: the item in an entity's hand (held-item sync)
+    public static final int ID_MOB_ARMOR_EQUIPMENT = 0xa8; // outbound: the four worn armor pieces, one packet
+    public static final int WINDOW_ID_ARMOR = 0x78;        // the wearer's own armor slots (SPECIAL_ARMOR)
     public static final int ID_ENTITY_EVENT = 0xa4; // outbound: one-shot entity event (hurt animation etc.)
     public static final int ID_INTERACT = 0xa9;    // inbound: attack / interact with an entity
     public static final int ID_USE_ITEM = 0xaa;
@@ -450,6 +452,36 @@ public final class Mcpe014Packets {
         writeSlot(b, state, state == 0 ? 0 : 1);
         b.writeByte(0);
         b.writeByte(0);
+    }
+
+    /**
+     * The wearer's own armor: a ContainerSetContent for the armor window (0x78). PMMP's
+     * {@code sendArmorContents} sends the holder this rather than the MobArmorEquipment other players
+     * get — without it a 0.14 player sees everyone's armor but their own. Body: window id, slot count,
+     * the four slots, then the trailing hotbar-link count of 0 (links exist only for window 0).
+     */
+    public static void ownArmor(ByteBuf b, int helmet, int chestplate, int leggings, int boots) {
+        b.writeByte(ID_CONTAINER_SET_CONTENT);
+        b.writeByte(WINDOW_ID_ARMOR);
+        b.writeShort(4);
+        for (int state : new int[]{helmet, chestplate, leggings, boots}) {
+            writeSlot(b, state, state == 0 ? 0 : 1);
+        }
+        b.writeShort(0);
+    }
+
+    /**
+     * MobArmorEquipment (0xa8) — the four worn pieces in one packet, head-to-feet. Layout, verbatim
+     * from the 0.14-era PMMP {@code MobArmorEquipmentPacket}: eid (BE long) then four Slots. Same
+     * shape as 113's 0x20 apart from the era's big-endian eid.
+     */
+    public static void mobArmorEquipment(ByteBuf b, long eid,
+                                         int helmet, int chestplate, int leggings, int boots) {
+        b.writeByte(ID_MOB_ARMOR_EQUIPMENT);
+        b.writeLong(eid);
+        for (int state : new int[]{helmet, chestplate, leggings, boots}) {
+            writeSlot(b, state, state == 0 ? 0 : 1);
+        }
     }
 
     /**

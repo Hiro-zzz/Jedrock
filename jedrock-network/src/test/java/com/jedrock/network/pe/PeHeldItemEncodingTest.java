@@ -44,6 +44,40 @@ class PeHeldItemEncodingTest {
     }
 
     @Test
+    void mobArmorEquipment113CarriesFourSlotsHeadToFeet() {
+        ByteBuf b = Unpooled.buffer();
+        // A diamond helmet and iron boots, nothing in between.
+        PeSession.writeMobArmorEquipment(b, 42L, Blocks.state(310, 0), 0, 0, Blocks.state(309, 0));
+
+        assertEquals(0x20, ByteBufUtils.readVarInt(b), "packet id MOB_ARMOR_EQUIPMENT");
+        assertEquals(42L, ByteBufUtils.readVarLong(b), "entity runtime id");
+        assertEquals(Blocks.state(310, 0), McpeCodec.readItemState(b), "slot 0 = helmet");
+        assertEquals(0, McpeCodec.readItemState(b), "slot 1 = chestplate (empty)");
+        assertEquals(0, McpeCodec.readItemState(b), "slot 2 = leggings (empty)");
+        assertEquals(Blocks.state(309, 0), McpeCodec.readItemState(b), "slot 3 = boots");
+        assertFalse(b.isReadable(), "exactly four slots, no trailing bytes");
+        b.release();
+    }
+
+    @Test
+    void mobArmorEquipment014IsBigEndian() {
+        ByteBuf b = Unpooled.buffer();
+        Mcpe014Packets.mobArmorEquipment(b, 42L, Blocks.state(310, 0), 0, 0, 0);
+
+        assertEquals(0xa8, b.readUnsignedByte(), "packet id MOB_ARMOR_EQUIPMENT (0.14)");
+        assertEquals(42L, b.readLong(), "eid (BE long)");
+        assertEquals(310, b.readShort(), "helmet id (BE short)");
+        assertEquals(1, b.readUnsignedByte(), "count");
+        assertEquals(0, b.readShort(), "meta");
+        assertEquals(0, b.readShort(), "nbt length");
+        assertEquals(0, b.readShort(), "chestplate = air");
+        assertEquals(0, b.readShort(), "leggings = air");
+        assertEquals(0, b.readShort(), "boots = air");
+        assertFalse(b.isReadable(), "exactly four slots, no trailing bytes");
+        b.release();
+    }
+
+    @Test
     void mobEquipment014IsBigEndianWithoutWindowId() {
         ByteBuf b = Unpooled.buffer();
         Mcpe014Packets.mobEquipment(b, 42L, Blocks.state(267, 0)); // an iron sword

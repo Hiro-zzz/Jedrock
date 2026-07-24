@@ -8,6 +8,27 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Armor on avatars, cross-edition.** A worn helmet / chestplate / leggings / boots now render on the
+  wearer's avatar for every other player, on all four protocols. Visual only — the illusionist rule
+  holds, the server simulates no protection. New `ArmorSlot` enum (head-to-feet, each carrying its
+  backing inventory slot 36-39 — past the 36 storage slots, which is why `setArmor` exists rather than
+  the storage-slot `setItem`), plus `Player.getArmor(slot)` / `setArmor(slot, state)` / `clearArmor()`.
+  The version split that makes this per-protocol: **JE 1.8** numbers Entity Equipment `0` held then
+  `1-4` feet-to-head, while **1.9+ (1.12.2)** inserted the off-hand at `1` and pushed armor to `2-5` —
+  ground truth ViaVersion's own 1.9→1.8 slot transform. Both **PE eras** take all four pieces in one
+  `MobArmorEquipment` (1.1.5 `0x20`, 0.14 `0xa8` with the era's big-endian eid), head-to-feet, so the
+  core's slot order maps straight through. The **wearer's own copy is a different packet**: JE reads its
+  own armor from the inventory window's armor slots, but a Bedrock client shows the wearer nothing
+  unless the four pieces are pushed to its dedicated armor window (`ContainerSetContent` to window
+  `0x78`, per PMMP's own `sendArmorContents`) — caught on a live PE client, which saw everyone's armor
+  but its own, and now covered by `sendOwnArmor`. Relays fire from the same equipment hook as the held item
+  (now a two-method `EquipmentListener`, so a hotbar switch doesn't re-send armor and vice versa), a
+  freshly spawned avatar arrives already dressed, and a **creative player dragging armor into their
+  own slots 5-8 dresses their avatar for everyone** (that path already reached the core inventory — it
+  just wasn't relayed). 0.14 routes each piece through its crash gate. `/armor` demo in
+  `plugins/example.js`. Tested in `PeHeldItemEncodingTest` (both PE wire shapes) and
+  `CorePlayerIdentityTest` (wear / read back / clear, hooks stay independent).
+
 - **Held-item tracking — the item in your hand is visible to everyone, cross-edition.** Every edition
   already reported hotbar switches; the reports were being dropped (JE 1.8 swallowed them outright,
   1.12.2 and PE 1.1.5 kept a local view for placement only). They now funnel through one

@@ -241,6 +241,21 @@ public interface PlayerConnection {
     default void showHeldItem(long entityId, int state) {}
 
     /**
+     * Draw the four worn armor pieces (canonical states, 0 = nothing) on another player's avatar —
+     * JE Entity Equipment per piece / PE MobArmorEquipment in one packet. Arguments are head-to-feet,
+     * the order both Bedrock eras put on the wire. Default no-op.
+     */
+    default void showArmor(long entityId, int helmet, int chestplate, int leggings, int boots) {}
+
+    /**
+     * Show <em>this</em> client its own worn armor. A separate call because the wearer's own copy is a
+     * different packet from the one that dresses other people's avatars: JE renders it from the armor
+     * slots of the inventory window (so this is a no-op there), while Bedrock needs the pieces pushed
+     * to its dedicated armor window or the wearer sees nothing on themselves. Default no-op.
+     */
+    default void sendOwnArmor(int helmet, int chestplate, int leggings, int boots) {}
+
+    /**
      * Close the connection.
      */
     void close(String reason);
