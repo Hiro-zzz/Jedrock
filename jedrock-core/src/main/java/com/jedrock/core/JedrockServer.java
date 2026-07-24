@@ -1568,11 +1568,14 @@ public class JedrockServer implements Server, ConnectionListener {
             format = event.getFormat();
             body = event.getMessage();
         }
-        // The name is escaped so an untrusted username (a 0.14 client picks its own; a '_' would
-        // otherwise italicise) can't inject markup. The message body is intentionally left raw —
-        // rendering it is the documented "players can use {color} / Markdown in chat" feature.
+        // The real name is escaped so an untrusted username (a 0.14 client picks its own; a '_' would
+        // otherwise italicise) can't inject markup. A script-set display name, like the group prefix,
+        // is authored text and renders raw — coloured nicknames are its whole point. The message body
+        // is intentionally left raw — "players can use {color} / Markdown in chat" is a feature.
+        String shown = sender.getDisplayName();
+        String nameToken = shown.equals(sender.getName()) ? ChatText.escape(shown) : shown;
         String line = format.replace("%prefix%", sender.getPrefix())
-                .replace("%name%", ChatText.escape(sender.getName())).replace("%s", body);
+                .replace("%name%", nameToken).replace("%s", body);
         LOGGER.info("[chat] <" + sender.getName() + "> " + body);
         broadcast(line, null); // relay to everyone, including the sender
     }

@@ -51,6 +51,28 @@ public interface Player extends Entity, CommandSender {
         teleport(new Location(getWorld(), x, y, z, yaw, pitch));
     }
 
+    /**
+     * Round-trip latency to this player's client, in milliseconds, or {@code -1} while unknown (just
+     * after join, or a connection that can't measure it). JE measures the keep-alive round trip;
+     * Bedrock reads the RakNet transport's own estimate.
+     */
+    default int getPing() {
+        return getConnection().getPing();
+    }
+
+    /**
+     * The name shown for this player in chat — defaults to the real {@link #getName()}. A custom
+     * display name is authored text: it may carry the unified {@code {color}} / Markdown markup and is
+     * rendered as-is in the chat format (the real name, being client-controlled, is escaped instead).
+     * Identity stays the real name everywhere else (commands, tab list, joins, permissions).
+     */
+    default String getDisplayName() {
+        return getName();
+    }
+
+    /** Set the chat display name; {@code null} or blank resets to the real name. Default: a no-op. */
+    default void setDisplayName(String displayName) {}
+
     /** Play a canonical sound to this player only, at their own position (a private UI ding). */
     default void playSound(com.jedrock.api.world.Sound sound) {
         playSound(sound, 1.0f, 1.0f);
