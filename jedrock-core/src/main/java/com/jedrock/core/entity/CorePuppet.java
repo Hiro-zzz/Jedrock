@@ -131,6 +131,11 @@ public final class CorePuppet implements PuppetEntity {
         server.relayPuppetNameTag(this); // relays the new text to every viewer
     }
 
+    /** Set the initial name tag before anyone can see the puppet — no relay, since it hasn't spawned. */
+    public void initNameTag(String nameTag) {
+        this.nameTag = nameTag;
+    }
+
     @Override
     public void teleport(Location to) {
         setLocation(to);

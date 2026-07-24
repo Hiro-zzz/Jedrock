@@ -99,6 +99,78 @@ public final class ScriptEntities {
         return track(manager.server().spawnFallingBlock(at, state));
     }
 
+    /**
+     * Spawn a <b>floating line of text</b> — the label that names an exhibit. Authored in the unified
+     * {@code {color}} markup, and an entity like any other: movable, tickable, owned by this plugin,
+     * re-textable with {@link ScriptEntity#setNameTag}. Stack several (a {@link ScriptGroup} keeps
+     * them together) for a multi-line sign.
+     */
+    public ScriptEntity spawnText(String text, double x, double y, double z) {
+        return spawnText(text, new Location(manager.server().getDefaultWorld(), x, y, z));
+    }
+
+    /** Spawn a floating line of text at a {@link Location}. */
+    public ScriptEntity spawnText(String text, Location at) {
+        return track(manager.server().spawnText(at, text));
+    }
+
+    /**
+     * A new, empty {@link ScriptGroup} — a set of entities handled as one, so a scene can be moved,
+     * turned or cleared in a single call.
+     */
+    public ScriptGroup group() {
+        return new ScriptGroup();
+    }
+
+    /**
+     * Place {@code count} things evenly around a circle and return them as a group. The callback is
+     * handed each position and spawns whatever belongs there, so the shape and the contents stay
+     * separate concerns:
+     *
+     * <pre>{@code
+     *   entities.circle(8, x, y, z, 1.2, (px, py, pz) => entities.spawnItem(gem, px, py, pz));
+     * }</pre>
+     */
+    public ScriptGroup circle(int count, double cx, double cy, double cz, double radius, Function place) {
+        ScriptGroup group = new ScriptGroup();
+        for (int i = 0; i < Math.max(0, count); i++) {
+            double angle = (Math.PI * 2 / Math.max(1, count)) * i;
+            group.add(callPlace(place, cx + Math.cos(angle) * radius, cy, cz + Math.sin(angle) * radius, i));
+        }
+        return group;
+    }
+
+    /** Place {@code count} things evenly along the line between two points, ends included. */
+    public ScriptGroup line(int count, double x1, double y1, double z1,
+                            double x2, double y2, double z2, Function place) {
+        ScriptGroup group = new ScriptGroup();
+        int steps = Math.max(0, count);
+        for (int i = 0; i < steps; i++) {
+            double t = steps == 1 ? 0 : (double) i / (steps - 1);
+            group.add(callPlace(place, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, z1 + (z2 - z1) * t, i));
+        }
+        return group;
+    }
+
+    /** Place a {@code columns × rows} grid on the horizontal plane, {@code spacing} blocks apart. */
+    public ScriptGroup grid(int columns, int rows, double x, double y, double z, double spacing,
+                            Function place) {
+        ScriptGroup group = new ScriptGroup();
+        int index = 0;
+        for (int row = 0; row < Math.max(0, rows); row++) {
+            for (int column = 0; column < Math.max(0, columns); column++) {
+                group.add(callPlace(place, x + column * spacing, y, z + row * spacing, index++));
+            }
+        }
+        return group;
+    }
+
+    /** Run a placement callback and keep the entity it returns (anything else is ignored). */
+    private ScriptEntity callPlace(Function place, double x, double y, double z, int index) {
+        Object spawned = manager.callPlacement(plugin, place, x, y, z, index);
+        return spawned instanceof ScriptEntity entity ? entity : null;
+    }
+
     /** Wrap a freshly spawned body and put it on this plugin's roster. */
     private ScriptEntity track(com.jedrock.api.entity.PuppetEntity puppet) {
         ScriptEntity entity = new ScriptEntity(puppet, this);

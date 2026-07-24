@@ -25,11 +25,28 @@ public final class EntityTypeIds {
         return switch (type) {
             case CREEPER -> 50;
             case SKELETON -> 51;
+            case SPIDER -> 52;
             case ZOMBIE -> 54;
+            case SLIME -> 55;
+            case GHAST -> 56;
+            case ZOMBIE_PIGMAN -> 57;
+            case ENDERMAN -> 58;
+            case CAVE_SPIDER -> 59;
+            case SILVERFISH -> 60;
+            case BLAZE -> 61;
+            case MAGMA_CUBE -> 62;
+            case BAT -> 65;
             case PIG -> 90;
+            case SHEEP -> 91;
             case COW -> 92;
             case CHICKEN -> 93;
-            case PLAYER, ITEM, FALLING_BLOCK -> throw notAMob(type);
+            case SQUID -> 94;
+            case WOLF -> 95;
+            case MOOSHROOM -> 96;
+            case SNOW_GOLEM -> 97;
+            case OCELOT -> 98;
+            case VILLAGER -> 120;
+            case PLAYER, ITEM, FALLING_BLOCK, TEXT -> throw notAMob(type);
         };
     }
 
@@ -54,14 +71,31 @@ public final class EntityTypeIds {
             case CHICKEN -> 10;
             case COW -> 11;
             case PIG -> 12;
+            case SHEEP -> 13;
+            case WOLF -> 14;
+            case VILLAGER -> 15;
+            case MOOSHROOM -> 16;
+            case SQUID -> 17;
+            case BAT -> 19;
+            case SNOW_GOLEM -> 21;
+            case OCELOT -> 22;
             case ZOMBIE -> 32;
             case CREEPER -> 33;
             case SKELETON -> 34;
+            case SPIDER -> 35;
+            case ZOMBIE_PIGMAN -> 36;
+            case SLIME -> 37;
+            case ENDERMAN -> 38;
+            case SILVERFISH -> 39;
+            case CAVE_SPIDER -> 40;
+            case GHAST -> 41;
+            case MAGMA_CUBE -> 42;   // PMMP calls it LavaSlime
+            case BLAZE -> 43;
             // A dropped item is a real Bedrock entity type, but it spawns through AddItemEntity (which
             // carries the item) rather than AddEntity, so callers never need this id.
             case ITEM -> 64;
             case FALLING_BLOCK -> BEDROCK_FALLING_BLOCK;
-            case PLAYER -> throw notAMob(type);
+            case PLAYER, TEXT -> throw notAMob(type);
         };
     }
 

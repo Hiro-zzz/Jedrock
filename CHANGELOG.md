@@ -8,6 +8,33 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Decoration grows up: labels, scenes and a wider cast.** Three gaps between "props exist" and "props
+  are an authoring surface", closed together.
+  **Labels are entities now.** A floating line of text was the one member of the family outside the
+  entity API — reachable only as `server.spawnHologram(...)`, with no tick, no state and no plugin
+  ownership. New `EntityType.TEXT` / `entities.spawnText('{yellow}Lantern', x, y, z)` returns an
+  ordinary `ScriptEntity`: movable, re-textable through `setNameTag`, despawned with its plugin. It
+  reuses the very wire the hologram lines ride (invisible marker armor stand on Java, item entity with
+  no item on Bedrock), so nothing new had to be learned about the protocols. `spawnHologram` stays for
+  managed multi-line stacks.
+  **Scenes.** `entities.group()` returns a `ScriptGroup` — a set handled as one: `add`, `move`,
+  `moveTo`, `rotate(degrees)` around a pivot (positions *and* facings), `setNameTag`, `remove`, with
+  the pivot defaulting to the members' centre. Plus shape helpers that place a callback's output along
+  a `circle` / `line` / `grid` and hand back the group, keeping the arrangement and its contents as
+  separate concerns. A group is a view, not an owner: entities still belong to their plugin, so a
+  hot-reload clears them whether grouped or not.
+  **17 more mobs** — sheep, wolf, villager, mooshroom, squid, bat, ocelot, snow golem, spider, cave
+  spider, silverfish, enderman, slime, zombie pigman, ghast, magma cube, blaze — taking the cast from 6
+  to 23. Java ids checked against minecraft-data, Bedrock ids against the legacy table PocketMine's own
+  classes corroborate (Wolf 14, Villager 15, Squid 17 read straight from its source). Since 0.14 is a
+  2016 client that predates some of them, a new `Pe014Entities` gate lists what that era is known to
+  have and simply doesn't render the rest for those players — the same graceful degradation its blocks
+  and sounds already use, and the same "grow it only against a real client" rule.
+  `/decor` is rebuilt on all of it: the ring comes from the `circle` helper, the label is a text entity,
+  and `/decor spin` turns the whole scene at once. Tested in `ScriptEntitiesTest` — which caught a real
+  bug on the way, that an entity returned from a script callback arrives wrapped as a `NativeJavaObject`
+  and has to be unwrapped before the group would accept it.
+
 - **Two more ways to pose a block: worn, and full-size.** Building on item props, the decoration
   vocabulary gains the two techniques that put a *block* wherever you want it.
   **Equipment on entities:** puppets gained `setHeldItem(state)` and `setArmor(slot, state)` (scripts:

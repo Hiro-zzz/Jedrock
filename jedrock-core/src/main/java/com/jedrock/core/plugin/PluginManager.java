@@ -16,6 +16,7 @@ import org.mozilla.javascript.ContextFactory;
 import org.mozilla.javascript.Function;
 import org.mozilla.javascript.Scriptable;
 import org.mozilla.javascript.ScriptableObject;
+import org.mozilla.javascript.Wrapper;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -365,6 +366,32 @@ public final class PluginManager {
             }
         } catch (RuntimeException e) {
             LOGGER.error("Plugin " + plugin.name() + " entity handler threw: " + e.getMessage());
+        } finally {
+            scriptLock.unlock();
+        }
+    }
+
+    /**
+     * Run a shape-helper placement callback with a position and its index, returning whatever the
+     * script spawned there. Unlike the fire-and-forget handlers this one has a result, so a throw is
+     * logged and reported as "nothing placed" rather than silently losing the whole shape.
+     */
+    Object callPlacement(ScriptPlugin plugin, Function place, double x, double y, double z, int index) {
+        scriptLock.lock();
+        try {
+            Context cx = contextFactory.enterContext();
+            try {
+                Scriptable scope = plugin.scope();
+                Object result = place.call(cx, scope, scope, new Object[]{x, y, z, index});
+                // A Java object handed back from JS arrives wrapped (NativeJavaObject); the caller
+                // wants the entity itself, so unwrap before it leaves the script boundary.
+                return result instanceof Wrapper wrapper ? wrapper.unwrap() : result;
+            } finally {
+                Context.exit();
+            }
+        } catch (RuntimeException e) {
+            LOGGER.error("Plugin " + plugin.name() + " placement callback threw: " + e.getMessage());
+            return null;
         } finally {
             scriptLock.unlock();
         }
