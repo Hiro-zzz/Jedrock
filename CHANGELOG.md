@@ -86,6 +86,20 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Virtual chests for scripts — the `menus` global.** A script-owned chest window with no world block
+  behind it: `menus.create(title, rows)` (1–6 rows) builds one, `setItem` / `getItem` / `clear` lay it
+  out, and `open(player)` shows it. Two shapes decided by one call: give it an `onClick(player, slot,
+  state)` and it becomes a **button menu** — the slots go read-only, and clicking one fires the handler
+  instead of moving the item, so each slot is a button (a class picker, a shop, a confirm dialog); leave
+  `onClick` off and it's a plain **storage chest** the player moves items in and out of, transient (nothing
+  persists — it isn't a world block). It reuses the server-authoritative Java chest-window flow, which was
+  generalized from a hard-coded 27 slots to the container's actual size along the way, so the player-
+  inventory half of the window lines up for any menu size. Java only: `open` returns `false` for a Bedrock
+  player, because the retail 1.1.5 client crashes on a chest window (the same reason world chests trade
+  through click-transfer there) and 0.14 is unwired. The core routing is unit-tested (button vs storage,
+  the non-27 slot math, the Bedrock refusal, transient-not-persisted), and the script surface through
+  Rhino. Try `/menu` in `plugins/example.js`.
+
 - **Boss bar, Java 1.12.2.** `player.setBossBar(title, progress[, color])` / `clearBossBar()` — a titled
   bar across the top of the screen with a 0..1 fill and one of seven colours (`pink` … `white`, default
   purple). Purely presentational: no entity, no combat, just a bar showing whatever you set. Driven by the

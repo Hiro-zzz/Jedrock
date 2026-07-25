@@ -9,6 +9,8 @@
 //   world      — the shared world: getBlock / setBlock / fill / getHighestY / getBiome / spawn / weather /
 //                playSound / spawnParticle. Edits render live on every client, cross-edition.
 //   entities   — spawn and drive puppets, props and labels; group() builds a scene. See /guard and /decor.
+//   menus      — menus.create(title, rows): a virtual chest (Java clients). onClick makes it a button
+//                menu (read-only slots), or leave it off for a storage chest. See /menu.
 //   storage    — the only thing that survives a restart: get / set / has / remove / keys / size / clear,
 //                plus forPlayer(p) for per-player state. Strings, numbers, booleans, objects and arrays.
 //   events     — events.on(name, fn): subscribe to a built-in event (28 below) OR a custom, script-defined
@@ -386,6 +388,27 @@ commands.register({
         if (isNaN(pct)) { player.sendMessage('{red}Usage: /boss <0-100> [color]  (or /boss off)'); return; }
         player.setBossBar('{red}The Boss {gray}(' + pct + '%)', Math.max(0, Math.min(100, pct)) / 100,
             args.length > 1 ? args[1] : 'purple');
+    }
+});
+
+// /menu — a virtual chest opened as a BUTTON menu (Java clients; a Bedrock player is told it can't show).
+// The slots are read-only: clicking one fires onClick instead of moving the item, so each slot is a button.
+// (Drop the onClick and it's a plain storage chest the player can move items in and out of, backed by no
+// world block — nothing persists.)
+commands.register('menu', function (player, args) {
+    var m = menus.create('{dark_purple}Pick a class', 1);   // 1 row = 9 slots
+    m.setItem(2, Blocks.state(276, 0));   // diamond sword  -> "Warrior"
+    m.setItem(4, Blocks.state(261, 0));   // bow            -> "Archer"
+    m.setItem(6, Blocks.state(345, 0));   // compass        -> "Scout"
+    m.onClick(function (p, slot, state) {
+        var pick = slot === 2 ? 'Warrior' : slot === 4 ? 'Archer' : slot === 6 ? 'Scout' : null;
+        if (pick) {
+            p.sendMessage('{green}You chose {white}' + pick + '{green}!');
+            storage.forPlayer(p).set('class', pick);   // remembered across restarts
+        }
+    });
+    if (!m.open(player)) {
+        player.sendMessage('{red}Menus need a Java client (Bedrock chest windows are unstable here).');
     }
 });
 

@@ -392,6 +392,26 @@ class PluginManagerTest {
     }
 
     @Test
+    void theMenusGlobalBuildsAVirtualChestAScriptCanLayOut(@TempDir Path dir) {
+        // No server here, so open() would no-op, but a menu can still be created and populated — proving
+        // the `menus` global, ScriptMenu.setItem/getItem/size and the chainable API all reach the script.
+        EventBus bus = new EventBus();
+        PluginManager plugins = manager(bus, dir);
+        plugins.loadSource("shop.js",
+                "var m = menus.create('Shop', 2);\n"        // 2 rows = 18 slots
+              + "m.setItem(0, 264 << 4).setItem(1, 57 << 4, 3);\n"
+              + "events.on('PlayerChat', function (e) {\n"
+              + "  e.setMessage(m.size() + '|' + m.getItem(0) + '|' + m.getItem(1) + '|' + m.open(e.getPlayer()));\n"
+              + "});", 1L);
+
+        PlayerChatEvent event = new PlayerChatEvent(newPlayer(), "");
+        bus.post(event);
+
+        assertEquals("18|" + (264 << 4) + "|" + (57 << 4) + "|false", event.getMessage(),
+                "size, items, and open() returning false without a live server");
+    }
+
+    @Test
     void aScriptCommandCanSupplyTabCompletion(@TempDir Path dir) {
         CommandManager cm = new CommandManager(null);
         PluginManager plugins = manager(new EventBus(), dir, cm);

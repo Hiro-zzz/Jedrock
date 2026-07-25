@@ -95,10 +95,14 @@ public final class CorePlayer implements Player {
         return cursor;
     }
 
-    // ===== Open container (a chest) =====
+    // ===== Open container (a world chest, or a script-owned virtual menu) =====
 
     private int openWindowId = 0;      // 0 = only the player's own inventory is open
-    private Container openContainer;   // the chest container being viewed (null when none)
+    private Container openContainer;   // the chest / menu container being viewed (null when none)
+    /** True for a world chest (its edits persist); false for a transient script menu. */
+    private boolean openContainerPersistent;
+    /** Non-null when the open container is a button menu: its slots are read-only and clicks call this. */
+    private com.jedrock.core.inventory.MenuClick openMenuClick;
 
     public int getOpenWindowId() {
         return openWindowId;
@@ -112,14 +116,38 @@ public final class CorePlayer implements Player {
         return openContainer != null;
     }
 
+    /** Whether the open container's edits should be persisted (a world chest) rather than dropped (a menu). */
+    public boolean isOpenContainerPersistent() {
+        return openContainerPersistent;
+    }
+
+    /** The click handler if the open container is a button menu, or {@code null} for a storage container. */
+    public com.jedrock.core.inventory.MenuClick getOpenMenuClick() {
+        return openMenuClick;
+    }
+
+    /** Open a world chest: a storage container whose edits persist. */
     public void openContainer(int windowId, Container container) {
+        openContainer(windowId, container, true, null);
+    }
+
+    /**
+     * Open a container of any kind. {@code persistent} marks a world chest (edits saved) from a transient
+     * menu; a non-null {@code menuClick} makes it a read-only button menu whose clicks fire the handler.
+     */
+    public void openContainer(int windowId, Container container, boolean persistent,
+                              com.jedrock.core.inventory.MenuClick menuClick) {
         this.openWindowId = windowId;
         this.openContainer = container;
+        this.openContainerPersistent = persistent;
+        this.openMenuClick = menuClick;
     }
 
     public void closeContainer() {
         this.openWindowId = 0;
         this.openContainer = null;
+        this.openContainerPersistent = false;
+        this.openMenuClick = null;
     }
 
     /** Canonical state per inventory slot (0-8 hotbar, 9-35 main, 36-39 armor, 40 off-hand); 0 = empty. */

@@ -100,6 +100,30 @@ public final class ContainerService {
      * on every edition (Java accepts any container window id).
      */
     private static final int CHEST_WINDOW_ID = 10;
+    /** Window id for a script-opened virtual menu; distinct from the chest id (a player has one open anyway). */
+    private static final int MENU_WINDOW_ID = 11;
+
+    /**
+     * Open a script-owned virtual menu — a chest window backed by {@code container}, not by any world
+     * block. A non-null {@code onClick} makes it a read-only button menu whose clicks call the handler;
+     * a null one makes it a transient storage container (its edits are not persisted).
+     *
+     * <p>Java only. The retail 1.1.5 client crashes on a chest window (it binds the GUI to a block tile
+     * that a virtual menu has no equivalent of — the same reason world chests use click-transfer there),
+     * so opening one to a Bedrock player is refused.
+     *
+     * @return {@code true} if the menu was opened, {@code false} if the player's edition can't show it
+     */
+    public boolean openMenu(CorePlayer player, String title, Container container, MenuClick onClick) {
+        PlayerConnection connection = player.getConnection();
+        if (connection.getProtocolVersion().isBedrock()) {
+            return false; // a chest window crashes the legacy Bedrock clients — see the class note
+        }
+        player.openContainer(MENU_WINDOW_ID, container, false, onClick);
+        connection.openContainer(MENU_WINDOW_ID, title, container.size(), 0, 0, 0);
+        sendChestContents(player, connection);
+        return true;
+    }
 
     public boolean onUseBlock(PlayerConnection connection, int x, int y, int z) {
         CorePlayer clicker = players.getByConnectionOrNull(connection);
@@ -233,17 +257,31 @@ public final class ContainerService {
             return; // works in creative too — the chest window is server-authoritative in both modes
         }
         Container chest = player.getOpenContainer();
+        int chestSize = chest.size();
+        boolean inChest = windowSlot >= 0 && windowSlot < chestSize;
+
+        // A button menu: its slots never move items — a click on one is a signal, and the window is
+        // redrawn as it was. The handler runs (under the script lock, in the menu's implementation).
+        MenuClick menu = player.getOpenMenuClick();
+        if (menu != null) {
+            if (inChest) {
+                menu.onClick(player, windowSlot, chest.stateAt(windowSlot));
+            }
+            sendChestContents(player, connection); // resync: nothing moved
+            return;
+        }
+
         Container inv = player.getInventory();
-        // Chest-window layout: 0-26 the chest, 27-53 the player's main (core 9-35), 54-62 the hotbar (0-8).
-        boolean inChest = windowSlot >= 0 && windowSlot < 27;
+        // Chest-window layout for an N-slot chest: 0..N-1 the chest, then the player's main (core 9-35),
+        // then the hotbar (core 0-8).
         Container target;
         int index;
         if (inChest) {
             target = chest; index = windowSlot;
-        } else if (windowSlot >= 27 && windowSlot < 54) {
-            target = inv; index = 9 + (windowSlot - 27);
-        } else if (windowSlot >= 54 && windowSlot < 63) {
-            target = inv; index = windowSlot - 54;
+        } else if (windowSlot >= chestSize && windowSlot < chestSize + 27) {
+            target = inv; index = 9 + (windowSlot - chestSize);
+        } else if (windowSlot >= chestSize + 27 && windowSlot < chestSize + 36) {
+            target = inv; index = windowSlot - (chestSize + 27);
         } else {
             target = null; index = -1; // outside / unmodelled — resync only
         }
@@ -253,12 +291,14 @@ public final class ContainerService {
                 if (inChest) {
                     InventoryClick.shiftTo(chest, index, inv, 0, 36);
                 } else {
-                    InventoryClick.shiftTo(inv, index, chest, 0, 27);
+                    InventoryClick.shiftTo(inv, index, chest, 0, chestSize);
                 }
             } else {
                 InventoryClick.normal(target, player.getCursor(), index, button == 1);
             }
-            world.markDirty(); // a chest edit must be persisted by autosave / shutdown
+            if (player.isOpenContainerPersistent()) {
+                world.markDirty(); // a world-chest edit must be persisted; a menu's is transient
+            }
         }
         sendChestContents(player, connection);
     }
@@ -276,21 +316,22 @@ public final class ContainerService {
             connection.setWindowItems(windowId, chest.states(), chest.counts());
             return;
         }
+        int chestSize = chest.size();
         int[] ps = player.inventoryStates();
         int[] pc = player.inventoryCounts();
-        int[] states = new int[63];
-        int[] counts = new int[63];
-        for (int i = 0; i < 27; i++) {                 // chest
+        int[] states = new int[chestSize + 36];
+        int[] counts = new int[chestSize + 36];
+        for (int i = 0; i < chestSize; i++) {          // chest
             states[i] = chest.stateAt(i);
             counts[i] = chest.countAt(i);
         }
         for (int i = 0; i < 27; i++) {                 // player main (core 9-35)
-            states[27 + i] = ps[9 + i];
-            counts[27 + i] = pc[9 + i];
+            states[chestSize + i] = ps[9 + i];
+            counts[chestSize + i] = pc[9 + i];
         }
         for (int i = 0; i < 9; i++) {                  // player hotbar (core 0-8)
-            states[54 + i] = ps[i];
-            counts[54 + i] = pc[i];
+            states[chestSize + 27 + i] = ps[i];
+            counts[chestSize + 27 + i] = pc[i];
         }
         connection.setWindowItems(windowId, states, counts);
         connection.setCursorItem(player.getCursor().state(), player.getCursor().count());

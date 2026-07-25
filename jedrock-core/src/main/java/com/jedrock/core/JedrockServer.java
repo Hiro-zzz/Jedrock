@@ -529,6 +529,21 @@ public class JedrockServer implements Server, ConnectionListener {
         return plugins;
     }
 
+    /**
+     * Open a script-owned virtual menu (a chest window backed by {@code container}, no world block) to a
+     * player. A non-null {@code onClick} makes it a read-only button menu; null makes it a storage
+     * container. Java only — see {@link ContainerService#openMenu}.
+     *
+     * @return {@code true} if it opened, {@code false} if the player is offline or on an edition that can't show it
+     */
+    public boolean openMenu(Player player, String title, com.jedrock.core.inventory.Container container,
+                            com.jedrock.core.inventory.MenuClick onClick) {
+        if (!(player instanceof CorePlayer cp)) {
+            return false;
+        }
+        return containers.openMenu(cp, title, container, onClick);
+    }
+
     // ===== ConnectionListener: network → core state bridge =====
     //
     // The network protocol handler is responsible for sending the protocol-mandatory
