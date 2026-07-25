@@ -8,6 +8,7 @@ import com.jedrock.api.event.player.PlayerHeldItemChangeEvent;
 import com.jedrock.api.player.ArmorSlot;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
+import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Blocks;
 import com.jedrock.core.player.CorePlayer;
 import com.jedrock.core.player.PlayerBroadcast;
@@ -108,16 +109,18 @@ public final class ContainerService {
      * block. A non-null {@code onClick} makes it a read-only button menu whose clicks call the handler;
      * a null one makes it a transient storage container (its edits are not persisted).
      *
-     * <p>Java only. The retail 1.1.5 client crashes on a chest window (it binds the GUI to a block tile
-     * that a virtual menu has no equivalent of — the same reason world chests use click-transfer there),
-     * so opening one to a Bedrock player is refused.
+     * <p>Java and Bedrock <b>0.14</b>, which open real chest windows. The retail <b>1.1.5</b> client crashes
+     * on a chest window (it binds the GUI to a block tile a virtual menu has no equivalent of — the same
+     * reason world chests trade through click-transfer there), so opening one to a 1.1.5 player is refused.
+     * On the client-authoritative PE window a storage menu works cleanly; a button menu's read-only
+     * revert is best-effort (see {@link #onContainerSetSlot}).
      *
      * @return {@code true} if the menu was opened, {@code false} if the player's edition can't show it
      */
     public boolean openMenu(CorePlayer player, String title, Container container, MenuClick onClick) {
         PlayerConnection connection = player.getConnection();
-        if (connection.getProtocolVersion().isBedrock()) {
-            return false; // a chest window crashes the legacy Bedrock clients — see the class note
+        if (connection.getProtocolVersion() == ProtocolVersion.PE_1_1_5) {
+            return false; // a chest window crashes the retail 1.1.5 client — see the class note
         }
         player.openContainer(MENU_WINDOW_ID, container, false, onClick);
         connection.openContainer(MENU_WINDOW_ID, title, container.size(), 0, 0, 0);
@@ -346,9 +349,22 @@ public final class ContainerService {
         // tells us the new slot value.
         if (player.hasContainerOpen() && windowId == player.getOpenWindowId()) {
             Container chest = player.getOpenContainer();
+            MenuClick menu = player.getOpenMenuClick();
+            if (menu != null) {
+                // A button menu: slots are read-only. Fire the click for the tapped slot, then re-send the
+                // window so the client's optimistic move is undone. (Cross-window moves on the client-
+                // authoritative PE path can't be perfectly reverted — button menus there are best-effort.)
+                if (slot < chest.size()) {
+                    menu.onClick(player, slot, chest.stateAt(slot));
+                }
+                connection.setWindowItems(windowId, chest.states(), chest.counts());
+                return;
+            }
             if (slot < chest.size()) {
                 chest.set(slot, state, count);
-                world.markDirty();
+                if (player.isOpenContainerPersistent()) {
+                    world.markDirty(); // a world-chest edit persists; a menu's is transient
+                }
             }
         } else if (windowId == 0 && player.getGameMode() == GameMode.CREATIVE) {
             // The player's own inventory (PE window 0: 0-8 hotbar, 9-35 main). Only trust the client's

@@ -59,7 +59,7 @@ class ContainerMenuTest {
     }
 
     @Test
-    void aBedrockPlayerIsRefused() {
+    void aRetail115PlayerIsRefused() {
         Conn conn = new Conn(ProtocolVersion.PE_1_1_5);
         CorePlayer player = join(conn);
 
@@ -67,6 +67,56 @@ class ContainerMenuTest {
 
         assertFalse(opened, "the 1.1.5 client crashes on a chest window");
         assertFalse(player.hasContainerOpen());
+    }
+
+    @Test
+    void a014PlayerCanOpenAMenu() {
+        Conn conn = new Conn(ProtocolVersion.PE_0_14);
+        CorePlayer player = join(conn);
+        Container menu = new Container(27);
+        menu.set(0, DIAMOND, 1);
+
+        boolean opened = containers.openMenu(player, "Shop", menu, null);
+
+        assertTrue(opened, "0.14 opens a real chest window");
+        assertTrue(player.hasContainerOpen());
+        assertEquals(27, conn.lastWindowItems.length, "PE window is just the chest slots");
+        assertEquals(DIAMOND, conn.lastWindowItems[0]);
+    }
+
+    @Test
+    void a014ButtonMenuClickRoutesThroughContainerSetSlotAndReverts() {
+        Conn conn = new Conn(ProtocolVersion.PE_0_14);
+        CorePlayer player = join(conn);
+        Container menu = new Container(27);
+        menu.set(3, DIAMOND, 1);
+        int[] clicked = {-1, -1};
+        containers.openMenu(player, "Menu", menu, (p, slot, state) -> { clicked[0] = slot; clicked[1] = state; });
+        int windowId = player.getOpenWindowId();
+
+        // The client (authoritative) reports it emptied the button slot; the menu fires the click and
+        // re-sends the window so the button is restored.
+        containers.onContainerSetSlot(conn, windowId, 3, 0, 0);
+
+        assertEquals(3, clicked[0], "the handler saw the tapped slot");
+        assertEquals(DIAMOND, clicked[1], "and the button item");
+        assertEquals(DIAMOND, menu.stateAt(3), "the button is untouched (the report was rejected)");
+        assertEquals(DIAMOND, conn.lastWindowItems[3], "the window was re-sent to revert the client");
+    }
+
+    @Test
+    void a014StorageMenuAppliesTheClientsMoveButDoesNotPersist() {
+        Conn conn = new Conn(ProtocolVersion.PE_0_14);
+        CorePlayer player = join(conn);
+        Container menu = new Container(27);
+        containers.openMenu(player, "Bag", menu, null); // a fresh, unbaked world starts clean
+        int windowId = player.getOpenWindowId();
+
+        containers.onContainerSetSlot(conn, windowId, 5, DIAMOND, 2); // the client says it put items in slot 5
+
+        assertEquals(DIAMOND, menu.stateAt(5), "the client-authoritative move was applied");
+        assertEquals(2, menu.countAt(5));
+        assertFalse(world.isDirty(), "a menu's edits are transient");
     }
 
     @Test

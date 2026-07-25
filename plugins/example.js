@@ -391,7 +391,8 @@ commands.register({
     }
 });
 
-// /menu — a virtual chest opened as a BUTTON menu (Java clients; a Bedrock player is told it can't show).
+// /menu — a virtual chest opened as a BUTTON menu (Java and Bedrock 0.14; a 1.1.5 player is told it can't
+// show, since that client crashes on a chest window).
 // The slots are read-only: clicking one fires onClick instead of moving the item, so each slot is a button.
 // (Drop the onClick and it's a plain storage chest the player can move items in and out of, backed by no
 // world block — nothing persists.)
@@ -408,7 +409,7 @@ commands.register('menu', function (player, args) {
         }
     });
     if (!m.open(player)) {
-        player.sendMessage('{red}Menus need a Java client (Bedrock chest windows are unstable here).');
+        player.sendMessage('{red}Menus work on Java and 0.14, but the 1.1.5 client crashes on chest windows.');
     }
 });
 

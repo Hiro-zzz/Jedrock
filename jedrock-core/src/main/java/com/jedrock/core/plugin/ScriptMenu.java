@@ -21,8 +21,10 @@ import org.mozilla.javascript.Function;
  *   bag.open(player);
  * }</pre>
  *
- * <p>Java only — the retail 1.1.5 client crashes on a chest window (the same reason world chests trade
- * through click-transfer there), so {@link #open} returns {@code false} for a Bedrock player.
+ * <p>Java and Bedrock 0.14, which open real chest windows. The retail 1.1.5 client crashes on a chest
+ * window (the same reason world chests trade through click-transfer there), so {@link #open} returns
+ * {@code false} for a 1.1.5 player. On the client-authoritative PE window a storage menu works cleanly;
+ * a button menu's read-only revert is best-effort.
  */
 public final class ScriptMenu {
 

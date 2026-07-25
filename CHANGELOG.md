@@ -86,6 +86,16 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Virtual chests reach Bedrock 0.14.** The `menus` virtual chest (Java last round) now opens on 0.14
+  too, which — unlike 1.1.5 — shows a real chest window without crashing (it already had the full
+  container flow wired for world chests: ContainerOpen `0xb5`, ContainerSetContent `0xb9`, inbound
+  ContainerSetSlot `0xb7`). `openMenu` now refuses only 1.1.5, not all of Bedrock. Because the PE window is
+  client-authoritative, a **storage** menu works cleanly — the client moves items and reports each slot,
+  which is applied to the menu (and, being transient, never marks the world dirty) — while a **button**
+  menu's read-only revert is best-effort: `onContainerSetSlot` fires the click for the tapped slot and
+  re-sends the window to undo the client's optimistic move, which can't perfectly reverse a cross-window
+  drag the way the server-authoritative Java path does. Tested for both PE shapes plus the 1.1.5 refusal.
+
 - **Boss bar reaches Java 1.8 and Bedrock 1.1.5.** The boss bar (added on 1.12.2 last round) now shows on
   two more editions, so `player.setBossBar(...)` is cross-edition wherever a client can draw one.
   **Java 1.8** has no boss-bar packet, so it uses the classic **wither illusion**: an invisible wither is
