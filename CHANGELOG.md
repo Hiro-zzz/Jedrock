@@ -112,9 +112,11 @@ unstable — anything may change between entries.
 - **Boss bar reaches Java 1.8 and Bedrock 1.1.5.** The boss bar (added on 1.12.2 last round) now shows on
   two more editions, so `player.setBossBar(...)` is cross-edition wherever a client can draw one.
   **Java 1.8** has no boss-bar packet, so it uses the classic **wither illusion**: an invisible wither is
-  spawned and ridden by the player (Attach Entity), which keeps it at zero distance so the health bar
-  always shows, with the title as its name and the fill driven through its health (max 300). No
-  repositioning — it follows the player as its passenger. **Bedrock 1.1.5** uses the native **BossEvent**
+  spawned a few blocks below the player (clear of their collision box), named the title, its health driving
+  the fill (max 300), and teleported to follow the player so it stays loaded as they travel — the approach
+  battle-tested 1.8 bar plugins use. (A first cut rode the wither on the player via Attach Entity; that
+  didn't render the bar on a real client, so it was replaced with the spawn-and-follow above.) The wither's
+  name is set without the always-visible flag, so no floating text leaks under the player. **Bedrock 1.1.5** uses the native **BossEvent**
   packet (`0x4c`) bound to the player's own entity id, so no extra entity is spawned: TYPE_SHOW to add
   (title + fill + colour + overlay, the fields in PMMP's fall-through order), TYPE_HEALTH_PERCENT and
   TYPE_TITLE to update, TYPE_HIDE to clear. **0.14 predates boss bars** and keeps the no-op. The 1.1.5

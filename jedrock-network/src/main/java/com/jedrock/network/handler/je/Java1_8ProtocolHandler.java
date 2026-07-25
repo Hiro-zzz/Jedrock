@@ -81,10 +81,12 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
         var listener = connection.getListener();
         if (id == SB_POSITION) {
             double x = in.readDouble(), y = in.readDouble(), z = in.readDouble();
+            bossBarFollow(connection, x, y, z); // keep the boss-bar wither on the player
             connection.clientMoved(x, y, z, null, null);
         } else if (id == SB_POSITION_LOOK) {
             double x = in.readDouble(), y = in.readDouble(), z = in.readDouble();
             float yaw = in.readFloat(), pitch = in.readFloat();
+            bossBarFollow(connection, x, y, z);
             connection.clientMoved(x, y, z, yaw, pitch);
         } else if (id == SB_LOOK) {
             float yaw = in.readFloat(), pitch = in.readFloat();
@@ -238,6 +240,7 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
             b.writeFloat(spawn.yaw()); b.writeFloat(spawn.pitch());
             b.writeByte(0);                                  // flags: all absolute (no teleport id in 1.8)
         });
+        this.bossX = spawn.x(); this.bossY = spawn.y(); this.bossZ = spawn.z(); // seed the boss-bar follow pos
         sendKeepAlive(c);
     }
 
@@ -638,19 +641,21 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     }
 
     // ===== Boss bar (1.8 has no boss-bar packet, so a classic wither-entity illusion) =====
-    // The client draws a boss health bar for a nearby wither / dragon. Spawn an invisible wither, ride it
-    // on the player (Attach Entity) so it is always at zero distance and the bar always shows, name it the
-    // title, and drive the bar fill through its health (max 300). No repositioning: it follows the player
-    // as its passenger. Unverified on a real 1.8 client; its failure mode is cosmetic (no bar), not a crash.
+    // The client draws a boss health bar for a loaded wither / dragon. Spawn an invisible wither a few
+    // blocks below the player (clear of their collision box), name it the title, drive the fill through its
+    // health (max 300), and teleport it to follow the player so it stays loaded as they travel. This is
+    // what battle-tested 1.8 bar plugins do. Unverified on a real client; its failure mode is cosmetic.
 
-    private static final int CB_ATTACH_ENTITY = 0x1B;   // entityId (int), vehicleId (int), leash (bool)
     private static final int WITHER_TYPE_ID = 64;       // classic 1.8 mob id
     private static final float WITHER_MAX_HEALTH = 300f; // the client's fixed wither max — the bar denominator
-    private static final int SELF_ENTITY_ID = 1;        // the player's own id on their client (see JoinGame)
     /** A fixed, very high id for the boss-bar wither; core ids start at 1000 and never approach this. */
     private static final int BOSS_BAR_ENTITY_ID = Integer.MAX_VALUE - 1;
+    /** The wither sits this far below the player's feet: close enough for the bar, clear of collision. */
+    private static final double BOSS_BAR_Y_OFFSET = -5.0;
 
     private boolean bossBarShown;
+    /** Last known player position; the wither is teleported here (offset down) so it follows and stays loaded. */
+    private double bossX, bossY = 64, bossZ;
 
     @Override
     public void setBossBar(JedrockConnection c, String title, float progress, int color) {
@@ -660,20 +665,14 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
             send(c, CB_SPAWN_MOB, b -> {
                 ByteBufUtils.writeVarInt(b, BOSS_BAR_ENTITY_ID);
                 b.writeByte(WITHER_TYPE_ID);
-                b.writeInt(fixed(0)); b.writeInt(fixed(64)); b.writeInt(fixed(0)); // position is irrelevant once it rides
+                b.writeInt(fixed(bossX)); b.writeInt(fixed(bossY + BOSS_BAR_Y_OFFSET)); b.writeInt(fixed(bossZ));
                 b.writeByte(0); b.writeByte(0); b.writeByte(0);                    // yaw, pitch, head yaw
                 b.writeShort(0); b.writeShort(0); b.writeShort(0);                 // velocity
                 writeMetaByte(b, META_INDEX_FLAGS, FLAG_INVISIBLE);
-                writeNameTag(b, title);
+                writeBossName(b, title);
                 b.writeByte((META_TYPE_FLOAT << 5) | META_INDEX_HEALTH);
                 b.writeFloat(health);
                 b.writeByte(META_END);
-            });
-            // Attach Entity (0x1B): the wither rides the player, so it is always at their position.
-            send(c, CB_ATTACH_ENTITY, b -> {
-                b.writeInt(BOSS_BAR_ENTITY_ID);
-                b.writeInt(SELF_ENTITY_ID);
-                b.writeBoolean(false); // not a leash — a vehicle mount
             });
             bossBarShown = true;
             return;
@@ -681,11 +680,21 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
         // Already up: update the wither's name (title) and health (fill) via Entity Metadata (0x1C).
         send(c, CB_ENTITY_METADATA, b -> {
             ByteBufUtils.writeVarInt(b, BOSS_BAR_ENTITY_ID);
-            writeNameTag(b, title);
+            writeBossName(b, title);
             b.writeByte((META_TYPE_FLOAT << 5) | META_INDEX_HEALTH);
             b.writeFloat(health);
             b.writeByte(META_END);
         });
+    }
+
+    /**
+     * The boss wither's title as its custom name (metadata index 2) <em>without</em> the always-visible
+     * flag (index 3): the boss bar reads the name from {@code getDisplayName()} regardless, and a visible
+     * nametag on the invisible wither would be a floating-text artifact under the player.
+     */
+    private static void writeBossName(ByteBuf b, String title) {
+        b.writeByte((META_TYPE_STRING << 5) | META_INDEX_CUSTOM_NAME);
+        ByteBufUtils.writeString(b, title == null ? "" : title);
     }
 
     @Override
@@ -696,6 +705,24 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
                 ByteBufUtils.writeVarInt(b, BOSS_BAR_ENTITY_ID);
             });
             bossBarShown = false;
+        }
+    }
+
+    /**
+     * Remember the player's position and, if the boss bar is up, teleport its wither to follow — so a
+     * player who walks off doesn't leave the wither (and its bar) behind to unload. Called on every move.
+     */
+    private void bossBarFollow(JedrockConnection c, double x, double y, double z) {
+        this.bossX = x;
+        this.bossY = y;
+        this.bossZ = z;
+        if (bossBarShown) {
+            send(c, CB_ENTITY_TELEPORT, b -> {
+                ByteBufUtils.writeVarInt(b, BOSS_BAR_ENTITY_ID);
+                b.writeInt(fixed(x)); b.writeInt(fixed(y + BOSS_BAR_Y_OFFSET)); b.writeInt(fixed(z));
+                b.writeByte(0); b.writeByte(0);   // yaw, pitch
+                b.writeBoolean(false);            // on ground
+            });
         }
     }
 
