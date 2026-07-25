@@ -269,7 +269,8 @@ public interface PlayerConnection {
     /**
      * Show / update the boss bar: a title (already rendered to legacy {@code §} form), a fill fraction
      * ({@code 0}..{@code 1}), and a canonical colour id (0 pink, 1 blue, 2 red, 3 green, 4 yellow,
-     * 5 purple, 6 white — the JE wire values). Java 1.12.2 draws it; everything else ignores it. Default no-op.
+     * 5 purple, 6 white — the JE wire values). Java (1.12.2 packet, 1.8 wither illusion) and Bedrock 1.1.5
+     * draw it; 0.14 predates boss bars and ignores it. Default no-op.
      */
     default void setBossBar(String title, float progress, int color) {}
 

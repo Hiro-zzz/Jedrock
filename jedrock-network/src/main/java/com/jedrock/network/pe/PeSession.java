@@ -142,6 +142,63 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         sendGameBatch(b -> writeSetTitle(b, TITLE_TYPE_CLEAR, "", 0, 0, 0));
     }
 
+    /** BossEvent event types (PMMP {@code BossEventPacket} @ 113). */
+    private static final int BOSS_SHOW = 0;
+    private static final int BOSS_HIDE = 2;
+    private static final int BOSS_HEALTH = 4;
+    private static final int BOSS_TITLE = 5;
+
+    private boolean bossBarShown;
+
+    @Override
+    public void setBossBar(String title, float progress, int color) {
+        // The bar binds to an entity; use the player's own id (StartGame gave it SELF_ENTITY_ID), so no
+        // extra entity has to be spawned. Verified against PMMP's BossEventPacket @ 113; unverified on a
+        // real client. A malformed field could disconnect the client, so every field mirrors PMMP exactly.
+        String shown = title == null ? "" : title;
+        if (!bossBarShown) {
+            // TYPE_SHOW falls through to the texture fields in PMMP, so the packet carries title, health,
+            // an unknown short, then colour + overlay — all of them, in that order.
+            sendGameBatch(b -> {
+                ByteBufUtils.writeVarInt(b, ID_BOSS_EVENT);
+                ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID); // bossEid (putEntityUniqueId)
+                ByteBufUtils.writeVarInt(b, BOSS_SHOW);
+                ByteBufUtils.writeString(b, shown);
+                b.writeFloatLE(progress);
+                b.writeShortLE(0);                                   // unknownShort
+                ByteBufUtils.writeVarInt(b, color);                 // colour
+                ByteBufUtils.writeVarInt(b, 0);                     // overlay
+            });
+            bossBarShown = true;
+            return;
+        }
+        // Already up: update the fill and the title (colour changes after the first show are ignored).
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_BOSS_EVENT);
+            ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);
+            ByteBufUtils.writeVarInt(b, BOSS_HEALTH);
+            b.writeFloatLE(progress);
+        });
+        sendGameBatch(b -> {
+            ByteBufUtils.writeVarInt(b, ID_BOSS_EVENT);
+            ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);
+            ByteBufUtils.writeVarInt(b, BOSS_TITLE);
+            ByteBufUtils.writeString(b, shown);
+        });
+    }
+
+    @Override
+    public void clearBossBar() {
+        if (bossBarShown) {
+            sendGameBatch(b -> {
+                ByteBufUtils.writeVarInt(b, ID_BOSS_EVENT);
+                ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);
+                ByteBufUtils.writeVarInt(b, BOSS_HIDE);
+            });
+            bossBarShown = false;
+        }
+    }
+
     /**
      * Write one SetTitle (0x59) packet. Layout, verbatim from PMMP {@code SetTitlePacket} at protocol 113:
      * {@code type} (signed varint), {@code text} (string), then {@code fadeIn} / {@code stay} /

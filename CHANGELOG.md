@@ -86,6 +86,19 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Boss bar reaches Java 1.8 and Bedrock 1.1.5.** The boss bar (added on 1.12.2 last round) now shows on
+  two more editions, so `player.setBossBar(...)` is cross-edition wherever a client can draw one.
+  **Java 1.8** has no boss-bar packet, so it uses the classic **wither illusion**: an invisible wither is
+  spawned and ridden by the player (Attach Entity), which keeps it at zero distance so the health bar
+  always shows, with the title as its name and the fill driven through its health (max 300). No
+  repositioning — it follows the player as its passenger. **Bedrock 1.1.5** uses the native **BossEvent**
+  packet (`0x4c`) bound to the player's own entity id, so no extra entity is spawned: TYPE_SHOW to add
+  (title + fill + colour + overlay, the fields in PMMP's fall-through order), TYPE_HEALTH_PERCENT and
+  TYPE_TITLE to update, TYPE_HIDE to clear. **0.14 predates boss bars** and keeps the no-op. The 1.1.5
+  layout is byte-checked against PocketMine at protocol 113 (`1.7dev-27`); neither the wither trick nor the
+  BossEvent is verified on a real client here, so both are best-effort — the 1.8 one fails cosmetically (no
+  bar), and every 1.1.5 field mirrors PMMP exactly to avoid a malformed-packet disconnect.
+
 - **Virtual chests for scripts — the `menus` global.** A script-owned chest window with no world block
   behind it: `menus.create(title, rows)` (1–6 rows) builds one, `setItem` / `getItem` / `clear` lay it
   out, and `open(player)` shows it. Two shapes decided by one call: give it an `onClick(player, slot,

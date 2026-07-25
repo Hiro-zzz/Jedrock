@@ -40,6 +40,7 @@ final class McpeProtocol {
     static final int ID_SET_ENTITY_DATA = 0x27;   // entity metadata (sneak pose etc.)
     static final int ID_ANIMATE = 0x2C;           // arm swing
     static final int ID_SET_TITLE = 0x59;         // outbound: title / subtitle / action-bar / times (protocol 113)
+    static final int ID_BOSS_EVENT = 0x4c;        // outbound: boss bar (show / health / title / hide)
     static final int ID_LEVEL_SOUND_EVENT = 0x19; // outbound: entity-ish sounds (explode / levelup / note …)
     static final int ID_LEVEL_EVENT = 0x1a;       // outbound: world effects — 1000-series sounds, 0x4000|particle
 

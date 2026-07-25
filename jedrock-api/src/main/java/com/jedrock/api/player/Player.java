@@ -242,8 +242,9 @@ public interface Player extends Entity, CommandSender {
     /**
      * Show a <b>boss bar</b> across the top of the screen: a title and a fill fraction, in the default
      * purple. Purely presentational — no entity, no combat; the bar shows whatever you set. Calling it
-     * again updates the same bar. Java 1.12.2 only for now (it has the dedicated packet); 1.8 and Bedrock
-     * ignore it (1.8 has no boss-bar packet, and the legacy Bedrock clients aren't wired here yet).
+     * again updates the same bar. Cross-edition where the client can show one: Java 1.12.2 (its dedicated
+     * packet), Java 1.8 (an invisible wither ridden by the player — the classic illusion) and Bedrock
+     * 1.1.5 (BossEvent). Bedrock 0.14 predates boss bars and ignores it.
      *
      * @param progress the fill, {@code 0.0}..{@code 1.0} (clamped)
      */

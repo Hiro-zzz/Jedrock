@@ -637,6 +637,68 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
         sidebar(c).clear();
     }
 
+    // ===== Boss bar (1.8 has no boss-bar packet, so a classic wither-entity illusion) =====
+    // The client draws a boss health bar for a nearby wither / dragon. Spawn an invisible wither, ride it
+    // on the player (Attach Entity) so it is always at zero distance and the bar always shows, name it the
+    // title, and drive the bar fill through its health (max 300). No repositioning: it follows the player
+    // as its passenger. Unverified on a real 1.8 client; its failure mode is cosmetic (no bar), not a crash.
+
+    private static final int CB_ATTACH_ENTITY = 0x1B;   // entityId (int), vehicleId (int), leash (bool)
+    private static final int WITHER_TYPE_ID = 64;       // classic 1.8 mob id
+    private static final float WITHER_MAX_HEALTH = 300f; // the client's fixed wither max — the bar denominator
+    private static final int SELF_ENTITY_ID = 1;        // the player's own id on their client (see JoinGame)
+    /** A fixed, very high id for the boss-bar wither; core ids start at 1000 and never approach this. */
+    private static final int BOSS_BAR_ENTITY_ID = Integer.MAX_VALUE - 1;
+
+    private boolean bossBarShown;
+
+    @Override
+    public void setBossBar(JedrockConnection c, String title, float progress, int color) {
+        float health = Math.max(1f, progress * WITHER_MAX_HEALTH); // >0 so the wither (and its bar) stays alive
+        if (!bossBarShown) {
+            // Spawn Mob (0x0F): an invisible wither carrying the title as its name and the fill as its health.
+            send(c, CB_SPAWN_MOB, b -> {
+                ByteBufUtils.writeVarInt(b, BOSS_BAR_ENTITY_ID);
+                b.writeByte(WITHER_TYPE_ID);
+                b.writeInt(fixed(0)); b.writeInt(fixed(64)); b.writeInt(fixed(0)); // position is irrelevant once it rides
+                b.writeByte(0); b.writeByte(0); b.writeByte(0);                    // yaw, pitch, head yaw
+                b.writeShort(0); b.writeShort(0); b.writeShort(0);                 // velocity
+                writeMetaByte(b, META_INDEX_FLAGS, FLAG_INVISIBLE);
+                writeNameTag(b, title);
+                b.writeByte((META_TYPE_FLOAT << 5) | META_INDEX_HEALTH);
+                b.writeFloat(health);
+                b.writeByte(META_END);
+            });
+            // Attach Entity (0x1B): the wither rides the player, so it is always at their position.
+            send(c, CB_ATTACH_ENTITY, b -> {
+                b.writeInt(BOSS_BAR_ENTITY_ID);
+                b.writeInt(SELF_ENTITY_ID);
+                b.writeBoolean(false); // not a leash — a vehicle mount
+            });
+            bossBarShown = true;
+            return;
+        }
+        // Already up: update the wither's name (title) and health (fill) via Entity Metadata (0x1C).
+        send(c, CB_ENTITY_METADATA, b -> {
+            ByteBufUtils.writeVarInt(b, BOSS_BAR_ENTITY_ID);
+            writeNameTag(b, title);
+            b.writeByte((META_TYPE_FLOAT << 5) | META_INDEX_HEALTH);
+            b.writeFloat(health);
+            b.writeByte(META_END);
+        });
+    }
+
+    @Override
+    public void clearBossBar(JedrockConnection c) {
+        if (bossBarShown) {
+            send(c, CB_ENTITY_DESTROY, b -> {
+                ByteBufUtils.writeVarInt(b, 1);
+                ByteBufUtils.writeVarInt(b, BOSS_BAR_ENTITY_ID);
+            });
+            bossBarShown = false;
+        }
+    }
+
     @Override
     public void setGameMode(JedrockConnection c, GameMode mode) {
         // Change Game State (0x2B): byte reason 3 = change game mode, float value = the mode id.

@@ -73,6 +73,8 @@ public final class Java1_8Protocol {
     // Type ids are 1.8's own (byte 0, short 1, int 2, float 3, string 4, …) — 1.12.2 renumbered them.
     public static final int META_TYPE_BYTE = 0;
     public static final int META_TYPE_STRING = 4;
+    public static final int META_TYPE_FLOAT = 3;
+    public static final int META_INDEX_HEALTH = 6;              // float — drives a wither's boss-bar fill
     public static final int META_INDEX_FLAGS = 0;   // shared entity flags byte
     public static final int META_INDEX_CUSTOM_NAME = 2;          // string
     public static final int META_INDEX_CUSTOM_NAME_VISIBLE = 3;  // byte (1.8 has no boolean type)
