@@ -86,6 +86,19 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Virtual chests on Bedrock 1.1.5 — as a `/pick` list.** The 1.1.5 client crashes on a chest window, so a
+  button menu there degrades to a text **list**: a script gives each button a label with the new
+  `menu.button(slot, item, label)`, and on 1.1.5 those labels are printed and chosen with a built-in
+  **`/pick <label>`**, which fires the same click handler the window would. `/pick` is a built-in (not a
+  per-menu command) on purpose — the 1.1.5 client rejects any command not in the manifest it got at spawn,
+  and re-sending that manifest per menu is exactly the risky, unverifiable wire this avoids. On Java the
+  labels tab-complete (from the player's pending list); on 1.1.5 the client only knows `/pick` takes free
+  text, so the player reads the options from the chat list — true client-side label completion there would
+  need a dynamic per-menu command manifest, a follow-up against a real client. A menu with no labels has
+  nothing to list, so it's still refused on 1.1.5; storage menus (which move items) can't be a list and
+  stay window-only. Tested: the list build, the case-insensitive pick, the label completion, and the
+  no-labels refusal.
+
 - **Virtual chests reach Bedrock 0.14.** The `menus` virtual chest (Java last round) now opens on 0.14
   too, which — unlike 1.1.5 — shows a real chest window without crashing (it already had the full
   container flow wired for world chests: ContainerOpen `0xb5`, ContainerSetContent `0xb9`, inbound

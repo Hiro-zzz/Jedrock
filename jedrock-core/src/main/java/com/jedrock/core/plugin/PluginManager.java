@@ -519,9 +519,9 @@ public final class PluginManager {
 
     /** Open a virtual menu to a player through the server (a no-op returning false without a live server). */
     boolean openMenu(com.jedrock.api.player.Player player, String title,
-                     com.jedrock.core.inventory.Container container,
+                     com.jedrock.core.inventory.Container container, String[] labels,
                      com.jedrock.core.inventory.MenuClick onClick) {
-        return server instanceof JedrockServer js && js.openMenu(player, title, container, onClick);
+        return server instanceof JedrockServer js && js.openMenu(player, title, container, labels, onClick);
     }
 
     /** Build a JS array of primitive strings (see {@link #callCommand} for why primitives, not wrappers). */

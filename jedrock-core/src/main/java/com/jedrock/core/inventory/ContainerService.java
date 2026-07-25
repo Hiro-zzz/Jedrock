@@ -115,16 +115,55 @@ public final class ContainerService {
      * On the client-authoritative PE window a storage menu works cleanly; a button menu's read-only
      * revert is best-effort (see {@link #onContainerSetSlot}).
      *
-     * @return {@code true} if the menu was opened, {@code false} if the player's edition can't show it
+     * <p>The retail <b>1.1.5</b> can't show a window, so a <em>button</em> menu there degrades to a text
+     * <b>list</b>: the labelled slots ({@code labels}) become options the player chooses with {@code /pick}.
+     * A menu with no labels (or no click handler) has nothing to list, so it's refused on 1.1.5.
+     *
+     * @param labels per-slot option labels for the list fallback, or {@code null} entries for plain items
+     * @return {@code true} if the menu was shown (as a window or a list), {@code false} if it couldn't be
      */
-    public boolean openMenu(CorePlayer player, String title, Container container, MenuClick onClick) {
+    public boolean openMenu(CorePlayer player, String title, Container container, String[] labels,
+                            MenuClick onClick) {
         PlayerConnection connection = player.getConnection();
         if (connection.getProtocolVersion() == ProtocolVersion.PE_1_1_5) {
-            return false; // a chest window crashes the retail 1.1.5 client — see the class note
+            return openAsList(player, title, container, labels, onClick);
         }
         player.openContainer(MENU_WINDOW_ID, container, false, onClick);
         connection.openContainer(MENU_WINDOW_ID, title, container.size(), 0, 0, 0);
         sendChestContents(player, connection);
+        return true;
+    }
+
+    /**
+     * Show a button menu as a text list on a client that can't open a window (1.1.5): store it as the
+     * player's pending {@link ListMenu} and print the options, which they pick with {@code /pick <label>}.
+     * Needs a click handler and at least one labelled button, or there is nothing to offer.
+     */
+    private boolean openAsList(CorePlayer player, String title, Container container, String[] labels,
+                               MenuClick onClick) {
+        if (onClick == null || labels == null) {
+            return false;
+        }
+        java.util.List<String> optionLabels = new java.util.ArrayList<>();
+        java.util.List<Integer> optionSlots = new java.util.ArrayList<>();
+        java.util.List<Integer> optionStates = new java.util.ArrayList<>();
+        for (int slot = 0; slot < labels.length && slot < container.size(); slot++) {
+            if (labels[slot] != null && !labels[slot].isEmpty()) {
+                optionLabels.add(labels[slot]);
+                optionSlots.add(slot);
+                optionStates.add(container.stateAt(slot));
+            }
+        }
+        if (optionLabels.isEmpty()) {
+            return false; // no labelled buttons — nothing a list can offer
+        }
+        int[] slots = optionSlots.stream().mapToInt(Integer::intValue).toArray();
+        int[] states = optionStates.stream().mapToInt(Integer::intValue).toArray();
+        player.setPendingMenu(new ListMenu(title, optionLabels, slots, states, onClick));
+        player.sendMessage(title == null || title.isEmpty() ? "{gold}Pick one:" : title);
+        for (String label : optionLabels) {
+            player.sendMessage(" {gray}• {white}/pick " + label);
+        }
         return true;
     }
 

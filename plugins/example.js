@@ -9,8 +9,8 @@
 //   world      — the shared world: getBlock / setBlock / fill / getHighestY / getBiome / spawn / weather /
 //                playSound / spawnParticle. Edits render live on every client, cross-edition.
 //   entities   — spawn and drive puppets, props and labels; group() builds a scene. See /guard and /decor.
-//   menus      — menus.create(title, rows): a virtual chest (Java clients). onClick makes it a button
-//                menu (read-only slots), or leave it off for a storage chest. See /menu.
+//   menus      — menus.create(title, rows): a virtual chest (Java + 0.14 windows; 1.1.5 gets a /pick list).
+//                onClick + button(slot,item,label) makes a button menu; setItem alone is a storage chest.
 //   storage    — the only thing that survives a restart: get / set / has / remove / keys / size / clear,
 //                plus forPlayer(p) for per-player state. Strings, numbers, booleans, objects and arrays.
 //   events     — events.on(name, fn): subscribe to a built-in event (28 below) OR a custom, script-defined
@@ -398,9 +398,11 @@ commands.register({
 // world block — nothing persists.)
 commands.register('menu', function (player, args) {
     var m = menus.create('{dark_purple}Pick a class', 1);   // 1 row = 9 slots
-    m.setItem(2, Blocks.state(276, 0));   // diamond sword  -> "Warrior"
-    m.setItem(4, Blocks.state(261, 0));   // bow            -> "Archer"
-    m.setItem(6, Blocks.state(345, 0));   // compass        -> "Scout"
+    // button(slot, item, label): the label is what the 1.1.5 list fallback shows and /pick matches; the
+    // window clients (Java, 0.14) just show the item. Give every choice a label so 1.1.5 can list it.
+    m.button(2, Blocks.state(276, 0), 'Warrior');   // diamond sword
+    m.button(4, Blocks.state(261, 0), 'Archer');    // bow
+    m.button(6, Blocks.state(345, 0), 'Scout');     // compass
     m.onClick(function (p, slot, state) {
         var pick = slot === 2 ? 'Warrior' : slot === 4 ? 'Archer' : slot === 6 ? 'Scout' : null;
         if (pick) {
@@ -408,9 +410,9 @@ commands.register('menu', function (player, args) {
             storage.forPlayer(p).set('class', pick);   // remembered across restarts
         }
     });
-    if (!m.open(player)) {
-        player.sendMessage('{red}Menus work on Java and 0.14, but the 1.1.5 client crashes on chest windows.');
-    }
+    // Java / 0.14 open a chest window; 1.1.5 gets a text list it picks from with /pick <label>. open()
+    // returns true in both cases, so there's nothing to fall back on here.
+    m.open(player);
 });
 
 // /inv — exercise the scripting inventory API (survival: give / set / count / remove / clear).

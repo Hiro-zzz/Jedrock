@@ -32,6 +32,7 @@ public final class ScriptMenu {
     private final ScriptPlugin plugin;
     private final String title;
     private final Container container;
+    private final String[] labels; // per-slot option label for the 1.1.5 list fallback; null = none
     private Function onClick;
 
     ScriptMenu(PluginManager manager, ScriptPlugin plugin, String title, int rows) {
@@ -42,6 +43,7 @@ public final class ScriptMenu {
         this.plugin = plugin;
         this.title = title == null ? "" : title;
         this.container = new Container(rows * 9);
+        this.labels = new String[container.size()];
     }
 
     /** Number of slots (rows × 9). */
@@ -58,6 +60,19 @@ public final class ScriptMenu {
     public ScriptMenu setItem(int slot, int state, int count) {
         if (slot >= 0 && slot < container.size()) {
             container.set(slot, state, state == 0 ? 0 : Math.max(1, count));
+        }
+        return this;
+    }
+
+    /**
+     * A labelled <b>button</b>: sets the slot's item and gives it a name. The label is what a client that
+     * can't show a window (1.1.5) lists and what {@code /pick} matches, and it's ignored by the window
+     * clients (Java, 0.14) beyond the item itself. Buttons are the slots the list fallback can offer.
+     */
+    public ScriptMenu button(int slot, int state, String label) {
+        setItem(slot, state);
+        if (slot >= 0 && slot < labels.length) {
+            labels[slot] = label;
         }
         return this;
     }
@@ -91,6 +106,6 @@ public final class ScriptMenu {
     public boolean open(Player player) {
         MenuClick click = onClick == null ? null
                 : (p, slot, state) -> manager.callMenuClick(plugin, onClick, p, slot, state);
-        return manager.openMenu(player, title, container, click);
+        return manager.openMenu(player, title, container, labels, click);
     }
 }

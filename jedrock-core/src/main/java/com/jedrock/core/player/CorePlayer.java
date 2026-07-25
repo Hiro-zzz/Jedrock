@@ -150,6 +150,17 @@ public final class CorePlayer implements Player {
         this.openMenuClick = null;
     }
 
+    /** A button menu shown as a text list (the 1.1.5 fallback), pickable with {@code /pick}; null if none. */
+    private volatile com.jedrock.core.inventory.ListMenu pendingMenu;
+
+    public com.jedrock.core.inventory.ListMenu getPendingMenu() {
+        return pendingMenu;
+    }
+
+    public void setPendingMenu(com.jedrock.core.inventory.ListMenu menu) {
+        this.pendingMenu = menu;
+    }
+
     /** Canonical state per inventory slot (0-8 hotbar, 9-35 main, 36-39 armor, 40 off-hand); 0 = empty. */
     public int[] inventoryStates() {
         return inventory.states();
