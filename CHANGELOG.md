@@ -322,6 +322,18 @@ unstable — anything may change between entries.
   than reaching for a constant, so nothing in the new class knows what a session is. Behaviour is identical
   — even the boss bar still sends its fill and title as two separate batches, which is what it did before.
 
+- **`JedrockServer` split again: the network bridge moves out (1099 → 616 lines).** The last split pulled
+  out what the server *does* (broadcasting, combat, containers, entities, the level). What stayed was two
+  things that never share a line of code: the server's own life — config, the collaborators it owns,
+  bootstrap, the tick, the api surface — and the ~470 lines of *inbound decisions*, one per thing a client
+  can report. New **`ConnectionBridge`** takes the second half, and the split is the one
+  `ConnectionListener` was always shaped for: the network layer holds a listener, not a server, so it now
+  holds exactly that and `JedrockServer` stops implementing the interface entirely. Where a decision is
+  genuinely the server's — which mode a returning player joins in, what commands there are to advertise —
+  the bridge forwards rather than keeping a second copy of the state. Everything else was already
+  delegated and stays so. No behaviour change: the bodies moved verbatim, and 18 imports went dead in the
+  process, which is its own measure of how much did not belong there.
+
 - **`JedrockServer` split into five collaborators (1822 → 1043 lines).** The class had accumulated every
   responsibility that ever needed the roster, and its next feature would have made that worse. What came
   out, each owning one thing and testable on its own: **`PlayerBroadcast`** — the single place that walks
