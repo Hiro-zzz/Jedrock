@@ -23,6 +23,8 @@ import com.jedrock.api.player.GameMode;
  * @param bedrock014Port    UDP port for the experimental MCPE 0.14 listener (own RakNet version)
  * @param bedrock014Enabled whether the MCPE 0.14 listener is bound at all
  * @param defaultGameMode   game mode a player joins in (survival / creative / …)
+ * @param peSidebarRaise    blank rows padded under the Bedrock sidebar, lifting it off the hotbar
+ * @param peSidebarShift    spaces padded on each Bedrock sidebar row, nudging it sideways
  */
 public record ServerProperties(
         String name,
@@ -39,7 +41,9 @@ public record ServerProperties(
         double maxMoveDelta,
         int bedrock014Port,
         boolean bedrock014Enabled,
-        GameMode defaultGameMode
+        GameMode defaultGameMode,
+        int peSidebarRaise,
+        int peSidebarShift
 ) {
 
     /** The built-in defaults, used when no config file is present or a key is missing/invalid. */
@@ -59,7 +63,9 @@ public record ServerProperties(
                 16.0,            // maxMoveDelta — generous; catches teleport/speed, not lag/falls
                 19133,           // bedrock014Port — experimental MCPE 0.14, its own UDP port
                 true,            // bedrock014Enabled
-                GameMode.CREATIVE // defaultGameMode — creative preserves the current join behaviour
+                GameMode.CREATIVE, // defaultGameMode — creative preserves the current join behaviour
+                4,               // peSidebarRaise — lift the popup clear of the hotbar
+                16               // peSidebarShift — nudge it aside, the way a Java sidebar sits off-centre
         );
     }
 }

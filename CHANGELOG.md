@@ -8,6 +8,44 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **The sidebar reaches Bedrock — on the item-name line.** Neither legacy Bedrock era has a scoreboard, so
+  `player.setSidebar(title, [lines])` borrows the one persistent text field those clients do have: the
+  **popup**, which MCPE draws in the HUD slot where a held item's name appears, displaced up the screen.
+  The title goes in the popup's own string and the rows follow beneath it, newline-joined — the two-string
+  shape PMMP's `sendPopup(message, subtitle)` uses. `TextPacket TYPE_POPUP = 3` and its layout are verbatim
+  from PocketMine at **both** protocols (1.7dev-27 for 113, e11b76318 for 45): a `type` byte, then `source`
+  and `message`. The eras are structurally identical here and differ only in their strings — varint-length
+  at 1.1.5, big-endian-short at 0.14 — so each session writes its own, as everywhere else.
+  The one thing a popup isn't is *stateful*: unlike a Java scoreboard the client holds nothing, and the
+  line fades after a couple of seconds. So `PlayerConnection` gained **`sidebarRepaintTicks()`** — how
+  often this client needs its sidebar re-sent, `0` (the default, and Java's answer) meaning never — and
+  `PlayerBroadcast.repaintSidebars` honours it on the game loop from the rendered copy `CorePlayer` now
+  keeps. The core still never learns which edition it is talking to; it just obeys a number the connection
+  declares. A script sets the sidebar once and it stays up on every edition; a server with no sidebars in
+  use pays one field read per player per tick.
+  **Confirmed on a real client**: the panel renders, and `\n` really does give multiple lines rather than
+  one run-on string — the open question this landed with. What it also showed is that the client, not the
+  server, decides *where* that line goes: it sits centred, right on top of the hotbar. Since the only lever
+  is the text itself, placement is two config knobs — **`pe.sidebar.raise`** (blank rows padded under the
+  panel, each lifting it a line clear of the hotbar; negative pads above instead, for a client that anchors
+  the other way) and **`pe.sidebar.shift`** (spaces padded on every row, positive right / negative left;
+  the client centres the popup, so the panel moves about half as far as you pad). Defaults 4 and 16 — off
+  the hotbar and aside, roughly where a Java sidebar sits; `0`/`0` restores the raw centred position. A pad
+  row is a single space, not an empty line, since a renderer is free to drop trailing blanks.
+  Tested: the popup bytes at both protocols, the newline join and its 16-line cap, the padding in both
+  directions on both eras, and the repaint cadence (fires on its tick, not off it; stops on
+  `clearSidebar`; never fires for a Java connection).
+
+- **Virtual chests fall back to `/pick` on 0.14 too.** The `menus` window doesn't come up on a real 0.14
+  client, so that era now takes the same route 1.1.5 does: a **button** menu is shown as a labelled text
+  list and chosen with `/pick <label>`, firing the same handler the window would. 0.14 predates the
+  Bedrock command manifest entirely and sends `/` lines as ordinary chat, so `/pick` needed nothing new
+  there. The two eras aren't treated identically, because their failure modes aren't: on 1.1.5 a window
+  *crashes* the client, so a menu with no labels is refused outright; on 0.14 a window is merely
+  unreliable, so a **storage** menu — which moves items and therefore can't be a list at all — still
+  attempts it rather than losing the only mechanism that era has. Net effect: `menus` is now a **button
+  menu on all four editions**, and Bedrock storage menus are the remaining soft spot.
+
 - **Decoration grows up: labels, scenes and a wider cast.** Three gaps between "props exist" and "props
   are an authoring surface", closed together.
   **Labels are entities now.** A floating line of text was the one member of the family outside the

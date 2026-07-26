@@ -109,15 +109,19 @@ public final class ContainerService {
      * block. A non-null {@code onClick} makes it a read-only button menu whose clicks call the handler;
      * a null one makes it a transient storage container (its edits are not persisted).
      *
-     * <p>Java and Bedrock <b>0.14</b>, which open real chest windows. The retail <b>1.1.5</b> client crashes
-     * on a chest window (it binds the GUI to a block tile a virtual menu has no equivalent of — the same
-     * reason world chests trade through click-transfer there), so opening one to a 1.1.5 player is refused.
-     * On the client-authoritative PE window a storage menu works cleanly; a button menu's read-only
-     * revert is best-effort (see {@link #onContainerSetSlot}).
+     * <p><b>Java</b> opens a real, server-authoritative chest window. <b>Bedrock doesn't get one</b>: the
+     * retail 1.1.5 client crashes on a chest window (it binds the GUI to a block tile a virtual menu has no
+     * equivalent of — the same reason world chests trade through click-transfer there), and a menu window
+     * doesn't come up on 0.14 either. So on <em>both</em> Bedrock eras a <em>button</em> menu degrades to a
+     * text <b>list</b>: the labelled slots ({@code labels}) become options the player chooses with
+     * {@code /pick}, which fires the same click the window would.
      *
-     * <p>The retail <b>1.1.5</b> can't show a window, so a <em>button</em> menu there degrades to a text
-     * <b>list</b>: the labelled slots ({@code labels}) become options the player chooses with {@code /pick}.
-     * A menu with no labels (or no click handler) has nothing to list, so it's refused on 1.1.5.
+     * <p>A menu with no labels (or no click handler) has nothing a list can offer. On 1.1.5 that is refused
+     * outright — a window there crashes the client, so there is no second choice. On 0.14 a window is
+     * merely unreliable rather than fatal, so a <em>storage</em> menu (which moves items and therefore
+     * can't be a list at all) still tries it: the client-authoritative window is the only mechanism that
+     * era has, and it costs nothing to attempt. Its read-only revert for a button menu is best-effort (see
+     * {@link #onContainerSetSlot}) — which is one more reason button menus take the list.
      *
      * @param labels per-slot option labels for the list fallback, or {@code null} entries for plain items
      * @return {@code true} if the menu was shown (as a window or a list), {@code false} if it couldn't be
@@ -125,8 +129,12 @@ public final class ContainerService {
     public boolean openMenu(CorePlayer player, String title, Container container, String[] labels,
                             MenuClick onClick) {
         PlayerConnection connection = player.getConnection();
-        if (connection.getProtocolVersion() == ProtocolVersion.PE_1_1_5) {
+        ProtocolVersion version = connection.getProtocolVersion();
+        if (version == ProtocolVersion.PE_1_1_5) {
             return openAsList(player, title, container, labels, onClick);
+        }
+        if (version == ProtocolVersion.PE_0_14 && openAsList(player, title, container, labels, onClick)) {
+            return true; // a button menu: the list is the reliable path on 0.14 too
         }
         player.openContainer(MENU_WINDOW_ID, container, false, onClick);
         connection.openContainer(MENU_WINDOW_ID, title, container.size(), 0, 0, 0);
@@ -135,9 +143,10 @@ public final class ContainerService {
     }
 
     /**
-     * Show a button menu as a text list on a client that can't open a window (1.1.5): store it as the
-     * player's pending {@link ListMenu} and print the options, which they pick with {@code /pick <label>}.
-     * Needs a click handler and at least one labelled button, or there is nothing to offer.
+     * Show a button menu as a text list on a client that can't open a window (either Bedrock era): store
+     * it as the player's pending {@link ListMenu} and print the options, which they pick with
+     * {@code /pick <label>}. Needs a click handler and at least one labelled button, or there is nothing
+     * to offer — the caller decides what an empty return means for its edition.
      */
     private boolean openAsList(CorePlayer player, String title, Container container, String[] labels,
                                MenuClick onClick) {

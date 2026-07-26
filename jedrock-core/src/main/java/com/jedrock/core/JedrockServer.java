@@ -290,6 +290,10 @@ public class JedrockServer implements Server, ConnectionListener {
         // stopped sending position updates. The service gates itself to a coarse interval.
         combat.environmentTick(currentTick);
 
+        // Repaint the sidebar for clients that can't hold one (Bedrock borrows a HUD line that fades).
+        // Free for everyone else: a player with no sidebar is one field read.
+        broadcast.repaintSidebars(currentTick);
+
         // The scriptable heartbeat: fire a tick event for listeners hanging periodic work on the loop.
         // Only built when something is listening, so an idle server pays nothing for it.
         if (eventBus.hasListeners(ServerTickEvent.class)) {

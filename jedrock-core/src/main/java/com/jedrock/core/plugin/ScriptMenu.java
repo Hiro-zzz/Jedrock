@@ -21,10 +21,12 @@ import org.mozilla.javascript.Function;
  *   bag.open(player);
  * }</pre>
  *
- * <p>Java and Bedrock 0.14, which open real chest windows. The retail 1.1.5 client crashes on a chest
- * window (the same reason world chests trade through click-transfer there), so {@link #open} returns
- * {@code false} for a 1.1.5 player. On the client-authoritative PE window a storage menu works cleanly;
- * a button menu's read-only revert is best-effort.
+ * <p><b>Java</b> opens a real chest window. On <b>Bedrock</b> a window isn't available — 1.1.5 crashes on
+ * one, and 0.14 doesn't bring it up — so a <em>button</em> menu there is shown as a text <b>list</b>
+ * instead: give each button a {@link #button(int, int, String) label} and the player picks it with
+ * {@code /pick <label>}, firing the same handler. A menu with no labels has nothing to list, so
+ * {@link #open} returns {@code false} on 1.1.5; on 0.14 a storage menu (which moves items and can't be a
+ * list) still attempts the window, since a window there is unreliable rather than fatal.
  */
 public final class ScriptMenu {
 
@@ -66,8 +68,9 @@ public final class ScriptMenu {
 
     /**
      * A labelled <b>button</b>: sets the slot's item and gives it a name. The label is what a client that
-     * can't show a window (1.1.5) lists and what {@code /pick} matches, and it's ignored by the window
-     * clients (Java, 0.14) beyond the item itself. Buttons are the slots the list fallback can offer.
+     * can't show a window (either Bedrock era) lists and what {@code /pick} matches; Java ignores it
+     * beyond the item itself. Buttons are the slots the list fallback can offer — a Bedrock button menu
+     * without labels can't be shown at all.
      */
     public ScriptMenu button(int slot, int state, String label) {
         setItem(slot, state);
@@ -100,8 +103,9 @@ public final class ScriptMenu {
     }
 
     /**
-     * Open the menu to {@code player}. Returns {@code false} if the player is offline or on an edition
-     * that can't show a chest window (Bedrock).
+     * Open the menu to {@code player} — as a window on Java, as a {@code /pick} list on Bedrock. Returns
+     * {@code false} if the player is offline, or if neither shape is available to them (a Bedrock button
+     * menu whose buttons carry no labels).
      */
     public boolean open(Player player) {
         MenuClick click = onClick == null ? null

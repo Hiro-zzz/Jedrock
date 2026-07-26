@@ -72,9 +72,12 @@ final class McpeProtocol {
     static final int PLAY_STATUS_LOGIN_SUCCESS = 0;
     static final int PLAY_STATUS_PLAYER_SPAWN = 3;
 
-    // --- TextPacket types ---
+    // --- TextPacket types (verbatim from PMMP TextPacket at 113) ---
     static final int TEXT_TYPE_RAW = 0;
     static final int TEXT_TYPE_CHAT = 1;
+    /** Two strings (source + message): the HUD line above the hotbar, where a held item's name shows. */
+    static final int TEXT_TYPE_POPUP = 3;
+    static final int TEXT_TYPE_TIP = 4;
 
     // --- PlayerList actions ---
     static final int PLAYER_LIST_ADD = 0;

@@ -96,6 +96,72 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         }
     }
 
+    /**
+     * The sidebar on 0.14: this era has no scoreboard either (it predates even 1.1.5's boss bar), so the
+     * panel borrows the <b>popup</b> — the HUD field that shows a held item's name, displaced up the
+     * screen — exactly as the 1.1.5 session does, over 0.14's own big-endian TextPacket. Title first, rows
+     * newline-separated beneath it.
+     *
+     * <p>The popup fades by itself, so the core repaints it — see {@link #sidebarRepaintTicks()}.
+     */
+    @Override
+    public void setSidebar(String title, String[] lines) {
+        int raise = properties.peSidebarRaise();
+        int shift = properties.peSidebarShift();
+        String head = pad(title == null ? "" : title, shift);
+        String body = joinSidebarLines(lines, raise, shift);
+        sendWrapped(b -> Mcpe014Packets.popup(b, head, body));
+    }
+
+    @Override
+    public void clearSidebar() {
+        sendWrapped(b -> Mcpe014Packets.popup(b, "", ""));
+    }
+
+    @Override
+    public int sidebarRepaintTicks() {
+        return SIDEBAR_REPAINT_TICKS;
+    }
+
+    /** Repaint cadence for the popup sidebar: once a second, comfortably inside its own fade. */
+    private static final int SIDEBAR_REPAINT_TICKS = 20;
+
+    /**
+     * Join the sidebar rows into the popup's second string, capped at the api's line limit, padded into
+     * place by the {@code pe.sidebar.raise} / {@code pe.sidebar.shift} knobs — see the 1.1.5 session's
+     * copy for what the padding does and why the pad rows are a space rather than empty. (The two
+     * Bedrock eras deliberately share no wire code.)
+     */
+    static String joinSidebarLines(String[] lines, int raise, int shift) {
+        if (lines == null || lines.length == 0) {
+            return "";
+        }
+        int count = Math.min(lines.length, com.jedrock.api.player.Player.SIDEBAR_MAX_LINES);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < -raise; i++) {
+            sb.append(" \n");
+        }
+        for (int i = 0; i < count; i++) {
+            if (i > 0) {
+                sb.append('\n');
+            }
+            sb.append(pad(lines[i] == null ? "" : lines[i], shift));
+        }
+        for (int i = 0; i < raise; i++) {
+            sb.append("\n ");
+        }
+        return sb.toString();
+    }
+
+    /** Pad one row sideways: {@code shift} spaces on the left, or {@code -shift} on the right. */
+    static String pad(String line, int shift) {
+        if (shift == 0 || line.isEmpty()) {
+            return line;
+        }
+        String spaces = " ".repeat(Math.abs(shift));
+        return shift > 0 ? spaces + line : line + spaces;
+    }
+
     @Override
     public void clearTitle() {
         // nothing to clear in the chat fallback

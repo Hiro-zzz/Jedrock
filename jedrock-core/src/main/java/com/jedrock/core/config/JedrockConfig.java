@@ -72,7 +72,9 @@ public final class JedrockConfig {
                 positiveDouble(file, "judge.max-move-delta", def.maxMoveDelta()),
                 port(file, "server.port.pe014", def.bedrock014Port()),
                 bool(file, "pe014.enabled", def.bedrock014Enabled()),
-                gameMode(file, "game.default-gamemode", def.defaultGameMode())
+                gameMode(file, "game.default-gamemode", def.defaultGameMode()),
+                anyInt(file, "pe.sidebar.raise", def.peSidebarRaise()),
+                anyInt(file, "pe.sidebar.shift", def.peSidebarShift())
         );
     }
 
@@ -118,6 +120,20 @@ public final class JedrockConfig {
             return parsed;
         } catch (NumberFormatException e) {
             LOGGER.warn(key + " is not a number ('" + v.trim() + "'); using default " + def);
+            return def;
+        }
+    }
+
+    /** Like {@link #positiveInt} but signed: a knob whose direction is carried by the sign. */
+    private static int anyInt(Properties file, String key, int def) {
+        String v = raw(file, key);
+        if (v == null || v.isBlank()) {
+            return def;
+        }
+        try {
+            return Integer.parseInt(v.trim());
+        } catch (NumberFormatException e) {
+            LOGGER.warn(key + " is not a whole number ('" + v.trim() + "'); using default " + def);
             return def;
         }
     }

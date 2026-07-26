@@ -142,6 +142,94 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         sendGameBatch(b -> writeSetTitle(b, TITLE_TYPE_CLEAR, "", 0, 0, 0));
     }
 
+    /**
+     * The sidebar on Bedrock: there is no scoreboard packet in this era, so the panel borrows the
+     * <b>popup</b> — the HUD field that normally shows a held item's name, displaced up the screen. The
+     * title goes in the popup's own line and the rows follow beneath it, newline-separated, which is what
+     * PMMP's {@code sendPopup(message, subtitle)} does with its two strings.
+     *
+     * <p>Unlike a Java scoreboard the client holds no state here: a popup fades on its own after a couple
+     * of seconds, so it has to be repainted — see {@link #sidebarRepaintTicks()}.
+     */
+    @Override
+    public void setSidebar(String title, String[] lines) {
+        int raise = properties.peSidebarRaise();
+        int shift = properties.peSidebarShift();
+        String head = pad(title == null ? "" : title, shift);
+        String body = joinSidebarLines(lines, raise, shift);
+        sendGameBatch(b -> writePopup(b, head, body));
+    }
+
+    @Override
+    public void clearSidebar() {
+        // An empty popup is how it goes away — there is nothing to tear down, so this is also what a
+        // fade does on its own. Sent once; the repaint stops with it because the core drops the state.
+        sendGameBatch(b -> writePopup(b, "", ""));
+    }
+
+    @Override
+    public int sidebarRepaintTicks() {
+        return SIDEBAR_REPAINT_TICKS;
+    }
+
+    /** Repaint cadence for the popup sidebar: once a second, comfortably inside its own fade. */
+    private static final int SIDEBAR_REPAINT_TICKS = 20;
+
+    /**
+     * Join the sidebar rows into the popup's second string, capped at the api's line limit.
+     *
+     * <p>The client decides where the popup goes, so the only lever on its placement is the text itself:
+     * {@code raise} blank rows are padded under the panel (each one lifting it a line off the hotbar; a
+     * negative value pads above instead, for a client that anchors the other way), and {@code shift}
+     * spaces are padded on every row. Both are config knobs — {@code pe.sidebar.raise} /
+     * {@code pe.sidebar.shift} — because only a real client can say what looks right.
+     *
+     * <p>A pad row is a single space rather than an empty string: a renderer is free to drop a trailing
+     * empty line, and then the padding wouldn't move anything. (0.14 does all of this with its own codec —
+     * the two Bedrock eras deliberately share no wire code.)
+     */
+    static String joinSidebarLines(String[] lines, int raise, int shift) {
+        if (lines == null || lines.length == 0) {
+            return "";
+        }
+        int count = Math.min(lines.length, com.jedrock.api.player.Player.SIDEBAR_MAX_LINES);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < -raise; i++) {
+            sb.append(" \n");
+        }
+        for (int i = 0; i < count; i++) {
+            if (i > 0) {
+                sb.append('\n');
+            }
+            sb.append(pad(lines[i] == null ? "" : lines[i], shift));
+        }
+        for (int i = 0; i < raise; i++) {
+            sb.append("\n ");
+        }
+        return sb.toString();
+    }
+
+    /** Pad one row sideways: {@code shift} spaces on the left, or {@code -shift} on the right. */
+    static String pad(String line, int shift) {
+        if (shift == 0 || line.isEmpty()) {
+            return line;
+        }
+        String spaces = " ".repeat(Math.abs(shift));
+        return shift > 0 ? spaces + line : line + spaces;
+    }
+
+    /**
+     * Write one TextPacket popup. Layout, verbatim from PMMP {@code TextPacket} at protocol 113:
+     * {@code type} (byte) then, for {@code TYPE_POPUP}, two strings — {@code source} (the popup line) and
+     * {@code message} (the subtitle under it). Both are the era's unsigned-varint-length strings.
+     */
+    static void writePopup(ByteBuf b, String source, String message) {
+        ByteBufUtils.writeVarInt(b, ID_TEXT);
+        b.writeByte(TEXT_TYPE_POPUP);
+        ByteBufUtils.writeString(b, source == null ? "" : source);
+        ByteBufUtils.writeString(b, message == null ? "" : message);
+    }
+
     /** BossEvent event types (PMMP {@code BossEventPacket} @ 113). */
     private static final int BOSS_SHOW = 0;
     private static final int BOSS_HIDE = 2;

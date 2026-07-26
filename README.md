@@ -176,20 +176,30 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   `complete(player, args)` returns candidates the core narrows to the partial (`/kit` in `plugins/example.js`).
   Bedrock keeps its client-side completion from the AvailableCommands manifest, so this is a Java-side
   feature; the retail 1.1.5 client's known bugs are reason enough not to enrich that manifest.
-- ✅ **Sidebar scoreboard and boss bar (Java), plus virtual chests for scripts.** Three illusion-toolkit
-  additions. **`player.setSidebar(title, [lines])`** shows a titled panel down the right of the screen; it
-  updates by diffing so a timer refresh never flickers, and keeps up to 16 lines (the pre-1.13 client draws
-  the vanilla red score number beside each). **`player.setBossBar(title, progress[, color])`** shows the
+- ✅ **Sidebar, boss bar and virtual chests for scripts — cross-edition.** Three illusion-toolkit
+  additions. **`player.setSidebar(title, [lines])`** shows a titled panel of text, up to 16 lines, on
+  **every edition** — but by two different illusions. On **Java** (1.8 + 1.12.2) it's a real sidebar
+  scoreboard down the right of the screen, updated by diffing so a timer refresh never flickers (the
+  pre-1.13 client draws the vanilla red score number beside each line). Neither legacy **Bedrock** era has
+  a scoreboard at all, so there the same text goes to the one persistent field those clients do have — the
+  **popup**, drawn in the HUD slot where a held item's name appears, displaced upward (`TextPacket`
+  `TYPE_POPUP`, byte-checked against PocketMine at both protocol 113 and protocol 45, and confirmed on a
+  real client). That line fades on its own, so the connection declares how often it needs repainting and
+  the loop obliges; a script sets the sidebar once and it stays up. The client decides *where* it draws —
+  centred, on top of the hotbar — so placement is padding, tuned with `pe.sidebar.raise` /
+  `pe.sidebar.shift` in the config (`0`/`0` = the raw centred position). **`player.setBossBar(title, progress[, color])`** shows the
   bar across the top — cross-edition where a client can draw one: Java 1.12.2 (dedicated packet), Java 1.8
   (an invisible wither ridden by the player, the classic illusion) and Bedrock 1.1.5 (native BossEvent).
-  The scoreboard is Java-only (1.8 has it, the legacy Bedrock clients don't); 0.14 predates both. And
+  0.14 predates boss bars entirely and ignores that one. And
   **`menus`** gives scripts a **virtual chest**: `menus.create(title, rows)`, laid out with `setItem`,
   opened with `open(player)` — with an `onClick` it's a read-only **button menu** (a class picker, a shop),
-  without one a transient **storage chest**. Java and Bedrock **0.14** open a real chest window; on **1.1.5**
-  (which crashes on one) a button menu degrades to a text **list** — labelled buttons (`menu.button(slot,
-  item, label)`) become options the player chooses with a built-in **`/pick <label>`**. Packet ids are from
-  minecraft-data / PocketMine; on-client behaviour isn't verified here. Try `/sb on`, `/boss 50 red` and
-  `/menu` in `plugins/example.js`.
+  without one a transient **storage chest**. **Java** opens a real chest window; **neither Bedrock era does**
+  (1.1.5 crashes on one, 0.14 doesn't bring it up), so there a button menu degrades to a text **list** —
+  labelled buttons (`menu.button(slot, item, label)`) become options the player chooses with a built-in
+  **`/pick <label>`**, which fires the same handler. That makes button menus work on all four editions;
+  a Bedrock *storage* menu is the remaining gap (a list can't move items — on 0.14 it still tries the
+  window, on 1.1.5 it's refused). Packet ids are from minecraft-data / PocketMine; on-client behaviour
+  isn't verified here. Try `/sb on`, `/boss 50 red` and `/menu` in `plugins/example.js`.
 - ✅ **Player-facing UI — titles, subtitles and the action bar.** `player.sendTitle(title, subtitle[, fadeIn,
   stay, fadeOut])`, `sendActionBar(text)` and `clearTitle()` show a large centred title or a line above the
   hotbar, authored in the unified markup and rendered per edition: the JE Title packet (id 0x45 on 1.8, 0x48
@@ -511,8 +521,9 @@ which binds (defaults, configurable in `jedrock.properties`):
 - **Bedrock 0.14** on UDP `0.0.0.0:19133` (`server.port.pe014`; disable with `pe014.enabled=false`)
 
 The first run writes a `jedrock.properties` next to the process with the bind host/ports, server
-name, MOTD, max players, world seed, tick rate, view distance and the blind-judge limits
-(`judge.enabled`, `judge.max-reach`, `judge.max-move-delta`); edit and restart to apply, or override
+name, MOTD, max players, world seed, tick rate, view distance, the blind-judge limits
+(`judge.enabled`, `judge.max-reach`, `judge.max-move-delta`) and the Bedrock sidebar placement
+(`pe.sidebar.raise`, `pe.sidebar.shift`); edit and restart to apply, or override
 a single key with `-Dkey=value`. The RakNet protocol version defaults to `8` (MCPE 1.1.5)
 and can be overridden with `-Djedrock.pe.raknetProtocolVersion=N` for other client builds. The Bedrock
 listeners bind best-effort — a busy UDP port (the Minecraft Bedrock client itself holds 19132 for LAN
@@ -594,10 +605,11 @@ simulation stays out (see non-goals).
   the `storage` global, the last thing this section was waiting on (see [What works today](#what-works-today)).
   **Typed command arguments and tab-completion** landed too — a command declares its arguments and the core
   parses them and completes them (Java clients), scripts included. And the **illusion toolkit** grew a
-  **sidebar scoreboard** (Java), a **boss bar** (Java 1.8 + 1.12.2 and Bedrock 1.1.5), and **virtual
-  chests** for scripts (the `menus` global — a window on Java and 0.14, a `/pick` list on 1.1.5). What it
-  still wants: the scoreboard on Bedrock, and a real-client pass on the unverified PE wire — **forms** stay
-  out, since the legacy PE clients predate them.
+  **sidebar** (a scoreboard on Java, the displaced item-name line on both Bedrock eras), a **boss bar**
+  (Java 1.8 + 1.12.2 and Bedrock 1.1.5), and **virtual chests** for scripts (the `menus` global — a window
+  on Java, a `/pick` list on Bedrock). What it still wants: a **storage** menu on Bedrock (a list can only
+  offer buttons), and a real-client pass on the unverified PE wire — **forms** stay out, since the legacy
+  PE clients predate them.
 - **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
   **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
   cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry
