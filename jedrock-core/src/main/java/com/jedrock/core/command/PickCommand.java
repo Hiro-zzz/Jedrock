@@ -11,13 +11,14 @@ import java.util.List;
 
 /**
  * {@code /pick <option>} — choose an option from a button menu that was shown as a text <b>list</b> (the
- * fallback for a client that can't open a chest window, i.e. 1.1.5). The chosen label fires the menu's
- * click. It's a built-in so it's in the Bedrock command manifest from the start — a menu-time command
- * couldn't be, since the client rejects any command it wasn't told about.
+ * fallback for a client that can't open a chest window: both Bedrock eras). The chosen label fires the
+ * menu's click. It's a built-in so it's in the 1.1.5 command manifest from the start — a menu-time command
+ * couldn't be, since that client rejects any command it wasn't told about. (0.14 predates the manifest
+ * entirely and sends {@code /} lines as ordinary chat, so it needs nothing special.)
  *
- * <p>On Java the option labels tab-complete (from the player's pending menu). On 1.1.5 the client only
- * knows the command takes free text, so the player reads the options from the chat list and types one;
- * true client-side label completion there would need a per-menu command manifest, a follow-up.
+ * <p>On Java the option labels tab-complete (from the player's pending menu). A Bedrock client has no
+ * per-menu completion — the player reads the options from the chat list and types one; true client-side
+ * label completion on 1.1.5 would need a dynamic per-menu command manifest, a follow-up.
  */
 public final class PickCommand implements Command {
 

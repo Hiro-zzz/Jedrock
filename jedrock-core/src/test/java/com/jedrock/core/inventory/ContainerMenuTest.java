@@ -145,6 +145,27 @@ class ContainerMenuTest {
     }
 
     @Test
+    void a014ButtonMenuWithLabelsBecomesAPickableList() {
+        Conn conn = new Conn(ProtocolVersion.PE_0_14);
+        CorePlayer player = join(conn);
+        Container menu = new Container(9);
+        menu.set(2, DIAMOND, 1);
+        String[] labels = new String[9];
+        labels[2] = "Warrior";
+        int[] picked = {-1};
+
+        boolean opened = containers.openMenu(player, "Class", menu, labels, (p, slot, state) -> picked[0] = slot);
+
+        assertTrue(opened);
+        assertFalse(player.hasContainerOpen(), "a menu window doesn't come up on 0.14 — the list does");
+        assertEquals(1, player.getPendingMenu().labels().size());
+        assertTrue(conn.messages.stream().anyMatch(m -> m.contains("/pick Warrior")), conn.messages.toString());
+
+        assertTrue(player.getPendingMenu().pick(player, "Warrior"));
+        assertEquals(2, picked[0], "the same click the window would have fired");
+    }
+
+    @Test
     void a014ButtonMenuClickRoutesThroughContainerSetSlotAndReverts() {
         Conn conn = new Conn(ProtocolVersion.PE_0_14);
         CorePlayer player = join(conn);

@@ -150,7 +150,11 @@ public final class CorePlayer implements Player {
         this.openMenuClick = null;
     }
 
-    /** A button menu shown as a text list (the 1.1.5 fallback), pickable with {@code /pick}; null if none. */
+    /** The sidebar as it was last sent (legacy-rendered), kept for connections that need a repaint. */
+    private volatile String sidebarTitle;
+    private volatile String[] sidebarLines;
+
+    /** A button menu shown as a text list (the Bedrock fallback), pickable with {@code /pick}; null if none. */
     private volatile com.jedrock.core.inventory.ListMenu pendingMenu;
 
     public com.jedrock.core.inventory.ListMenu getPendingMenu() {
@@ -612,12 +616,33 @@ public final class CorePlayer implements Player {
             Object line = raw.get(i);
             rendered[i] = ChatText.toLegacy(line == null ? "" : line.toString());
         }
+        // Kept so a connection that can't hold the panel itself can be repainted (see
+        // PlayerConnection#sidebarRepaintTicks): the rendered form is exactly what was sent.
+        this.sidebarTitle = renderedTitle;
+        this.sidebarLines = rendered;
         connection.setSidebar(renderedTitle, rendered);
     }
 
     @Override
     public void clearSidebar() {
+        this.sidebarTitle = null;
+        this.sidebarLines = null;
         connection.clearSidebar();
+    }
+
+    /** Whether a sidebar is currently shown — the cheap gate the repaint loop reads first. */
+    public boolean hasSidebar() {
+        return sidebarLines != null;
+    }
+
+    /** The sidebar title as it was sent (legacy-rendered), or {@code null} if none is shown. */
+    public String getSidebarTitle() {
+        return sidebarTitle;
+    }
+
+    /** The sidebar lines as they were sent (legacy-rendered), or {@code null} if none is shown. */
+    public String[] getSidebarLines() {
+        return sidebarLines;
     }
 
     @Override

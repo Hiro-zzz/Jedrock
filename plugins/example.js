@@ -9,7 +9,7 @@
 //   world      — the shared world: getBlock / setBlock / fill / getHighestY / getBiome / spawn / weather /
 //                playSound / spawnParticle. Edits render live on every client, cross-edition.
 //   entities   — spawn and drive puppets, props and labels; group() builds a scene. See /guard and /decor.
-//   menus      — menus.create(title, rows): a virtual chest (Java + 0.14 windows; 1.1.5 gets a /pick list).
+//   menus      — menus.create(title, rows): a virtual chest (a window on Java; a /pick list on Bedrock).
 //                onClick + button(slot,item,label) makes a button menu; setItem alone is a storage chest.
 //   storage    — the only thing that survives a restart: get / set / has / remove / keys / size / clear,
 //                plus forPlayer(p) for per-player state. Strings, numbers, booleans, objects and arrays.
@@ -343,7 +343,8 @@ commands.register('title', function (player, args) {
     player.sendActionBar('{aqua}action bar: {white}' + player.getName());
 });
 
-// /sb on|off — a live sidebar scoreboard (Java clients; Bedrock ignores it). setSidebar takes a title
+// /sb on|off — a live sidebar, cross-edition: a real scoreboard panel on Java, and on Bedrock (which has
+// no scoreboard in either era) the same text in the HUD line above the hotbar. setSidebar takes a title
 // and an array of lines (markup rendered per line); calling it again only sends what changed, so it's
 // cheap to refresh on a timer with no flicker. A per-player timer is kept in storage-free local state.
 var sbTasks = {};   // player uuid -> timer handle
@@ -391,15 +392,15 @@ commands.register({
     }
 });
 
-// /menu — a virtual chest opened as a BUTTON menu (Java and Bedrock 0.14; a 1.1.5 player is told it can't
-// show, since that client crashes on a chest window).
+// /menu — a virtual chest opened as a BUTTON menu. Java opens a window; neither Bedrock era does (1.1.5
+// crashes on one, 0.14 doesn't bring it up), so both show the buttons as a /pick list instead.
 // The slots are read-only: clicking one fires onClick instead of moving the item, so each slot is a button.
 // (Drop the onClick and it's a plain storage chest the player can move items in and out of, backed by no
 // world block — nothing persists.)
 commands.register('menu', function (player, args) {
     var m = menus.create('{dark_purple}Pick a class', 1);   // 1 row = 9 slots
-    // button(slot, item, label): the label is what the 1.1.5 list fallback shows and /pick matches; the
-    // window clients (Java, 0.14) just show the item. Give every choice a label so 1.1.5 can list it.
+    // button(slot, item, label): the label is what the Bedrock list fallback shows and /pick matches;
+    // Java just shows the item. Give every choice a label, or Bedrock has nothing to list.
     m.button(2, Blocks.state(276, 0), 'Warrior');   // diamond sword
     m.button(4, Blocks.state(261, 0), 'Archer');    // bow
     m.button(6, Blocks.state(345, 0), 'Scout');     // compass
@@ -410,8 +411,8 @@ commands.register('menu', function (player, args) {
             storage.forPlayer(p).set('class', pick);   // remembered across restarts
         }
     });
-    // Java / 0.14 open a chest window; 1.1.5 gets a text list it picks from with /pick <label>. open()
-    // returns true in both cases, so there's nothing to fall back on here.
+    // Java opens a chest window; both Bedrock eras get a text list they pick from with /pick <label>.
+    // open() returns true in both cases, so there's nothing to fall back on here.
     m.open(player);
 });
 

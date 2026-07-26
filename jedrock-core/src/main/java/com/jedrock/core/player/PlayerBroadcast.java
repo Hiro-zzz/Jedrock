@@ -110,6 +110,30 @@ public final class PlayerBroadcast {
         wearer.getConnection().sendOwnArmor(helmet, chestplate, leggings, boots);
     }
 
+    /**
+     * Re-send the sidebar to every player whose client can't hold one by itself.
+     *
+     * <p>A Java scoreboard is stateful — sent once, then only diffed — so nothing here touches it. A
+     * Bedrock client has no scoreboard at all and borrows a HUD line that fades after a couple of
+     * seconds, so its connection asks (via {@link com.jedrock.api.player.PlayerConnection#sidebarRepaintTicks()})
+     * to be repainted on a cadence. The core never learns which edition that is; it just honours the
+     * number.
+     *
+     * <p>Cost when nobody uses a sidebar: one field read per online player per tick. The
+     * {@code hasSidebar} check comes first precisely so a server with no sidebars pays nothing else.
+     */
+    public void repaintSidebars(long tick) {
+        for (CorePlayer p : players.online()) {
+            if (!p.hasSidebar()) {
+                continue;
+            }
+            int every = p.getConnection().sidebarRepaintTicks();
+            if (every > 0 && tick % every == 0) {
+                p.getConnection().setSidebar(p.getSidebarTitle(), p.getSidebarLines());
+            }
+        }
+    }
+
     /** Relay a player's arm swing to every other client (their own already drew it). */
     public void swing(CorePlayer player) {
         long entityId = player.getEntityId();

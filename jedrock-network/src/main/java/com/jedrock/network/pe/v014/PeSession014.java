@@ -96,6 +96,53 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         }
     }
 
+    /**
+     * The sidebar on 0.14: this era has no scoreboard either (it predates even 1.1.5's boss bar), so the
+     * panel borrows the <b>popup</b> — the HUD field that shows a held item's name, displaced up the
+     * screen — exactly as the 1.1.5 session does, over 0.14's own big-endian TextPacket. Title first, rows
+     * newline-separated beneath it.
+     *
+     * <p>The popup fades by itself, so the core repaints it — see {@link #sidebarRepaintTicks()}.
+     */
+    @Override
+    public void setSidebar(String title, String[] lines) {
+        String head = title == null ? "" : title;
+        String body = joinSidebarLines(lines);
+        sendWrapped(b -> Mcpe014Packets.popup(b, head, body));
+    }
+
+    @Override
+    public void clearSidebar() {
+        sendWrapped(b -> Mcpe014Packets.popup(b, "", ""));
+    }
+
+    @Override
+    public int sidebarRepaintTicks() {
+        return SIDEBAR_REPAINT_TICKS;
+    }
+
+    /** Repaint cadence for the popup sidebar: once a second, comfortably inside its own fade. */
+    private static final int SIDEBAR_REPAINT_TICKS = 20;
+
+    /**
+     * Join the sidebar rows into the popup's second string, capped at the api's line limit. (The 1.1.5
+     * session does the same with its own codec — the two Bedrock eras deliberately share no wire code.)
+     */
+    static String joinSidebarLines(String[] lines) {
+        if (lines == null || lines.length == 0) {
+            return "";
+        }
+        int count = Math.min(lines.length, com.jedrock.api.player.Player.SIDEBAR_MAX_LINES);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            if (i > 0) {
+                sb.append('\n');
+            }
+            sb.append(lines[i] == null ? "" : lines[i]);
+        }
+        return sb.toString();
+    }
+
     @Override
     public void clearTitle() {
         // nothing to clear in the chat fallback

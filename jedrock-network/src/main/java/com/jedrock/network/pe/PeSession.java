@@ -142,6 +142,68 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         sendGameBatch(b -> writeSetTitle(b, TITLE_TYPE_CLEAR, "", 0, 0, 0));
     }
 
+    /**
+     * The sidebar on Bedrock: there is no scoreboard packet in this era, so the panel borrows the
+     * <b>popup</b> — the HUD field that normally shows a held item's name, displaced up the screen. The
+     * title goes in the popup's own line and the rows follow beneath it, newline-separated, which is what
+     * PMMP's {@code sendPopup(message, subtitle)} does with its two strings.
+     *
+     * <p>Unlike a Java scoreboard the client holds no state here: a popup fades on its own after a couple
+     * of seconds, so it has to be repainted — see {@link #sidebarRepaintTicks()}.
+     */
+    @Override
+    public void setSidebar(String title, String[] lines) {
+        String head = title == null ? "" : title;
+        String body = joinSidebarLines(lines);
+        sendGameBatch(b -> writePopup(b, head, body));
+    }
+
+    @Override
+    public void clearSidebar() {
+        // An empty popup is how it goes away — there is nothing to tear down, so this is also what a
+        // fade does on its own. Sent once; the repaint stops with it because the core drops the state.
+        sendGameBatch(b -> writePopup(b, "", ""));
+    }
+
+    @Override
+    public int sidebarRepaintTicks() {
+        return SIDEBAR_REPAINT_TICKS;
+    }
+
+    /** Repaint cadence for the popup sidebar: once a second, comfortably inside its own fade. */
+    private static final int SIDEBAR_REPAINT_TICKS = 20;
+
+    /**
+     * Join the sidebar rows into the popup's second string, capped at the api's line limit. (0.14 does the
+     * same with its own codec — the two Bedrock eras deliberately share no wire code.)
+     */
+    static String joinSidebarLines(String[] lines) {
+        if (lines == null || lines.length == 0) {
+            return "";
+        }
+        int count = Math.min(lines.length, com.jedrock.api.player.Player.SIDEBAR_MAX_LINES);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            if (i > 0) {
+                sb.append('\n');
+            }
+            sb.append(lines[i] == null ? "" : lines[i]);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Write one TextPacket popup. Layout, verbatim from PMMP {@code TextPacket} at protocol 113:
+     * {@code type} (byte) then, for {@code TYPE_POPUP}, two strings — {@code source} (the popup line) and
+     * {@code message} (the subtitle under it). Both are the era's unsigned-varint-length strings.
+     */
+    static void writePopup(ByteBuf b, String source, String message) {
+        ByteBufUtils.writeVarInt(b, ID_TEXT);
+        b.writeByte(TEXT_TYPE_POPUP);
+        ByteBufUtils.writeString(b, source == null ? "" : source);
+        ByteBufUtils.writeString(b, message == null ? "" : message);
+    }
+
     /** BossEvent event types (PMMP {@code BossEventPacket} @ 113). */
     private static final int BOSS_SHOW = 0;
     private static final int BOSS_HIDE = 2;

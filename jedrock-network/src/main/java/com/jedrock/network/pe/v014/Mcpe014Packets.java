@@ -90,6 +90,9 @@ public final class Mcpe014Packets {
     // TextPacket types.
     public static final int TEXT_TYPE_RAW = 0;
     public static final int TEXT_TYPE_CHAT = 1;
+    /** Two strings (source + message): the HUD line above the hotbar, where a held item's name shows. */
+    public static final int TEXT_TYPE_POPUP = 3;
+    public static final int TEXT_TYPE_TIP = 4;
     // MovePlayer modes.
     public static final int MOVE_MODE_NORMAL = 0;
     public static final int MOVE_MODE_RESET = 1;
@@ -229,6 +232,19 @@ public final class Mcpe014Packets {
         b.writeByte(ID_TEXT);
         b.writeByte(TEXT_TYPE_RAW);
         Mcpe014Codec.writeString(b, message);
+    }
+
+    /**
+     * A popup: the HUD line above the hotbar (the held item's name field, displaced upward). Layout,
+     * verbatim from PMMP {@code TextPacket} at protocol 45 — {@code type} (byte) then, for
+     * {@code TYPE_POPUP}, {@code source} (the popup line) and {@code message} (the text under it), both
+     * this era's big-endian short-length strings. Structurally identical to 113; only the strings differ.
+     */
+    public static void popup(ByteBuf b, String source, String message) {
+        b.writeByte(ID_TEXT);
+        b.writeByte(TEXT_TYPE_POPUP);
+        Mcpe014Codec.writeString(b, source == null ? "" : source);
+        Mcpe014Codec.writeString(b, message == null ? "" : message);
     }
 
     /** Spawn another player's avatar. {@code y} is FEET; the metadata is empty (0x7f terminator). */

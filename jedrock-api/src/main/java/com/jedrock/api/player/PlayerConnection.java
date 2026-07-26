@@ -258,13 +258,27 @@ public interface PlayerConnection {
     default void sendTabComplete(java.util.List<String> matches) {}
 
     /**
-     * Show / update the sidebar scoreboard: a title and lines (already rendered to legacy {@code §} form),
-     * top to bottom. Java draws it; every other edition ignores it. Default no-op.
+     * Show / update the sidebar: a title and lines (already rendered to legacy {@code §} form), top to
+     * bottom. Java draws a real scoreboard panel; Bedrock, which has no scoreboard in either legacy era,
+     * draws the same text in the HUD line above the hotbar. Default no-op.
      */
     default void setSidebar(String title, String[] lines) {}
 
-    /** Remove the sidebar scoreboard, if shown. Default no-op. */
+    /** Remove the sidebar, if shown. Default no-op. */
     default void clearSidebar() {}
+
+    /**
+     * How often, in ticks, this client needs its sidebar re-sent to keep it on screen — {@code 0} (the
+     * default) meaning never, because the client holds the panel itself.
+     *
+     * <p>A Java scoreboard is stateful client-side, so it is sent once and left alone. A Bedrock client
+     * has no scoreboard at all and borrows a HUD line that fades on its own, so it asks to be repainted.
+     * The core honours whatever a connection declares without knowing why — the same way it never learns
+     * which protocol a player speaks.
+     */
+    default int sidebarRepaintTicks() {
+        return 0;
+    }
 
     /**
      * Show / update the boss bar: a title (already rendered to legacy {@code §} form), a fill fraction
