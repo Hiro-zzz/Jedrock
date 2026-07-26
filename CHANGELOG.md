@@ -348,9 +348,15 @@ unstable — anything may change between entries.
   deliberate exception: `player.getConnection()` is gone, replaced by **`player.getVersion()`** for the
   one thing scripts used it for. `isOp()` and `hasPermission()` moved onto the api `Player` as part of
   this — they were documented, used by the example plugin, and existed only on the implementation.
-  Still to do: puppets and holograms hand back their api objects unwrapped. Their implementations expose
-  little beyond the contract (no network, no server state), so that is a smaller hole than the two closed
-  here, not a closed one.
+  **`ScriptPuppet`** and **`ScriptHologram`** close the same hole for what `server.spawnPuppet(...)` and
+  `server.spawnHologram(...)` hand back (the `entities` global was already wrapped). The puppet is the
+  interesting one: its interaction callback is a function living in a plugin's scope, and a raw
+  `onInteract` stored it as a bare lambda on the puppet — so after a hot reload it kept firing into a
+  scope that had been thrown away, off the script lock, for as long as the server ran. It now dispatches
+  through the plugin that registered it, under the same lock, context and swallow-and-log as every other
+  script callback. Which plugin that is comes from the scope Rhino hands the wrap factory.
+  Nothing in the api is left unwrapped now: player, server, world, puppet and hologram all arrive as
+  contract objects, and `entities.spawn(...)` keeps returning the plugin-owned `ScriptEntity` it always did.
 
 - **`PeSession` split: the 1.1.5 encoders move out (1749 → 1218 lines).** The 0.14 layer has always been
   two classes — `PeSession014` for the session, `Mcpe014Packets` for the bytes — and 1.1.5 never got the

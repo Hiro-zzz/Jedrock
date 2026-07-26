@@ -156,6 +156,33 @@ class ScriptContractTest {
         assertTrue(conn.messages.contains("same=true"), conn.messages.toString());
     }
 
+    @Test
+    void puppetsAndHologramsAreViewsToo(@TempDir Path dir) {
+        EventBus bus = new EventBus();
+        CommandManager cm = new CommandManager(null);
+        PluginManager plugins = new PluginManager(bus, new StubServer(world), new Scheduler(), cm,
+                new PacketTapRegistry(), dir);
+        Recorder conn = new Recorder();
+        CorePlayer player = new CorePlayer(UUID.randomUUID(), "P", conn, world,
+                world.getSpawnLocation(), GameMode.SURVIVAL);
+
+        // The stub's puppet and hologram both carry an extra public method that no api interface declares
+        // — exactly the shape of the real implementations' internals.
+        plugins.loadSource("v.js",
+                "commands.register('probe', function (p, args) {\n"
+              + "  var puppet = server.spawnPuppet(null, p.getLocation());\n"
+              + "  p.sendMessage('tag=' + typeof puppet.setNameTag);\n"
+              + "  p.sendMessage('puppetDoor=' + typeof puppet.secretDoor);\n"
+              + "  var holo = server.spawnHologram(p.getLocation(), 'a', 'b');\n"
+              + "  p.sendMessage('lines=' + holo.getLines().size());\n"
+              + "  p.sendMessage('holoDoor=' + typeof holo.secretDoor);\n"
+              + "});", 1L);
+        cm.dispatch(player, "/probe");
+
+        assertEquals(List.of("tag=function", "puppetDoor=undefined", "lines=2", "holoDoor=undefined"),
+                conn.messages);
+    }
+
     /** The least server that lets a script see one: a name, a world and a roster. */
     private static final class StubServer implements com.jedrock.api.Server {
         private final CoreWorld world;
@@ -191,18 +218,85 @@ class ScriptContractTest {
         @Override public com.jedrock.api.world.World getDefaultWorld() { return world; }
         @Override public com.jedrock.api.entity.PuppetEntity spawnPuppet(
                 com.jedrock.api.entity.EntityType type, com.jedrock.api.world.Location at, String name) {
-            return null;
+            return new StubPuppet(at);
         }
         @Override public com.jedrock.api.entity.PuppetEntity spawnItem(
-                com.jedrock.api.world.Location at, int state) { return null; }
+                com.jedrock.api.world.Location at, int state) { return new StubPuppet(at); }
         @Override public com.jedrock.api.entity.PuppetEntity spawnFallingBlock(
-                com.jedrock.api.world.Location at, int state) { return null; }
+                com.jedrock.api.world.Location at, int state) { return new StubPuppet(at); }
         @Override public com.jedrock.api.entity.PuppetEntity spawnText(
-                com.jedrock.api.world.Location at, String text) { return null; }
+                com.jedrock.api.world.Location at, String text) { return new StubPuppet(at); }
         @Override public com.jedrock.api.entity.Hologram spawnHologram(
-                com.jedrock.api.world.Location at, String... lines) { return null; }
+                com.jedrock.api.world.Location at, String... lines) { return new StubHologram(at, lines); }
         @Override public long getCurrentTick() { return 0; }
         @Override public com.jedrock.api.ServerStatus getStatus() { return null; }
+    }
+
+    /** A puppet with one method no interface declares — standing in for the real one's internals. */
+    private static final class StubPuppet implements com.jedrock.api.entity.PuppetEntity {
+        private com.jedrock.api.world.Location at;
+        private String nameTag = "";
+
+        StubPuppet(com.jedrock.api.world.Location at) {
+            this.at = at;
+        }
+
+        /** Not on any api interface — a script must not see this. */
+        public String secretDoor() { return "leak"; }
+
+        @Override public com.jedrock.api.entity.EntityType getEntityType() {
+            return com.jedrock.api.entity.EntityType.ZOMBIE;
+        }
+        @Override public String getName() { return "stub"; }
+        @Override public String getNameTag() { return nameTag; }
+        @Override public void setNameTag(String tag) { this.nameTag = tag; }
+        @Override public void teleport(com.jedrock.api.world.Location to) { this.at = to; }
+        @Override public void setRotation(float yaw, float pitch) { }
+        @Override public void lookAt(com.jedrock.api.world.Location target) { }
+        @Override public boolean hasFlag(com.jedrock.api.entity.PuppetFlag flag) { return false; }
+        @Override public void setFlag(com.jedrock.api.entity.PuppetFlag flag, boolean on) { }
+        @Override public void setHeldItem(int state) { }
+        @Override public int getHeldItem() { return 0; }
+        @Override public void setArmor(com.jedrock.api.player.ArmorSlot slot, int state) { }
+        @Override public int getArmor(com.jedrock.api.player.ArmorSlot slot) { return 0; }
+        @Override public void swing() { }
+        @Override public void hurt() { }
+        @Override public void onInteract(java.util.function.Consumer<com.jedrock.api.player.Player> h) { }
+        @Override public UUID getUniqueId() { return UUID.randomUUID(); }
+        @Override public long getEntityId() { return 7L; }
+        @Override public com.jedrock.api.world.World getWorld() { return at.world(); }
+        @Override public com.jedrock.api.world.Location getLocation() { return at; }
+        @Override public void setLocation(com.jedrock.api.world.Location location) { this.at = location; }
+        @Override public void remove() { }
+        @Override public boolean isAlive() { return true; }
+        @Override public String getType() { return "zombie"; }
+    }
+
+    /** Likewise for a hologram. */
+    private static final class StubHologram implements com.jedrock.api.entity.Hologram {
+        private com.jedrock.api.world.Location at;
+        private List<String> lines;
+
+        StubHologram(com.jedrock.api.world.Location at, String... lines) {
+            this.at = at;
+            this.lines = List.of(lines);
+        }
+
+        /** Not on any api interface — a script must not see this. */
+        public String secretDoor() { return "leak"; }
+
+        @Override public List<String> getLines() { return lines; }
+        @Override public void setLines(String... lines) { this.lines = List.of(lines); }
+        @Override public void setLine(int index, String text) { }
+        @Override public void teleport(com.jedrock.api.world.Location to) { this.at = to; }
+        @Override public UUID getUniqueId() { return UUID.randomUUID(); }
+        @Override public long getEntityId() { return 8L; }
+        @Override public com.jedrock.api.world.World getWorld() { return at.world(); }
+        @Override public com.jedrock.api.world.Location getLocation() { return at; }
+        @Override public void setLocation(com.jedrock.api.world.Location location) { this.at = location; }
+        @Override public void remove() { }
+        @Override public boolean isAlive() { return true; }
+        @Override public String getType() { return "hologram"; }
     }
 
     /** Captures what the player was told. */

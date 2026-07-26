@@ -50,9 +50,6 @@ public final class PluginManager {
 
     private static final JLogger LOGGER = JLogger.getLogger("plugin");
 
-    /** Substitutes the script contract (ScriptPlayer / ScriptServer / ScriptWorld) for core objects. */
-    private static final ScriptWrapFactory WRAP_FACTORY = new ScriptWrapFactory();
-
     /** Best-effort sandbox: allow our own code and a safe JDK slice; deny the rest. */
     private static final ClassShutter SHUTTER = fullName -> {
         // The obvious escape hatches, denied even though they live under an allowed prefix.
@@ -84,7 +81,9 @@ public final class PluginManager {
             + "function clearTimeout(h) { if (h) h.cancel(); }\n"
             + "function clearInterval(h) { if (h) h.cancel(); }\n";
 
-    private final ContextFactory contextFactory = new ScriptContextFactory();
+    /** Substitutes the script contract (ScriptPlayer / ScriptServer / …) for core objects on their way in. */
+    private final ScriptWrapFactory wrapFactory = new ScriptWrapFactory(this);
+    private final ContextFactory contextFactory = new ScriptContextFactory(wrapFactory);
     private final ReentrantLock scriptLock = new ReentrantLock();
     private final Map<String, ScriptPlugin> plugins = new LinkedHashMap<>();
     /** Channel for script-defined custom events (events.emit / events.on for a non-built-in name). */
@@ -369,23 +368,65 @@ public final class PluginManager {
      * loop or break the others.
      */
     void callEntityHandler(ScriptPlugin plugin, Function handler, ScriptEntity entity, Object second) {
+        if (second == null) {
+            callScript(plugin, handler, "entity handler", entity);
+        } else {
+            callScript(plugin, handler, "entity handler", entity, second);
+        }
+    }
+
+    /**
+     * Invoke a server-owned puppet's interaction callback with just the player. A puppet from
+     * {@code server.spawnPuppet} is not a plugin's entity, so its handler takes only what the plugin
+     * doesn't already hold — but it still runs under the plugin's lock, context and error handling,
+     * because the function it calls lives in that plugin's scope.
+     */
+    void callInteract(ScriptPlugin plugin, Function handler, Object player) {
+        callScript(plugin, handler, "interaction handler", player);
+    }
+
+    /**
+     * The one way a script function is called from Java: serialized under the script lock, on a Rhino
+     * context, with its arguments wrapped into the plugin's scope, and a throwing handler swallowed and
+     * logged so one misbehaving plugin can't stall the tick loop or break the others.
+     */
+    private void callScript(ScriptPlugin plugin, Function handler, String what, Object... args) {
         scriptLock.lock();
         try {
             Context cx = contextFactory.enterContext();
             try {
                 Scriptable scope = plugin.scope();
-                Object[] args = second == null
-                        ? new Object[]{Context.javaToJS(entity, scope)}
-                        : new Object[]{Context.javaToJS(entity, scope), Context.javaToJS(second, scope)};
-                handler.call(cx, scope, scope, args);
+                Object[] wrapped = new Object[args.length];
+                for (int i = 0; i < args.length; i++) {
+                    wrapped[i] = Context.javaToJS(args[i], scope);
+                }
+                handler.call(cx, scope, scope, wrapped);
             } finally {
                 Context.exit();
             }
         } catch (RuntimeException e) {
-            LOGGER.error("Plugin " + plugin.name() + " entity handler threw: " + e.getMessage());
+            LOGGER.error("Plugin " + plugin.name() + " " + what + " threw: " + e.getMessage());
         } finally {
             scriptLock.unlock();
         }
+    }
+
+    /**
+     * The plugin whose scope a wrap is happening in, or {@code null} outside any plugin. Rhino hands the
+     * wrap factory the live scope, and a plugin's globals hang off its own top-level scope, so this is how
+     * a wrapper learns which script is asking — which it needs before it can own a callback.
+     */
+    ScriptPlugin pluginForScope(Scriptable scope) {
+        if (scope == null) {
+            return null;
+        }
+        Scriptable top = ScriptableObject.getTopLevelScope(scope);
+        for (ScriptPlugin plugin : plugins.values()) {
+            if (plugin.scope() == top) {
+                return plugin;
+            }
+        }
+        return null;
     }
 
     /**
@@ -625,6 +666,13 @@ public final class PluginManager {
 
     /** A context factory that pins the language level, interpreted mode, and the sandbox on every context. */
     private static final class ScriptContextFactory extends ContextFactory {
+
+        private final ScriptWrapFactory wrapFactory;
+
+        ScriptContextFactory(ScriptWrapFactory wrapFactory) {
+            this.wrapFactory = wrapFactory;
+        }
+
         @Override
         protected void onContextCreated(Context cx) {
             cx.setLanguageVersion(Context.VERSION_ES6); // arrow functions, let/const, template literals
@@ -633,7 +681,7 @@ public final class PluginManager {
             // Substitute the script contract for a core object on its way into JavaScript — every path,
             // since Rhino routes them all through the wrap factory. See ScriptWrapFactory for why the
             // api interfaces alone could not do this job.
-            cx.setWrapFactory(WRAP_FACTORY);
+            cx.setWrapFactory(wrapFactory);
             // Hand Java strings, numbers and booleans to scripts as JS primitives instead of wrapping
             // them. Rhino wraps by default, and a wrapper is never === a literal: `player.getName() ===
             // 'Alice'` and `storage.get('mode') === 'hard'` were both silently false, which is a bug that

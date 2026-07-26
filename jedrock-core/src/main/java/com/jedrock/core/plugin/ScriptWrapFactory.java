@@ -1,6 +1,8 @@
 package com.jedrock.core.plugin;
 
 import com.jedrock.api.Server;
+import com.jedrock.api.entity.Hologram;
+import com.jedrock.api.entity.PuppetEntity;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.world.World;
 import com.jedrock.core.player.CorePlayer;
@@ -35,9 +37,15 @@ final class ScriptWrapFactory extends WrapFactory {
     private final java.util.Map<Server, ScriptServer> servers = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.Map<World, ScriptWorld> worlds = new java.util.concurrent.ConcurrentHashMap<>();
 
+    private final PluginManager manager;
+
+    ScriptWrapFactory(PluginManager manager) {
+        this.manager = manager;
+    }
+
     @Override
     public Scriptable wrapAsJavaObject(Context cx, Scriptable scope, Object javaObject, Class<?> staticType) {
-        Object contract = contractFor(javaObject);
+        Object contract = contractFor(javaObject, scope);
         if (contract != javaObject) {
             return super.wrapAsJavaObject(cx, scope, contract, contract.getClass());
         }
@@ -53,7 +61,15 @@ final class ScriptWrapFactory extends WrapFactory {
      * works today would start ignoring the very player it is watching. A player's view is kept on the
      * player, so it dies with them rather than in a map of everyone who ever logged in.
      */
-    private Object contractFor(Object javaObject) {
+    private Object contractFor(Object javaObject, Scriptable scope) {
+        if (javaObject instanceof Hologram hologram) {
+            return new ScriptHologram(hologram);
+        }
+        if (javaObject instanceof PuppetEntity puppet) {
+            // A puppet's callback belongs to whichever plugin is asking, so it can die with that plugin
+            // instead of firing into a scope that was thrown away on reload.
+            return new ScriptPuppet(manager, manager.pluginForScope(scope), puppet);
+        }
         if (javaObject instanceof CorePlayer core) {
             ScriptPlayer view = core.scriptView();
             if (view == null) {
