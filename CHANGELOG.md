@@ -307,7 +307,7 @@ unstable — anything may change between entries.
 
 ### Changed
 
-- **`PeSession` split: the 1.1.5 encoders move out (1749 → 1092 lines).** The 0.14 layer has always been
+- **`PeSession` split: the 1.1.5 encoders move out (1749 → 1218 lines).** The 0.14 layer has always been
   two classes — `PeSession014` for the session, `Mcpe014Packets` for the bytes — and 1.1.5 never got the
   same treatment, so its session had accumulated every packet body it sends inline, most of them as
   lambdas inside the method that sent them. New **`McpePackets`** is the 1.1.5 counterpart: ~35 clientbound
@@ -322,7 +322,7 @@ unstable — anything may change between entries.
   than reaching for a constant, so nothing in the new class knows what a session is. Behaviour is identical
   — even the boss bar still sends its fill and title as two separate batches, which is what it did before.
 
-- **`JedrockServer` split again: the network bridge moves out (1099 → 616 lines).** The last split pulled
+- **`JedrockServer` split again: the network bridge moves out (1099 → 622 lines).** The last split pulled
   out what the server *does* (broadcasting, combat, containers, entities, the level). What stayed was two
   things that never share a line of code: the server's own life — config, the collaborators it owns,
   bootstrap, the tick, the api surface — and the ~470 lines of *inbound decisions*, one per thing a client
