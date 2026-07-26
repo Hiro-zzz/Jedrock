@@ -149,7 +149,7 @@ public final class ScriptWorld {
     }
 
     /** Parse a case-insensitive enum name, failing with the full list of valid names — a script-friendly error. */
-    private static <E extends Enum<E>> E parse(Class<E> type, String name) {
+    static <E extends Enum<E>> E parse(Class<E> type, String name) {
         try {
             return Enum.valueOf(type, name.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException | NullPointerException e) {

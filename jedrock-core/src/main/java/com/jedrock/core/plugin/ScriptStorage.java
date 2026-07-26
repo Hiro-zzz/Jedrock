@@ -110,8 +110,9 @@ public final class ScriptStorage {
     public ScriptStorage forPlayer(Object player) {
         Object unwrapped = unwrap(player);
         String id;
-        if (unwrapped instanceof Player p) {
-            id = p.getUniqueId().toString();
+        Player known = ScriptWrapFactory.unwrapPlayer(unwrapped);   // the script contract, or a raw player
+        if (known != null) {
+            id = known.getUniqueId().toString();
         } else if (unwrapped instanceof CharSequence s) {
             id = s.toString(); // a uuid (or any name the script wants to scope by), passed as text
         } else {

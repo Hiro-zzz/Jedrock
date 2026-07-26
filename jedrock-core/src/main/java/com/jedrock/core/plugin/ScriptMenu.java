@@ -107,9 +107,14 @@ public final class ScriptMenu {
      * {@code false} if the player is offline, or if neither shape is available to them (a Bedrock button
      * menu whose buttons carry no labels).
      */
-    public boolean open(Player player) {
+    public boolean open(Object player) {
+        // A script holds the script contract, not the core player — see ScriptWrapFactory.
+        Player target = ScriptWrapFactory.unwrapPlayer(player);
+        if (target == null) {
+            throw new IllegalArgumentException("menu.open expects a player");
+        }
         MenuClick click = onClick == null ? null
                 : (p, slot, state) -> manager.callMenuClick(plugin, onClick, p, slot, state);
-        return manager.openMenu(player, title, container, labels, click);
+        return manager.openMenu(target, title, container, labels, click);
     }
 }

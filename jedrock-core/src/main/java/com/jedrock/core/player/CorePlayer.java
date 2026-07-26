@@ -154,6 +154,23 @@ public final class CorePlayer implements Player {
     private volatile String sidebarTitle;
     private volatile String[] sidebarLines;
 
+    /**
+     * This player as scripts see them — the one view, kept here so it lives and dies with the player.
+     * Scripts compare players with {@code ==}, which Rhino answers by reference, so every crossing into
+     * JavaScript has to hand back the same object. Typed as {@code Object} because the core knows nothing
+     * about the scripting layer; the plugin host owns what this is (see {@code ScriptWrapFactory}).
+     */
+    private volatile Object scriptView;
+
+    @SuppressWarnings("unchecked")
+    public <T> T scriptView() {
+        return (T) scriptView;
+    }
+
+    public void scriptView(Object view) {
+        this.scriptView = view;
+    }
+
     /** A button menu shown as a text list (the Bedrock fallback), pickable with {@code /pick}; null if none. */
     private volatile com.jedrock.core.inventory.ListMenu pendingMenu;
 

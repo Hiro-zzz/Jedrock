@@ -326,6 +326,32 @@ unstable — anything may change between entries.
 
 ### Changed
 
+- **The script API is a contract now, not an accident.** Rhino reflects an object's <em>runtime</em> class.
+  Declaring a field as an api interface changes nothing, and neither does Rhino's own `staticType`, which
+  only narrows the surface when reflection outright fails — confirmed by experiment before any of this was
+  written. So for as long as the core handed scripts its own objects, a plugin could call every public
+  method those objects happened to have: `player.getConnection()` was a door into the network layer (raw
+  packet writes to anyone), `server.getOpList()` / `getNetworkServer()` / `getPlugins()` were doors into
+  the permission store, the socket and the plugin host. Meanwhile the `api` module — whose entire job is to
+  be the contract — described none of it, so a plugin's real surface was whatever the implementation
+  happened to expose, and renaming an internal broke scripts with nothing failing to compile.
+  New **`ScriptPlayer`** and **`ScriptServer`** are that surface, written down: every method a plugin may
+  call, delegating to the api. **`ScriptWrapFactory`** substitutes them wherever a core object crosses into
+  JavaScript — and because Rhino routes *every* path through a wrap factory, that is all of them at once:
+  the globals, `e.getPlayer()`, a command argument, `server.getPlayers()`, an entity's nearest-player
+  query. There is no way left to obtain a core object in a script.
+  Kept working on purpose: **`==` between two players**. Rhino compares Java objects by unwrapping and
+  comparing references, so a fresh view per crossing would have quietly made `e.getPlayer() == watched`
+  false — a script that works today silently ignoring the player it watches. Each player's view is kept on
+  the player itself, so it is the same object every time and dies with them rather than in a map of
+  everyone who ever logged in. Names match the api exactly, so existing plugins are unaffected, with one
+  deliberate exception: `player.getConnection()` is gone, replaced by **`player.getVersion()`** for the
+  one thing scripts used it for. `isOp()` and `hasPermission()` moved onto the api `Player` as part of
+  this — they were documented, used by the example plugin, and existed only on the implementation.
+  Still to do: puppets and holograms hand back their api objects unwrapped. Their implementations expose
+  little beyond the contract (no network, no server state), so that is a smaller hole than the two closed
+  here, not a closed one.
+
 - **`PeSession` split: the 1.1.5 encoders move out (1749 → 1218 lines).** The 0.14 layer has always been
   two classes — `PeSession014` for the session, `Mcpe014Packets` for the bytes — and 1.1.5 never got the
   same treatment, so its session had accumulated every packet body it sends inline, most of them as

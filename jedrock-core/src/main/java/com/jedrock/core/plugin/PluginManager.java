@@ -50,6 +50,9 @@ public final class PluginManager {
 
     private static final JLogger LOGGER = JLogger.getLogger("plugin");
 
+    /** Substitutes the script contract (ScriptPlayer / ScriptServer / ScriptWorld) for core objects. */
+    private static final ScriptWrapFactory WRAP_FACTORY = new ScriptWrapFactory();
+
     /** Best-effort sandbox: allow our own code and a safe JDK slice; deny the rest. */
     private static final ClassShutter SHUTTER = fullName -> {
         // The obvious escape hatches, denied even though they live under an allowed prefix.
@@ -627,6 +630,10 @@ public final class PluginManager {
             cx.setLanguageVersion(Context.VERSION_ES6); // arrow functions, let/const, template literals
             cx.setOptimizationLevel(-1);                // interpret, don't generate a class per script (hot reload)
             cx.setClassShutter(SHUTTER);
+            // Substitute the script contract for a core object on its way into JavaScript — every path,
+            // since Rhino routes them all through the wrap factory. See ScriptWrapFactory for why the
+            // api interfaces alone could not do this job.
+            cx.setWrapFactory(WRAP_FACTORY);
             // Hand Java strings, numbers and booleans to scripts as JS primitives instead of wrapping
             // them. Rhino wraps by default, and a wrapper is never === a literal: `player.getName() ===
             // 'Alice'` and `storage.get('mode') === 'hard'` were both silently false, which is a bug that

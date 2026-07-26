@@ -10,6 +10,10 @@
 //                playSound / spawnParticle. Edits render live on every client, cross-edition.
 //   entities   — spawn and drive puppets, props and labels; group() builds a scene. See /guard and /decor.
 //   menus      — menus.create(title, rows): a virtual chest (a window on Java; a /pick list on Bedrock).
+//
+// `server` and every `player` you get (a global, an event, a command argument, a roster query) are the
+// script contract — the methods below and nothing else. The server's internals are not reachable, and
+// neither is a player's connection; player.getVersion() gives the edition string that used to need it.
 //                onClick + button(slot,item,label) makes a button menu; setItem alone is a storage chest.
 //   storage    — the only thing that survives a restart: get / set / has / remove / keys / size / clear,
 //                plus forPlayer(p) for per-player state. Strings, numbers, booleans, objects and arrays.
@@ -653,7 +657,7 @@ commands.register('teststats', function (player, args) {
         player.sendMessage(' {white}' + names[i] + '{gray}: ' + stats.events[names[i]]);
     }
     player.sendMessage('{gold}== Packets =={gray} in={white}' + stats.packetsIn
-        + '{gray} out={white}' + stats.packetsOut + '{gray} (' + player.getConnection().getProtocolVersion() + ')');
+        + '{gray} out={white}' + stats.packetsOut + '{gray} (' + player.getVersion() + ')');
 });
 
 // Optional: called when the plugin is unloaded or reloaded. Everything a script registered — listeners,

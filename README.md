@@ -271,7 +271,11 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
   name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
   work (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too
-  — `player.isOp()`, `player.hasPermission('node')`, `player.getPrefix()`. A saved edit reloads within a
+  — `player.isOp()`, `player.hasPermission('node')`, `player.getPrefix()`. What a script may touch is a
+  **written contract**: `player` and `server` arrive as `ScriptPlayer` / `ScriptServer` wherever they cross
+  into JavaScript, so the core's internals (a player's connection, the op list, the network server) are not
+  reachable from a plugin — Rhino reflects an object's runtime class, so the api interfaces alone could
+  never have enforced that. A saved edit reloads within a
   second. Rhino (~1.5 MB, pure Java, zero transitive deps) was chosen over GraalJS for weight; it lives only
   in `core`. See `plugins/example.js`.
 
