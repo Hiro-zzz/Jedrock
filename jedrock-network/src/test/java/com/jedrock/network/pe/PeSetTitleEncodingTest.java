@@ -21,7 +21,7 @@ class PeSetTitleEncodingTest {
     @Test
     void titleBodyMatchesProtocol113() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeSetTitle(b, TITLE_TYPE_TITLE, "Hi", 5, 40, 5);
+        McpePackets.setTitle(b, TITLE_TYPE_TITLE, "Hi", 5, 40, 5);
 
         assertEquals(ID_SET_TITLE, ByteBufUtils.readVarInt(b), "packet id");
         assertEquals(TITLE_TYPE_TITLE, ByteBufUtils.readSignedVarInt(b), "type (putVarInt = zigzag)");
@@ -36,14 +36,14 @@ class PeSetTitleEncodingTest {
     @Test
     void actionBarAndClearUseTheirTypes() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeSetTitle(b, TITLE_TYPE_ACTIONBAR, "Wave", 1, 20, 1);
+        McpePackets.setTitle(b, TITLE_TYPE_ACTIONBAR, "Wave", 1, 20, 1);
         ByteBufUtils.readVarInt(b); // id
         assertEquals(TITLE_TYPE_ACTIONBAR, ByteBufUtils.readSignedVarInt(b), "action-bar type");
         assertEquals("Wave", ByteBufUtils.readString(b));
         b.release();
 
         ByteBuf c = Unpooled.buffer();
-        PeSession.writeSetTitle(c, TITLE_TYPE_CLEAR, "", 0, 0, 0);
+        McpePackets.setTitle(c, TITLE_TYPE_CLEAR, "", 0, 0, 0);
         ByteBufUtils.readVarInt(c); // id
         assertEquals(TITLE_TYPE_CLEAR, ByteBufUtils.readSignedVarInt(c), "clear type");
         assertEquals("", ByteBufUtils.readString(c), "empty text for a clear");

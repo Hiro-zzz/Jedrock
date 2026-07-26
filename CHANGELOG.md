@@ -307,6 +307,21 @@ unstable — anything may change between entries.
 
 ### Changed
 
+- **`PeSession` split: the 1.1.5 encoders move out (1749 → 1092 lines).** The 0.14 layer has always been
+  two classes — `PeSession014` for the session, `Mcpe014Packets` for the bytes — and 1.1.5 never got the
+  same treatment, so its session had accumulated every packet body it sends inline, most of them as
+  lambdas inside the method that sent them. New **`McpePackets`** is the 1.1.5 counterpart: ~35 clientbound
+  encoders (chat and popups, titles, boss-bar events, level events, the PlayerList/AddPlayer pair, entities
+  and props, metadata, animations, blocks, equipment, inventories, and the whole join sequence from
+  PlayStatus through StartGame to the command manifest), each a pure function of its arguments.
+  The point isn't the line count, it's what the split buys: an encoder that touches no session state can be
+  read against PocketMine field by field and pinned by a unit test that needs no client, no socket and no
+  login — which is exactly how these layouts were verified in the first place. The eight existing PE
+  encoding tests now call `McpePackets` directly, and they are what proves the move was byte-for-byte: the
+  wire is unchanged. Where an encoder needed the player's own entity id it takes it as an argument rather
+  than reaching for a constant, so nothing in the new class knows what a session is. Behaviour is identical
+  — even the boss bar still sends its fill and title as two separate batches, which is what it did before.
+
 - **`JedrockServer` split into five collaborators (1822 → 1043 lines).** The class had accumulated every
   responsibility that ever needed the roster, and its next feature would have made that worse. What came
   out, each owning one thing and testable on its own: **`PlayerBroadcast`** — the single place that walks

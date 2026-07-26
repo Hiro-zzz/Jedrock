@@ -21,7 +21,7 @@ class PeTextLineEncodingTest {
     @Test
     void textLineIsAnImmobileItemEntityWithANametag() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeAddTextLine(b, 1001L, 8.0, 70.0, 8.0, "§6Hello");
+        McpePackets.addTextLine(b, 1001L, 8.0, 70.0, 8.0, "§6Hello");
 
         assertEquals(0x0D, ByteBufUtils.readVarInt(b), "AddEntity id");
         assertEquals(1001L, readSignedVarLong(b), "entity unique id");

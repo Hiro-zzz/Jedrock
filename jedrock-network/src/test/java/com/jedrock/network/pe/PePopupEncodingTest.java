@@ -23,7 +23,7 @@ class PePopupEncodingTest {
     @Test
     void popupBodyMatchesProtocol113() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writePopup(b, "§6Stats", "§fKills: 3\n§7Deaths: 1");
+        McpePackets.popup(b, "§6Stats", "§fKills: 3\n§7Deaths: 1");
 
         assertEquals(ID_TEXT, ByteBufUtils.readVarInt(b), "packet id");
         assertEquals(TEXT_TYPE_POPUP, b.readUnsignedByte(), "type (a plain byte, not a varint)");
@@ -36,7 +36,7 @@ class PePopupEncodingTest {
     @Test
     void clearingSendsAnEmptyPopup() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writePopup(b, null, null);
+        McpePackets.popup(b, null, null);
 
         ByteBufUtils.readVarInt(b); // id
         assertEquals(TEXT_TYPE_POPUP, b.readUnsignedByte());

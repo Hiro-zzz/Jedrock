@@ -15,7 +15,7 @@ class PeRespawnEncodingTest {
     @Test
     void respawnBodyIsThreeLittleEndianFloats() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeRespawn(b, 0.5f, 65.0f, 0.5f);
+        McpePackets.respawn(b, 0.5f, 65.0f, 0.5f);
 
         assertEquals(ID_RESPAWN, ByteBufUtils.readVarInt(b), "packet id");
         assertEquals(0.5f, b.readFloatLE(), 1e-6, "x");

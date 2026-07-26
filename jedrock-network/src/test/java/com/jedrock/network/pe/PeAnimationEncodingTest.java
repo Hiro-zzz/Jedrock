@@ -20,7 +20,7 @@ class PeAnimationEncodingTest {
     @Test
     void animateBodyMatchesProtocol113() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeAnimate(b, McpeProtocol.ANIMATE_SWING_ARM, 1000L);
+        McpePackets.animate(b, McpeProtocol.ANIMATE_SWING_ARM, 1000L);
 
         assertEquals(ID_ANIMATE, ByteBufUtils.readVarInt(b), "packet id");
         assertEquals(McpeProtocol.ANIMATE_SWING_ARM, ByteBufUtils.readSignedVarInt(b), "action (putVarInt)");
@@ -32,7 +32,7 @@ class PeAnimationEncodingTest {
     @Test
     void setEntityDataSneakingSetsFlagBitOne() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeSetEntityDataFlags(b, 1000L, true, false, false);
+        McpePackets.setEntityPose(b, 1000L, true, false, false);
 
         assertEquals(ID_SET_ENTITY_DATA, ByteBufUtils.readVarInt(b), "packet id");
         assertEquals(1000L, ByteBufUtils.readVarLong(b), "entity runtime id");
@@ -47,7 +47,7 @@ class PeAnimationEncodingTest {
     @Test
     void setEntityDataCombinesSneakSprintAndItemUse() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeSetEntityDataFlags(b, 9L, true, true, true);
+        McpePackets.setEntityPose(b, 9L, true, true, true);
 
         ByteBufUtils.readVarInt(b);   // id
         ByteBufUtils.readVarLong(b);  // runtime id
@@ -62,7 +62,7 @@ class PeAnimationEncodingTest {
     @Test
     void setEntityDataItemUseSetsActionBit() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeSetEntityDataFlags(b, 3L, false, false, true);
+        McpePackets.setEntityPose(b, 3L, false, false, true);
 
         ByteBufUtils.readVarInt(b);   // id
         ByteBufUtils.readVarLong(b);  // runtime id
@@ -77,7 +77,7 @@ class PeAnimationEncodingTest {
     @Test
     void setEntityDataKeepsNametagFlagsWhenIdle() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeSetEntityDataFlags(b, 5L, false, false, false);
+        McpePackets.setEntityPose(b, 5L, false, false, false);
 
         ByteBufUtils.readVarInt(b);   // id
         ByteBufUtils.readVarLong(b);  // runtime id
@@ -92,7 +92,7 @@ class PeAnimationEncodingTest {
     @Test
     void entityEventHurtBodyMatchesProtocol113() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeEntityEvent(b, 1000L, McpeProtocol.ENTITY_EVENT_HURT, 0);
+        McpePackets.entityEvent(b, 1000L, McpeProtocol.ENTITY_EVENT_HURT, 0);
 
         assertEquals(ID_ENTITY_EVENT, ByteBufUtils.readVarInt(b), "packet id");
         assertEquals(1000L, ByteBufUtils.readVarLong(b), "entity runtime id");

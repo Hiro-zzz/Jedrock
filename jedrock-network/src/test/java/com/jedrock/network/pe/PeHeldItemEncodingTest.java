@@ -20,7 +20,7 @@ class PeHeldItemEncodingTest {
     @Test
     void mobEquipment113MatchesPmmp() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeMobEquipment(b, 42L, Blocks.state(276, 0)); // a diamond sword
+        McpePackets.mobEquipment(b, 42L, Blocks.state(276, 0)); // a diamond sword
 
         assertEquals(0x1F, ByteBufUtils.readVarInt(b), "packet id MOB_EQUIPMENT");
         assertEquals(42L, ByteBufUtils.readVarLong(b), "entity runtime id");
@@ -35,7 +35,7 @@ class PeHeldItemEncodingTest {
     @Test
     void emptyHandIs113Air() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeMobEquipment(b, 7L, Blocks.AIR);
+        McpePackets.mobEquipment(b, 7L, Blocks.AIR);
 
         ByteBufUtils.readVarInt(b);  // id
         ByteBufUtils.readVarLong(b); // runtime id
@@ -46,7 +46,7 @@ class PeHeldItemEncodingTest {
     @Test
     void addItemEntity113CarriesTheItemAndPinsItInPlace() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeAddItemEntity(b, 7L, 1.5, 65.0, -2.5, Blocks.state(89, 0)); // floating glowstone
+        McpePackets.addItemEntity(b, 7L, 1.5, 65.0, -2.5, Blocks.state(89, 0)); // floating glowstone
 
         assertEquals(0x0f, ByteBufUtils.readVarInt(b), "packet id ADD_ITEM_ENTITY");
         long zigzag = ByteBufUtils.readVarLong(b);
@@ -88,7 +88,7 @@ class PeHeldItemEncodingTest {
     void mobArmorEquipment113CarriesFourSlotsHeadToFeet() {
         ByteBuf b = Unpooled.buffer();
         // A diamond helmet and iron boots, nothing in between.
-        PeSession.writeMobArmorEquipment(b, 42L, Blocks.state(310, 0), 0, 0, Blocks.state(309, 0));
+        McpePackets.mobArmorEquipment(b, 42L, Blocks.state(310, 0), 0, 0, Blocks.state(309, 0));
 
         assertEquals(0x20, ByteBufUtils.readVarInt(b), "packet id MOB_ARMOR_EQUIPMENT");
         assertEquals(42L, ByteBufUtils.readVarLong(b), "entity runtime id");
