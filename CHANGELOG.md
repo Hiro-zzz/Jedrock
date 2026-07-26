@@ -294,6 +294,25 @@ unstable — anything may change between entries.
 
 ### Fixed
 
+- **The 1.8 boss bar still didn't show — the wither has to be in front of you.** Second attempt at this
+  (the first swapped riding the player for spawn-and-follow, which was also invisible). The missing fact:
+  the 1.8 client draws its boss health bar from the wither it is **rendering**, not merely from one it has
+  been told about — so an invisible wither parked five blocks under the player's feet, permanently out of
+  frame, never produces a bar no matter how correct its packets are. Ground truth this time is
+  **ViaRewind**, which has to solve the identical problem (give a 1.8 client the boss bar of a modern
+  server) and whose recipe explains itself: it holds the wither **48 blocks straight down the player's line
+  of sight** and re-places it on every **look** packet as well as every move. That trigonometry only makes
+  sense if the entity has to stay in view — which is the whole answer.
+  Now copied field for field: the placement (`x - cos(pitch)·sin(yaw)·48`, `y - sin(pitch)·48`,
+  `z + cos(pitch)·cos(yaw)·48`), the follow on look as well as position, the wither's
+  invulnerable-time metadata (index 20 = 880, which keeps the client's copy out of its spawn sequence),
+  and an empty bar as *almost* zero health rather than zero (a wither at 0 is dead and draws nothing).
+  The spawn seed now carries the facing too, so a bar shown before the client's first position report is
+  already placed correctly. Tested: the placement is pinned in four directions plus the invariant that the
+  wither always sits exactly 48 blocks away — the kind of mistake that is invisible otherwise, since the
+  packets send happily either way. One deliberate difference from ViaRewind remains: it also sets the
+  always-show-nametag flag, which would hang the title in the world as floating text, so that stays off.
+
 - **A sidebar line built by concatenation crashed the script.** `player.setSidebar(title, [lines])` threw
   `ClassCastException: ConsString cannot be cast to String` for any line a script assembled with `+` — which
   is every interesting line, since a static sidebar has no reason to exist. The cause is one Rhino detail:
