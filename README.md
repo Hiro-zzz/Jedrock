@@ -637,8 +637,10 @@ simulation stays out (see non-goals).
   this server does **scenery**. Three ways to pose a block or item where no block can go are in (a small
   item model, a full-size block, or a block worn on an invisible head), on all four protocols and with no
   resource pack, plus **labels** and **groups** so an arrangement is authored and moved as one, and a
-  cast of **23 mob types** to pose. What would grow it further: **splitting head yaw from body yaw** (the
-  packets already exist), **saving a scene** so it survives a restart without a script rebuilding it, and
+  cast of **23 mob types** to pose. **Saving a scene landed:** `group.save(name)` freezes an arrangement
+  and the *server* stands it back up at boot — no script involved, so decoration finally outlives the code
+  that authored it (`world/scenes.jdb`; behaviour is deliberately not saved, since a saved prop has no
+  plugin). What would grow it further: **splitting head yaw from body yaw** (the packets already exist) and
   a `/pose` in-game editor that exports one as a committable file. Known limits: no armor stands in
   either PE era, no per-entity scale, no limb posing, and 0.14 renders only the mobs it is old enough to
   know. And the one number to watch as scenes grow — a static prop costs no ticks but one spawn packet

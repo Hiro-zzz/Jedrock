@@ -568,6 +568,26 @@ public final class PluginManager {
         return server instanceof JedrockServer js && js.openMenu(player, title, container, labels, onClick);
     }
 
+    // ===== Scenes: authored by a script, owned by the server (see SceneManager) =====
+
+    void saveScene(String name, java.util.List<com.jedrock.api.entity.PuppetEntity> props) {
+        if (server instanceof JedrockServer js) {
+            js.getScenes().save(name, props);
+        }
+    }
+
+    java.util.List<com.jedrock.api.entity.PuppetEntity> loadScene(String name) {
+        return server instanceof JedrockServer js ? js.getScenes().spawn(name) : java.util.List.of();
+    }
+
+    java.util.List<String> sceneNames() {
+        return server instanceof JedrockServer js ? js.getScenes().names() : java.util.List.of();
+    }
+
+    boolean removeScene(String name) {
+        return server instanceof JedrockServer js && js.getScenes().remove(name);
+    }
+
     /**
      * Show a container's new contents to whoever has it open. A script editing a world chest is reaching
      * into the same box a player's window is bound to, so without this the change would be invisible to

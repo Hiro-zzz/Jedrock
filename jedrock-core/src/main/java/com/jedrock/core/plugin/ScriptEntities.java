@@ -119,7 +119,41 @@ public final class ScriptEntities {
      * turned or cleared in a single call.
      */
     public ScriptGroup group() {
-        return new ScriptGroup();
+        return newGroup();
+    }
+
+    /** Every group knows the manager, so {@code group.save(name)} can reach the scene store. */
+    private ScriptGroup newGroup() {
+        ScriptGroup group = new ScriptGroup();
+        group.bind(manager);
+        return group;
+    }
+
+    /**
+     * Stand a saved scene up in the world, or hand back the one already standing, as a group.
+     *
+     * <p>A saved scene belongs to the <b>server</b>, not to this plugin: it is restored at boot without
+     * any script, and a hot reload doesn't take it away. So this is how a script gets hold of one it
+     * wants to move or re-dress — asking twice returns the same props rather than a second copy of them.
+     * An unknown name yields an empty group.
+     */
+    public ScriptGroup loadScene(String name) {
+        ScriptGroup group = newGroup();
+        for (com.jedrock.api.entity.PuppetEntity puppet : manager.loadScene(name)) {
+            group.add(adopt(puppet));
+        }
+        return group;
+    }
+
+    /** The names of every saved scene. */
+    public String[] scenes() {
+        java.util.List<String> names = manager.sceneNames();
+        return names.toArray(new String[0]);
+    }
+
+    /** Take a scene out of the world and forget it was saved. {@code true} if there was one. */
+    public boolean removeScene(String name) {
+        return manager.removeScene(name);
     }
 
     /**
@@ -132,7 +166,7 @@ public final class ScriptEntities {
      * }</pre>
      */
     public ScriptGroup circle(int count, double cx, double cy, double cz, double radius, Function place) {
-        ScriptGroup group = new ScriptGroup();
+        ScriptGroup group = newGroup();
         for (int i = 0; i < Math.max(0, count); i++) {
             double angle = (Math.PI * 2 / Math.max(1, count)) * i;
             group.add(callPlace(place, cx + Math.cos(angle) * radius, cy, cz + Math.sin(angle) * radius, i));
@@ -143,7 +177,7 @@ public final class ScriptEntities {
     /** Place {@code count} things evenly along the line between two points, ends included. */
     public ScriptGroup line(int count, double x1, double y1, double z1,
                             double x2, double y2, double z2, Function place) {
-        ScriptGroup group = new ScriptGroup();
+        ScriptGroup group = newGroup();
         int steps = Math.max(0, count);
         for (int i = 0; i < steps; i++) {
             double t = steps == 1 ? 0 : (double) i / (steps - 1);
@@ -155,7 +189,7 @@ public final class ScriptEntities {
     /** Place a {@code columns × rows} grid on the horizontal plane, {@code spacing} blocks apart. */
     public ScriptGroup grid(int columns, int rows, double x, double y, double z, double spacing,
                             Function place) {
-        ScriptGroup group = new ScriptGroup();
+        ScriptGroup group = newGroup();
         int index = 0;
         for (int row = 0; row < Math.max(0, rows); row++) {
             for (int column = 0; column < Math.max(0, columns); column++) {
@@ -172,6 +206,15 @@ public final class ScriptEntities {
     }
 
     /** Wrap a freshly spawned body and put it on this plugin's roster. */
+    /**
+     * Wrap a puppet this plugin did <em>not</em> spawn — a saved scene's prop, which the server owns.
+     * Deliberately not tracked: a hot reload clears what this plugin spawned, and a scene standing in the
+     * world is not that. It gets a script handle, not an owner.
+     */
+    private ScriptEntity adopt(com.jedrock.api.entity.PuppetEntity puppet) {
+        return new ScriptEntity(puppet, this);
+    }
+
     private ScriptEntity track(com.jedrock.api.entity.PuppetEntity puppet) {
         ScriptEntity entity = new ScriptEntity(puppet, this);
         synchronized (entities) {

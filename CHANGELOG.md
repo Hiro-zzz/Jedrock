@@ -8,6 +8,24 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Scenes survive the restart — decoration stops being a demo.** Everything a script spawned died with
+  it: a hot reload, or a restart, took the lanterns away, so an arrangement only existed for as long as the
+  code describing it kept running. That is right for a guard with an `onTick` brain and wrong for a lamp
+  post. **`group.save(name)`** freezes an arrangement as it stands — type, position, facing, name tag, held
+  item, armor and flags — and the **server** owns it from then on: it is stood back up at boot, before
+  anyone can log in, with no script involved at all. `entities.loadScene(name)` hands a script the props
+  (spawning them if they aren't up, returning what is standing if they are — asking on every reload can't
+  breed copies), `entities.scenes()` lists them, `entities.removeScene(name)` takes one out of the world
+  and forgets it.
+  What is deliberately not saved is *behaviour*: a saved prop has no brain, because a saved scene has no
+  plugin. Stored like the world and the script store already are — one compact DEFLATE file
+  (`world/scenes.jdb`, next to the level file since scenes decorate that world), written atomically, with a
+  dirty flag so an untouched set is never rewritten, flushed by the same autosave and once more at
+  shutdown. Try `/scene save`, then restart the server and look. Tested: a scene round-trips through the
+  file with its look intact, standing one up twice yields the same props rather than two copies, removing
+  one takes it out of the world as well as the store, an unknown name is empty rather than an error, and an
+  untouched store is not rewritten.
+
 - **Scripts can reach the chests players actually placed.** The `menus` global has been able to conjure a
   chest out of nothing for a while; the one kind of storage a script could <em>not</em> touch was the kind
   that matters — a real chest block, with contents that persist in the level file and that anyone standing

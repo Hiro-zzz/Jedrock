@@ -27,6 +27,33 @@ import java.util.List;
 public final class ScriptGroup {
 
     private final List<ScriptEntity> members = new ArrayList<>();
+
+    /** Only needed by {@link #save}; a group built before the manager was known just can't save. */
+    private PluginManager manager;
+
+    void bind(PluginManager manager) {
+        this.manager = manager;
+    }
+
+    /**
+     * Freeze this arrangement under {@code name} so it survives a restart — the props come back at the
+     * next boot with no script involved, which is the difference between decoration and a demo.
+     *
+     * <p>What is saved is how the props <em>look</em>: type, position, facing, name tag, held item, armor
+     * and flags. Not behaviour — an {@code onTick} brain belongs to the plugin that wrote it, and a saved
+     * scene has no plugin. The entities in this group are unaffected and still belong to whoever spawned
+     * them; the scene is a copy taken at this moment, and the server owns it from here.
+     */
+    public void save(String name) {
+        if (manager == null || name == null || name.isEmpty()) {
+            return;
+        }
+        List<com.jedrock.api.entity.PuppetEntity> props = new ArrayList<>();
+        for (ScriptEntity entity : all()) {
+            props.add(entity.puppet());
+        }
+        manager.saveScene(name, props);
+    }
     /** The point moves and rotations are measured from; the centre of the members unless set. */
     private volatile Location pivot;
 
