@@ -602,11 +602,15 @@ public final class CorePlayer implements Player {
     @Override
     public void setSidebar(String title, java.util.List<String> lines) {
         // Render the markup here (like sendTitle); the connection frames the legacy strings per version.
+        // Read the elements as Object, not String: Rhino's NativeArray *is* a java.util.List, so a script's
+        // array arrives unconverted and a concatenated line is a ConsString, not a String — a String local
+        // here would checkcast and throw. Every CharSequence stringifies the same way.
+        java.util.List<?> raw = lines;
         String renderedTitle = ChatText.toLegacy(title == null ? "" : title);
-        String[] rendered = new String[lines == null ? 0 : lines.size()];
+        String[] rendered = new String[raw == null ? 0 : raw.size()];
         for (int i = 0; i < rendered.length; i++) {
-            String line = lines.get(i);
-            rendered[i] = ChatText.toLegacy(line == null ? "" : line);
+            Object line = raw.get(i);
+            rendered[i] = ChatText.toLegacy(line == null ? "" : line.toString());
         }
         connection.setSidebar(renderedTitle, rendered);
     }

@@ -57,6 +57,32 @@ class ScriptSidebarTest {
         assertNull(conn.title, "clearSidebar reached the connection");
     }
 
+    /**
+     * A concatenated line is a Rhino {@code ConsString}, not a {@code String} — and since {@code NativeArray}
+     * itself implements {@code java.util.List}, the array reaches the parameter with its elements
+     * unconverted. Reading one as a {@code String} used to checkcast and throw; the sidebar must render it.
+     */
+    @Test
+    void concatenatedLinesReachTheSidebar(@TempDir Path dir) {
+        EventBus bus = new EventBus();
+        CommandManager cm = new CommandManager(null);
+        PluginManager plugins = manager(bus, dir, cm);
+        plugins.loadSource("sb.js",
+                "commands.register('board', function (player, args) {\n"
+              + "  player.setSidebar('{gold}' + 'Stats', ['{white}Player: ' + player.getName(),\n"
+              + "                                        '{gray}Score: ' + (1 + 2)]);\n"
+              + "});", 1L);
+
+        SidebarConnection conn = new SidebarConnection();
+        CorePlayer player = new CorePlayer(UUID.randomUUID(), "P", conn, world,
+                world.getSpawnLocation(), GameMode.SURVIVAL);
+
+        cm.dispatch(player, "/board");
+        assertEquals("§6Stats", conn.title, "a concatenated title renders");
+        assertArrayEquals(new String[]{"§fPlayer: P", "§7Score: 3"}, conn.lines,
+                "concatenated lines render instead of throwing a ClassCastException");
+    }
+
     /** Records the sidebar the connection is told to show. */
     private static final class SidebarConnection implements PlayerConnection {
         String title;

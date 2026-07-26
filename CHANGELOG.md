@@ -254,6 +254,19 @@ unstable — anything may change between entries.
   real work never runs. Loose `==`, `String(…)`, and comparing the enum constants themselves all behave —
   the test asserts all four outcomes at once so the guidance can't rot.
 
+### Fixed
+
+- **A sidebar line built by concatenation crashed the script.** `player.setSidebar(title, [lines])` threw
+  `ClassCastException: ConsString cannot be cast to String` for any line a script assembled with `+` — which
+  is every interesting line, since a static sidebar has no reason to exist. The cause is one Rhino detail:
+  `NativeArray` *implements* `java.util.List`, so a JS array handed to a `List<String>` parameter is passed
+  **by identity, with its elements unconverted** — and a JS concatenation is a lazy `ConsString`, not a
+  `String`, so reading an element into a `String` local checkcast and threw. (A `String` or `String[]`
+  parameter is safe: Rhino converts those element by element. `List<String>` is the one shape that isn't,
+  and `setSidebar` is the only place in the api that takes one.) `CorePlayer.setSidebar` now reads the
+  elements as `Object` and stringifies, so any `CharSequence` renders. The existing test missed it by using
+  string *literals* — which really are `java.lang.String` — so the regression test now concatenates.
+
 ### Changed
 
 - **`JedrockServer` split into five collaborators (1822 → 1043 lines).** The class had accumulated every
