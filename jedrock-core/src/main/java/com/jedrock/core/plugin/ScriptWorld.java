@@ -33,8 +33,15 @@ import java.util.Locale;
 public final class ScriptWorld {
 
     private final World world;
+    /** Only needed to show a chest edit to whoever has that chest open; null in a bare view. */
+    private final PluginManager manager;
 
     ScriptWorld(World world) {
+        this(null, world);
+    }
+
+    ScriptWorld(PluginManager manager, World world) {
+        this.manager = manager;
         this.world = world;
     }
 
@@ -51,6 +58,27 @@ public final class ScriptWorld {
     /** The 4-bit metadata (variant) at {@code (x, y, z)} — 0 for a plain block. */
     public int getMeta(int x, int y, int z) {
         return Blocks.metaOf(world.getBlockId(x, y, z));
+    }
+
+    /**
+     * The chest at {@code (x, y, z)}, or {@code null} if that block is not a chest.
+     *
+     * <p>This is a <em>world</em> chest — the one a player placed, whose contents persist in the level
+     * file and which anyone standing at it can open. (The {@code menus} global makes chests out of
+     * nothing instead; those belong to the script that opened them and vanish with it.) Reading costs
+     * nothing, and a chest that has never been opened reads as empty rather than missing.
+     */
+    public ScriptChest getChest(int x, int y, int z) {
+        if (Blocks.idOf(world.getBlockId(x, y, z)) != Blocks.CHEST
+                || !(world instanceof com.jedrock.core.world.CoreWorld core)) {
+            return null;
+        }
+        return new ScriptChest(manager, core, core.getChestContainer(x, y, z), x, y, z);
+    }
+
+    /** Whether there is a chest block at {@code (x, y, z)} — {@link #getChest} without building a view. */
+    public boolean hasChest(int x, int y, int z) {
+        return Blocks.idOf(world.getBlockId(x, y, z)) == Blocks.CHEST;
     }
 
     /** Set a plain (meta-0) block. Id 0 breaks the block. Broadcast to every client. */

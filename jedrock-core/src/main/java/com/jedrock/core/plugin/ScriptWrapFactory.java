@@ -85,7 +85,7 @@ final class ScriptWrapFactory extends WrapFactory {
             return servers.computeIfAbsent(server, ScriptServer::new);
         }
         if (javaObject instanceof World world) {
-            return worlds.computeIfAbsent(world, ScriptWorld::new);
+            return worlds.computeIfAbsent(world, w -> new ScriptWorld(manager, w));
         }
         return javaObject;
     }

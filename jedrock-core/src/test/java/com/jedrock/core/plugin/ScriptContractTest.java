@@ -46,7 +46,7 @@ class ScriptContractTest {
         plugins.loadSource("probe.js",
                 "commands.register('probe', function (player, args) {\n" + body + "\n});", 1L);
 
-        Recorder conn = new Recorder();
+        RecordingConnection conn = new RecordingConnection();
         CorePlayer player = new CorePlayer(UUID.randomUUID(), "P", conn, world,
                 world.getSpawnLocation(), GameMode.SURVIVAL);
         cm.dispatch(player, "/probe");
@@ -112,7 +112,7 @@ class ScriptContractTest {
         CommandManager cm = new CommandManager(null);
         PluginManager plugins = new PluginManager(bus, new StubServer(world), new Scheduler(), cm,
                 new PacketTapRegistry(), dir);
-        Recorder conn = new Recorder();
+        RecordingConnection conn = new RecordingConnection();
         CorePlayer player = new CorePlayer(UUID.randomUUID(), "P", conn, world,
                 world.getSpawnLocation(), GameMode.SURVIVAL);
 
@@ -141,7 +141,7 @@ class ScriptContractTest {
         StubServer stub = new StubServer(world);
         PluginManager plugins = new PluginManager(bus, stub, new Scheduler(), cm,
                 new PacketTapRegistry(), dir);
-        Recorder conn = new Recorder();
+        RecordingConnection conn = new RecordingConnection();
         CorePlayer player = new CorePlayer(UUID.randomUUID(), "P", conn, world,
                 world.getSpawnLocation(), GameMode.SURVIVAL);
         stub.add(player);   // the roster hands back a second wrapper around the same player
@@ -162,7 +162,7 @@ class ScriptContractTest {
         CommandManager cm = new CommandManager(null);
         PluginManager plugins = new PluginManager(bus, new StubServer(world), new Scheduler(), cm,
                 new PacketTapRegistry(), dir);
-        Recorder conn = new Recorder();
+        RecordingConnection conn = new RecordingConnection();
         CorePlayer player = new CorePlayer(UUID.randomUUID(), "P", conn, world,
                 world.getSpawnLocation(), GameMode.SURVIVAL);
 
@@ -183,142 +183,4 @@ class ScriptContractTest {
                 conn.messages);
     }
 
-    /** The least server that lets a script see one: a name, a world and a roster. */
-    private static final class StubServer implements com.jedrock.api.Server {
-        private final CoreWorld world;
-        private final List<com.jedrock.api.player.Player> players = new ArrayList<>();
-
-        StubServer(CoreWorld world) {
-            this.world = world;
-        }
-
-        void add(com.jedrock.api.player.Player player) {
-            players.add(player);
-        }
-
-        @Override public String getName() { return "stub"; }
-        @Override public String getVersion() { return "test"; }
-        @Override public void start() { }
-        @Override public void shutdown() { }
-        @Override public boolean isRunning() { return true; }
-        @Override public EventBus getEventBus() { return new EventBus(); }
-        @Override public java.util.Collection<com.jedrock.api.player.Player> getPlayers() { return players; }
-        @Override public java.util.Optional<com.jedrock.api.player.Player> getPlayer(String name) {
-            return players.stream().filter(p -> p.getName().equals(name)).findFirst();
-        }
-        @Override public java.util.Optional<com.jedrock.api.player.Player> getPlayer(UUID uuid) {
-            return players.stream().filter(p -> p.getUniqueId().equals(uuid)).findFirst();
-        }
-        @Override public void broadcast(String message) { }
-        @Override public void dispatchCommand(com.jedrock.api.player.Player player, String line) { }
-        @Override public java.util.Collection<com.jedrock.api.world.World> getWorlds() { return List.of(world); }
-        @Override public java.util.Optional<com.jedrock.api.world.World> getWorld(String name) {
-            return java.util.Optional.of(world);
-        }
-        @Override public com.jedrock.api.world.World getDefaultWorld() { return world; }
-        @Override public com.jedrock.api.entity.PuppetEntity spawnPuppet(
-                com.jedrock.api.entity.EntityType type, com.jedrock.api.world.Location at, String name) {
-            return new StubPuppet(at);
-        }
-        @Override public com.jedrock.api.entity.PuppetEntity spawnItem(
-                com.jedrock.api.world.Location at, int state) { return new StubPuppet(at); }
-        @Override public com.jedrock.api.entity.PuppetEntity spawnFallingBlock(
-                com.jedrock.api.world.Location at, int state) { return new StubPuppet(at); }
-        @Override public com.jedrock.api.entity.PuppetEntity spawnText(
-                com.jedrock.api.world.Location at, String text) { return new StubPuppet(at); }
-        @Override public com.jedrock.api.entity.Hologram spawnHologram(
-                com.jedrock.api.world.Location at, String... lines) { return new StubHologram(at, lines); }
-        @Override public long getCurrentTick() { return 0; }
-        @Override public com.jedrock.api.ServerStatus getStatus() { return null; }
-    }
-
-    /** A puppet with one method no interface declares — standing in for the real one's internals. */
-    private static final class StubPuppet implements com.jedrock.api.entity.PuppetEntity {
-        private com.jedrock.api.world.Location at;
-        private String nameTag = "";
-
-        StubPuppet(com.jedrock.api.world.Location at) {
-            this.at = at;
-        }
-
-        /** Not on any api interface — a script must not see this. */
-        public String secretDoor() { return "leak"; }
-
-        @Override public com.jedrock.api.entity.EntityType getEntityType() {
-            return com.jedrock.api.entity.EntityType.ZOMBIE;
-        }
-        @Override public String getName() { return "stub"; }
-        @Override public String getNameTag() { return nameTag; }
-        @Override public void setNameTag(String tag) { this.nameTag = tag; }
-        @Override public void teleport(com.jedrock.api.world.Location to) { this.at = to; }
-        @Override public void setRotation(float yaw, float pitch) { }
-        @Override public void lookAt(com.jedrock.api.world.Location target) { }
-        @Override public boolean hasFlag(com.jedrock.api.entity.PuppetFlag flag) { return false; }
-        @Override public void setFlag(com.jedrock.api.entity.PuppetFlag flag, boolean on) { }
-        @Override public void setHeldItem(int state) { }
-        @Override public int getHeldItem() { return 0; }
-        @Override public void setArmor(com.jedrock.api.player.ArmorSlot slot, int state) { }
-        @Override public int getArmor(com.jedrock.api.player.ArmorSlot slot) { return 0; }
-        @Override public void swing() { }
-        @Override public void hurt() { }
-        @Override public void onInteract(java.util.function.Consumer<com.jedrock.api.player.Player> h) { }
-        @Override public UUID getUniqueId() { return UUID.randomUUID(); }
-        @Override public long getEntityId() { return 7L; }
-        @Override public com.jedrock.api.world.World getWorld() { return at.world(); }
-        @Override public com.jedrock.api.world.Location getLocation() { return at; }
-        @Override public void setLocation(com.jedrock.api.world.Location location) { this.at = location; }
-        @Override public void remove() { }
-        @Override public boolean isAlive() { return true; }
-        @Override public String getType() { return "zombie"; }
-    }
-
-    /** Likewise for a hologram. */
-    private static final class StubHologram implements com.jedrock.api.entity.Hologram {
-        private com.jedrock.api.world.Location at;
-        private List<String> lines;
-
-        StubHologram(com.jedrock.api.world.Location at, String... lines) {
-            this.at = at;
-            this.lines = List.of(lines);
-        }
-
-        /** Not on any api interface — a script must not see this. */
-        public String secretDoor() { return "leak"; }
-
-        @Override public List<String> getLines() { return lines; }
-        @Override public void setLines(String... lines) { this.lines = List.of(lines); }
-        @Override public void setLine(int index, String text) { }
-        @Override public void teleport(com.jedrock.api.world.Location to) { this.at = to; }
-        @Override public UUID getUniqueId() { return UUID.randomUUID(); }
-        @Override public long getEntityId() { return 8L; }
-        @Override public com.jedrock.api.world.World getWorld() { return at.world(); }
-        @Override public com.jedrock.api.world.Location getLocation() { return at; }
-        @Override public void setLocation(com.jedrock.api.world.Location location) { this.at = location; }
-        @Override public void remove() { }
-        @Override public boolean isAlive() { return true; }
-        @Override public String getType() { return "hologram"; }
-    }
-
-    /** Captures what the player was told. */
-    private static final class Recorder implements PlayerConnection {
-        final List<String> messages = new ArrayList<>();
-
-        @Override public void sendMessage(String message) { messages.add(message); }
-        @Override public ProtocolVersion getProtocolVersion() { return ProtocolVersion.JE_1_12_2; }
-        @Override public String getAddress() { return "test"; }
-        @Override public void sendPacket(Object packet) { }
-        @Override public void addToTab(UUID uuid, String name) { }
-        @Override public void removeFromTab(UUID uuid) { }
-        @Override public void showPlayer(UUID uuid, String name, long entityId,
-                                         double x, double y, double z, float yaw, float pitch) { }
-        @Override public void hidePlayer(UUID uuid, long entityId) { }
-        @Override public void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch) { }
-        @Override public void teleport(double x, double y, double z, float yaw, float pitch) { }
-        @Override public void setGameMode(GameMode mode) { }
-        @Override public void swingArm(long entityId) { }
-        @Override public void setPose(long entityId, boolean sneaking, boolean sprinting, boolean usingItem) { }
-        @Override public void sendBlockChange(int x, int y, int z, int state) { }
-        @Override public void close(String reason) { }
-        @Override public boolean isActive() { return true; }
-    }
 }

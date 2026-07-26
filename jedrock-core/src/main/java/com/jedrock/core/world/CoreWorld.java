@@ -410,8 +410,9 @@ public final class CoreWorld implements World {
 
     // ===== Block containers (chests) =====
     //
-    // A chest is a block plus a 27-slot container keyed by its position. In-memory only for now — chest
-    // contents do NOT yet survive a restart (level-file persistence is the next step).
+    // A chest is a block plus a 27-slot container keyed by its position, and the contents ride along in
+    // the level file (format v3) — a non-empty chest survives a restart; an empty one is simply recreated
+    // on first access, which is why nothing here has to be pre-registered when a chest block is placed.
 
     private final java.util.Map<Long, com.jedrock.core.inventory.Container> containers =
             new java.util.concurrent.ConcurrentHashMap<>();

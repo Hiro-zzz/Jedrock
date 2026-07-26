@@ -543,6 +543,11 @@ public class JedrockServer implements Server {
         return containers.openMenu(cp, title, container, labels, onClick);
     }
 
+    /** Re-send {@code container} to every player who currently has it open (a script edited it). */
+    public void refreshContainer(com.jedrock.core.inventory.Container container) {
+        containers.refreshViewers(container);
+    }
+
 
     /** Broadcast a system line to every online player (used by {@code /say} and the console {@code say}). */
     @Override

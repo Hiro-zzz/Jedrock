@@ -300,7 +300,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   connections, so a `setBlockId` from a script or command renders live on every client, cross-edition, and
   persists through autosave. Scripts get the `world` global — `getBlock` / `getMeta` /
   `setBlock(x, y, z, id[, meta])` / `fill(corner, corner, id[, meta])` (skips unchanged cells) /
-  `getHighestY` / `getBiome` / `getSpawn` / `setSpawn` / `isInside` — and the Java API gained
+  `getHighestY` / `getBiome` / `getSpawn` / `setSpawn` / `isInside` / **`getChest(x, y, z)`** (a real,
+  persisted chest a player placed — read it, fill it, empty it; anyone with it open sees the change) — and the Java API gained
   `Server.getDefaultWorld()`, `World.setBlock` / `fill` / `isInsideBounds`. Writes outside the finite bounds
   (or the 0–255 Y range) are dropped at the storage boundary, so no API path can grow the world past its
   edge. Try `/deck` and `/pillar` in `plugins/example.js`.

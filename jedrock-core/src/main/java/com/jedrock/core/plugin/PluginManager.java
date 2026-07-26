@@ -233,7 +233,7 @@ public final class PluginManager {
                         Context.javaToJS(new ScriptPackets(this, plugin), scope));
                 if (server != null) { // headless tests run without a server (and thus without a world)
                     ScriptableObject.putProperty(scope, "world",
-                            Context.javaToJS(new ScriptWorld(server.getDefaultWorld()), scope));
+                            Context.javaToJS(new ScriptWorld(this, server.getDefaultWorld()), scope));
                     ScriptableObject.putProperty(scope, "entities",
                             Context.javaToJS(new ScriptEntities(this, plugin), scope));
                 }
@@ -566,6 +566,17 @@ public final class PluginManager {
                      com.jedrock.core.inventory.Container container, String[] labels,
                      com.jedrock.core.inventory.MenuClick onClick) {
         return server instanceof JedrockServer js && js.openMenu(player, title, container, labels, onClick);
+    }
+
+    /**
+     * Show a container's new contents to whoever has it open. A script editing a world chest is reaching
+     * into the same box a player's window is bound to, so without this the change would be invisible to
+     * them until they closed and reopened it.
+     */
+    void refreshContainer(com.jedrock.core.inventory.Container container) {
+        if (server instanceof JedrockServer js) {
+            js.refreshContainer(container);
+        }
     }
 
     /** Build a JS array of primitive strings (see {@link #callCommand} for why primitives, not wrappers). */

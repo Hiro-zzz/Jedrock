@@ -360,6 +360,20 @@ public final class ContainerService {
      * server-authoritative (also resyncs the cursor); <b>Bedrock</b>'s chest window is just the 27 chest
      * slots — the player inventory is the separate window 0 the client already owns.
      */
+    /**
+     * Re-send {@code container} to every player who has it open. Called when something other than a click
+     * changed it — a script writing into a world chest reaches the same container object a player's open
+     * window is bound to, so their screen has to be told, or they keep looking at a stale copy and their
+     * next click is judged against contents that no longer exist.
+     */
+    public void refreshViewers(Container container) {
+        for (CorePlayer player : players.online()) {
+            if (player.getOpenContainer() == container) {
+                sendChestContents(player, player.getConnection());
+            }
+        }
+    }
+
     private void sendChestContents(CorePlayer player, PlayerConnection connection) {
         Container chest = player.getOpenContainer();
         int windowId = player.getOpenWindowId();

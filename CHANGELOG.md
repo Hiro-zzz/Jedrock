@@ -8,6 +8,19 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Scripts can reach the chests players actually placed.** The `menus` global has been able to conjure a
+  chest out of nothing for a while; the one kind of storage a script could <em>not</em> touch was the kind
+  that matters — a real chest block, with contents that persist in the level file and that anyone standing
+  at it can open. `world.getChest(x, y, z)` returns one now (`null` where there is no chest block, so a
+  script can't conjure storage in mid-air), with `hasChest` for the cheap check: `getItem` / `getCount` /
+  `setItem`, `add` / `remove` (returning how many actually fit or were found, so a full chest is
+  distinguishable from a successful drop), `count` / `contains`, `clear` and `size`.
+  It is the same container everything else uses, not a copy: an edit marks the world dirty for autosave
+  and is pushed to anyone who has that chest open at that moment — otherwise they would keep looking at a
+  stale window and their next click would be judged against contents that no longer exist. Try `/stash`.
+  Fixed a stale comment on the way: `CoreWorld` still claimed chest contents were in-memory only and did
+  not survive a restart, which stopped being true when the level file learned to carry them (format v3).
+
 - **The sidebar reaches Bedrock — on the item-name line.** Neither legacy Bedrock era has a scoreboard, so
   `player.setSidebar(title, [lines])` borrows the one persistent text field those clients do have: the
   **popup**, which MCPE draws in the HUD slot where a held item's name appears, displaced up the screen.

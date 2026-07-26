@@ -490,6 +490,45 @@ commands.register('deck', function (player, args) {
         + world.getBiome(x, z) + ').');
 });
 
+// /stash — read and fill the chest you're standing next to (world.getChest demo).
+// This is a REAL chest — the one a player placed. Its contents persist in the level file, and if someone
+// has it open they see the change the moment it happens. (The `menus` global makes throwaway chests
+// instead; those belong to the script and vanish with it.) getChest returns null unless a chest block is
+// really there, so a script can't conjure storage in mid-air.
+commands.register('stash', function (player, args) {
+    var loc = player.getLocation();
+    var x = loc.getBlockX(), y = loc.getBlockY(), z = loc.getBlockZ();
+
+    // Look around the player's feet for a chest block.
+    var chest = null;
+    for (var dx = -1; dx <= 1 && !chest; dx++) {
+        for (var dz = -1; dz <= 1 && !chest; dz++) {
+            for (var dy = -1; dy <= 1 && !chest; dy++) {
+                chest = world.getChest(x + dx, y + dy, z + dz);
+            }
+        }
+    }
+    if (!chest) {
+        player.sendMessage('{red}Stand next to a chest first.');
+        return;
+    }
+
+    if (args[0] === 'fill') {
+        var added = chest.add(Blocks.state(264, 0), 5);   // five diamonds
+        player.sendMessage('{green}Put {white}' + added + '{green} diamond(s) in.');
+        return;
+    }
+    var lines = [];
+    for (var slot = 0; slot < chest.size(); slot++) {
+        if (chest.getItem(slot) !== 0) {
+            lines.push(slot + ': ' + chest.getItem(slot) + ' x' + chest.getCount(slot));
+        }
+    }
+    player.sendMessage('{gold}Chest at {white}' + chest.getX() + ',' + chest.getY() + ',' + chest.getZ()
+        + '{gold}: ' + (lines.length ? lines.join('{gray}, {white}') : '{gray}empty')
+        + ' {gray}(/stash fill to add diamonds)');
+});
+
 // /pillar [meta] — a coloured wool pillar in front of spawn (per-block setBlock demo).
 commands.register('pillar', function (player, args) {
     var s = world.getSpawn();
