@@ -45,13 +45,22 @@ class Pe014PopupEncodingTest {
 
     @Test
     void theRowsAreNewlineJoinedAndCappedAtTheApiLimit() {
-        assertEquals("", PeSession014.joinSidebarLines(null));
-        assertEquals("a\nb", PeSession014.joinSidebarLines(new String[]{"a", "b"}));
+        assertEquals("", PeSession014.joinSidebarLines(null, 0, 0));
+        assertEquals("a\nb", PeSession014.joinSidebarLines(new String[]{"a", "b"}, 0, 0));
 
         String[] tooMany = new String[Player.SIDEBAR_MAX_LINES + 3];
         java.util.Arrays.fill(tooMany, "row");
         assertEquals(Player.SIDEBAR_MAX_LINES,
-                PeSession014.joinSidebarLines(tooMany).split("\n", -1).length,
+                PeSession014.joinSidebarLines(tooMany, 0, 0).split("\n", -1).length,
                 "capped like the Java sidebar and the 1.1.5 one");
+    }
+
+    @Test
+    void raiseAndShiftPadTheSameWayAsOn115() {
+        assertEquals("a\n \n ", PeSession014.joinSidebarLines(new String[]{"a"}, 2, 0));
+        assertEquals(" \na", PeSession014.joinSidebarLines(new String[]{"a"}, -1, 0));
+        assertEquals("  a", PeSession014.joinSidebarLines(new String[]{"a"}, 0, 2));
+        assertEquals("a  ", PeSession014.joinSidebarLines(new String[]{"a"}, 0, -2));
+        assertEquals(" x", PeSession014.pad("x", 1));
     }
 }

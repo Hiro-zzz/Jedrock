@@ -22,9 +22,19 @@ unstable — anything may change between entries.
   `PlayerBroadcast.repaintSidebars` honours it on the game loop from the rendered copy `CorePlayer` now
   keeps. The core still never learns which edition it is talking to; it just obeys a number the connection
   declares. A script sets the sidebar once and it stays up on every edition; a server with no sidebars in
-  use pays one field read per player per tick. Tested: the popup bytes at both protocols, the newline join
-  and its 16-line cap, and the repaint cadence (fires on its tick, not off it; stops on `clearSidebar`;
-  never fires for a Java connection).
+  use pays one field read per player per tick.
+  **Confirmed on a real client**: the panel renders, and `\n` really does give multiple lines rather than
+  one run-on string — the open question this landed with. What it also showed is that the client, not the
+  server, decides *where* that line goes: it sits centred, right on top of the hotbar. Since the only lever
+  is the text itself, placement is two config knobs — **`pe.sidebar.raise`** (blank rows padded under the
+  panel, each lifting it a line clear of the hotbar; negative pads above instead, for a client that anchors
+  the other way) and **`pe.sidebar.shift`** (spaces padded on every row, positive right / negative left;
+  the client centres the popup, so the panel moves about half as far as you pad). Defaults 4 and 16 — off
+  the hotbar and aside, roughly where a Java sidebar sits; `0`/`0` restores the raw centred position. A pad
+  row is a single space, not an empty line, since a renderer is free to drop trailing blanks.
+  Tested: the popup bytes at both protocols, the newline join and its 16-line cap, the padding in both
+  directions on both eras, and the repaint cadence (fires on its tick, not off it; stops on
+  `clearSidebar`; never fires for a Java connection).
 
 - **Virtual chests fall back to `/pick` on 0.14 too.** The `menus` window doesn't come up on a real 0.14
   client, so that era now takes the same route 1.1.5 does: a **button** menu is shown as a labelled text

@@ -106,8 +106,10 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
      */
     @Override
     public void setSidebar(String title, String[] lines) {
-        String head = title == null ? "" : title;
-        String body = joinSidebarLines(lines);
+        int raise = properties.peSidebarRaise();
+        int shift = properties.peSidebarShift();
+        String head = pad(title == null ? "" : title, shift);
+        String body = joinSidebarLines(lines, raise, shift);
         sendWrapped(b -> Mcpe014Packets.popup(b, head, body));
     }
 
@@ -125,22 +127,39 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     private static final int SIDEBAR_REPAINT_TICKS = 20;
 
     /**
-     * Join the sidebar rows into the popup's second string, capped at the api's line limit. (The 1.1.5
-     * session does the same with its own codec — the two Bedrock eras deliberately share no wire code.)
+     * Join the sidebar rows into the popup's second string, capped at the api's line limit, padded into
+     * place by the {@code pe.sidebar.raise} / {@code pe.sidebar.shift} knobs — see the 1.1.5 session's
+     * copy for what the padding does and why the pad rows are a space rather than empty. (The two
+     * Bedrock eras deliberately share no wire code.)
      */
-    static String joinSidebarLines(String[] lines) {
+    static String joinSidebarLines(String[] lines, int raise, int shift) {
         if (lines == null || lines.length == 0) {
             return "";
         }
         int count = Math.min(lines.length, com.jedrock.api.player.Player.SIDEBAR_MAX_LINES);
         StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < -raise; i++) {
+            sb.append(" \n");
+        }
         for (int i = 0; i < count; i++) {
             if (i > 0) {
                 sb.append('\n');
             }
-            sb.append(lines[i] == null ? "" : lines[i]);
+            sb.append(pad(lines[i] == null ? "" : lines[i], shift));
+        }
+        for (int i = 0; i < raise; i++) {
+            sb.append("\n ");
         }
         return sb.toString();
+    }
+
+    /** Pad one row sideways: {@code shift} spaces on the left, or {@code -shift} on the right. */
+    static String pad(String line, int shift) {
+        if (shift == 0 || line.isEmpty()) {
+            return line;
+        }
+        String spaces = " ".repeat(Math.abs(shift));
+        return shift > 0 ? spaces + line : line + spaces;
     }
 
     @Override

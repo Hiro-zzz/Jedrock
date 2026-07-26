@@ -183,9 +183,11 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   pre-1.13 client draws the vanilla red score number beside each line). Neither legacy **Bedrock** era has
   a scoreboard at all, so there the same text goes to the one persistent field those clients do have — the
   **popup**, drawn in the HUD slot where a held item's name appears, displaced upward (`TextPacket`
-  `TYPE_POPUP`, byte-checked against PocketMine at both protocol 113 and protocol 45). That line fades on
-  its own, so the connection declares how often it needs repainting and the loop obliges; a script sets the
-  sidebar once and it stays up. **`player.setBossBar(title, progress[, color])`** shows the
+  `TYPE_POPUP`, byte-checked against PocketMine at both protocol 113 and protocol 45, and confirmed on a
+  real client). That line fades on its own, so the connection declares how often it needs repainting and
+  the loop obliges; a script sets the sidebar once and it stays up. The client decides *where* it draws —
+  centred, on top of the hotbar — so placement is padding, tuned with `pe.sidebar.raise` /
+  `pe.sidebar.shift` in the config (`0`/`0` = the raw centred position). **`player.setBossBar(title, progress[, color])`** shows the
   bar across the top — cross-edition where a client can draw one: Java 1.12.2 (dedicated packet), Java 1.8
   (an invisible wither ridden by the player, the classic illusion) and Bedrock 1.1.5 (native BossEvent).
   0.14 predates boss bars entirely and ignores that one. And
@@ -519,8 +521,9 @@ which binds (defaults, configurable in `jedrock.properties`):
 - **Bedrock 0.14** on UDP `0.0.0.0:19133` (`server.port.pe014`; disable with `pe014.enabled=false`)
 
 The first run writes a `jedrock.properties` next to the process with the bind host/ports, server
-name, MOTD, max players, world seed, tick rate, view distance and the blind-judge limits
-(`judge.enabled`, `judge.max-reach`, `judge.max-move-delta`); edit and restart to apply, or override
+name, MOTD, max players, world seed, tick rate, view distance, the blind-judge limits
+(`judge.enabled`, `judge.max-reach`, `judge.max-move-delta`) and the Bedrock sidebar placement
+(`pe.sidebar.raise`, `pe.sidebar.shift`); edit and restart to apply, or override
 a single key with `-Dkey=value`. The RakNet protocol version defaults to `8` (MCPE 1.1.5)
 and can be overridden with `-Djedrock.pe.raknetProtocolVersion=N` for other client builds. The Bedrock
 listeners bind best-effort — a busy UDP port (the Minecraft Bedrock client itself holds 19132 for LAN
