@@ -86,6 +86,82 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Virtual chests on Bedrock 1.1.5 — as a `/pick` list.** The 1.1.5 client crashes on a chest window, so a
+  button menu there degrades to a text **list**: a script gives each button a label with the new
+  `menu.button(slot, item, label)`, and on 1.1.5 those labels are printed and chosen with a built-in
+  **`/pick <label>`**, which fires the same click handler the window would. `/pick` is a built-in (not a
+  per-menu command) on purpose — the 1.1.5 client rejects any command not in the manifest it got at spawn,
+  and re-sending that manifest per menu is exactly the risky, unverifiable wire this avoids. On Java the
+  labels tab-complete (from the player's pending list); on 1.1.5 the client only knows `/pick` takes free
+  text, so the player reads the options from the chat list — true client-side label completion there would
+  need a dynamic per-menu command manifest, a follow-up against a real client. A menu with no labels has
+  nothing to list, so it's still refused on 1.1.5; storage menus (which move items) can't be a list and
+  stay window-only. Tested: the list build, the case-insensitive pick, the label completion, and the
+  no-labels refusal.
+
+- **Virtual chests reach Bedrock 0.14.** The `menus` virtual chest (Java last round) now opens on 0.14
+  too, which — unlike 1.1.5 — shows a real chest window without crashing (it already had the full
+  container flow wired for world chests: ContainerOpen `0xb5`, ContainerSetContent `0xb9`, inbound
+  ContainerSetSlot `0xb7`). `openMenu` now refuses only 1.1.5, not all of Bedrock. Because the PE window is
+  client-authoritative, a **storage** menu works cleanly — the client moves items and reports each slot,
+  which is applied to the menu (and, being transient, never marks the world dirty) — while a **button**
+  menu's read-only revert is best-effort: `onContainerSetSlot` fires the click for the tapped slot and
+  re-sends the window to undo the client's optimistic move, which can't perfectly reverse a cross-window
+  drag the way the server-authoritative Java path does. Tested for both PE shapes plus the 1.1.5 refusal.
+
+- **Boss bar reaches Java 1.8 and Bedrock 1.1.5.** The boss bar (added on 1.12.2 last round) now shows on
+  two more editions, so `player.setBossBar(...)` is cross-edition wherever a client can draw one.
+  **Java 1.8** has no boss-bar packet, so it uses the classic **wither illusion**: an invisible wither is
+  spawned a few blocks below the player (clear of their collision box), named the title, its health driving
+  the fill (max 300), and teleported to follow the player so it stays loaded as they travel — the approach
+  battle-tested 1.8 bar plugins use. (A first cut rode the wither on the player via Attach Entity; that
+  didn't render the bar on a real client, so it was replaced with the spawn-and-follow above.) The wither's
+  name is set without the always-visible flag, so no floating text leaks under the player. **Bedrock 1.1.5** uses the native **BossEvent**
+  packet (`0x4c`) bound to the player's own entity id, so no extra entity is spawned: TYPE_SHOW to add
+  (title + fill + colour + overlay, the fields in PMMP's fall-through order), TYPE_HEALTH_PERCENT and
+  TYPE_TITLE to update, TYPE_HIDE to clear. **0.14 predates boss bars** and keeps the no-op. The 1.1.5
+  layout is byte-checked against PocketMine at protocol 113 (`1.7dev-27`); neither the wither trick nor the
+  BossEvent is verified on a real client here, so both are best-effort — the 1.8 one fails cosmetically (no
+  bar), and every 1.1.5 field mirrors PMMP exactly to avoid a malformed-packet disconnect.
+
+- **Virtual chests for scripts — the `menus` global.** A script-owned chest window with no world block
+  behind it: `menus.create(title, rows)` (1–6 rows) builds one, `setItem` / `getItem` / `clear` lay it
+  out, and `open(player)` shows it. Two shapes decided by one call: give it an `onClick(player, slot,
+  state)` and it becomes a **button menu** — the slots go read-only, and clicking one fires the handler
+  instead of moving the item, so each slot is a button (a class picker, a shop, a confirm dialog); leave
+  `onClick` off and it's a plain **storage chest** the player moves items in and out of, transient (nothing
+  persists — it isn't a world block). It reuses the server-authoritative Java chest-window flow, which was
+  generalized from a hard-coded 27 slots to the container's actual size along the way, so the player-
+  inventory half of the window lines up for any menu size. Java only: `open` returns `false` for a Bedrock
+  player, because the retail 1.1.5 client crashes on a chest window (the same reason world chests trade
+  through click-transfer there) and 0.14 is unwired. The core routing is unit-tested (button vs storage,
+  the non-27 slot math, the Bedrock refusal, transient-not-persisted), and the script surface through
+  Rhino. Try `/menu` in `plugins/example.js`.
+
+- **Boss bar, Java 1.12.2.** `player.setBossBar(title, progress[, color])` / `clearBossBar()` — a titled
+  bar across the top of the screen with a 0..1 fill and one of seven colours (`pink` … `white`, default
+  purple). Purely presentational: no entity, no combat, just a bar showing whatever you set. Driven by the
+  dedicated Boss Bar packet (`0x0C`): an add the first time, then only the deltas — a health update, a
+  title update, and a style update when the colour actually changed — so a per-tick refresh never re-adds
+  the bar. The sequencing lives in `JeBossBar` (unit-tested with a recording wire). 1.8 has no boss-bar
+  packet (it predates 1.9's, and the wither-entity trick that fakes one is a separate, riskier technique
+  left for later); Bedrock's legacy clients aren't wired here. Both let the default no-op stand. Try
+  `/boss 50 red` in `plugins/example.js`.
+
+- **Sidebar scoreboard, Java (1.8 + 1.12.2).** `player.setSidebar(title, [lines])` / `clearSidebar()` — a
+  titled panel of text lines down the right of the screen, authored in the unified markup. Purely
+  presentational, true to the illusion: the server tracks no real scores; the lines are whatever you set,
+  and setting them again replaces them. It updates by **diffing** — the objective is created once, the
+  title retitled only when it changes, and only the score entries that actually changed are re-sent — so
+  refreshing on a timer costs a couple of packets and never flickers (the version-neutral diff lives in
+  `JeScoreboard`, unit-tested; the two versions differ only in the objective packet, a JSON component +
+  VarInt type at 1.12.2 vs a plain string + type string at 1.8). Duplicate lines are kept distinct by an
+  invisible trailing colour code per row, and up to 16 lines show. The pre-1.13 client draws a small red
+  number beside each line — the vanilla scoreboard look, unavoidable without the 1.13 number-format.
+  Bedrock ignores it: 0.14 predates scoreboards and 1.1.5 isn't wired here yet (a follow-up, against a real
+  client). Packet ids checked against minecraft-data (objective 0x42/0x3B, score 0x45/0x3C, display
+  0x3B/0x3D); on-client behaviour isn't verified here. Try `/sb on` in `plugins/example.js`.
+
 - **Typed command arguments and tab-completion.** Two things that fall out of one declaration, and the end
   of every command parsing its own `String[]` by hand.
   A command may describe its arguments as a list of typed `CommandArg` — a name, an `ArgType`, and
@@ -177,6 +253,19 @@ unstable — anything may change between entries.
   string literal, so `e.getTo().name() === 'THUNDER'` is silently false and the `if` around a listener's
   real work never runs. Loose `==`, `String(…)`, and comparing the enum constants themselves all behave —
   the test asserts all four outcomes at once so the guidance can't rot.
+
+### Fixed
+
+- **A sidebar line built by concatenation crashed the script.** `player.setSidebar(title, [lines])` threw
+  `ClassCastException: ConsString cannot be cast to String` for any line a script assembled with `+` — which
+  is every interesting line, since a static sidebar has no reason to exist. The cause is one Rhino detail:
+  `NativeArray` *implements* `java.util.List`, so a JS array handed to a `List<String>` parameter is passed
+  **by identity, with its elements unconverted** — and a JS concatenation is a lazy `ConsString`, not a
+  `String`, so reading an element into a `String` local checkcast and threw. (A `String` or `String[]`
+  parameter is safe: Rhino converts those element by element. `List<String>` is the one shape that isn't,
+  and `setSidebar` is the only place in the api that takes one.) `CorePlayer.setSidebar` now reads the
+  elements as `Object` and stringifies, so any `CharSequence` renders. The existing test missed it by using
+  string *literals* — which really are `java.lang.String` — so the regression test now concatenates.
 
 ### Changed
 

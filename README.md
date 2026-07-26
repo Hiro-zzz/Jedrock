@@ -176,6 +176,20 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   `complete(player, args)` returns candidates the core narrows to the partial (`/kit` in `plugins/example.js`).
   Bedrock keeps its client-side completion from the AvailableCommands manifest, so this is a Java-side
   feature; the retail 1.1.5 client's known bugs are reason enough not to enrich that manifest.
+- ✅ **Sidebar scoreboard and boss bar (Java), plus virtual chests for scripts.** Three illusion-toolkit
+  additions. **`player.setSidebar(title, [lines])`** shows a titled panel down the right of the screen; it
+  updates by diffing so a timer refresh never flickers, and keeps up to 16 lines (the pre-1.13 client draws
+  the vanilla red score number beside each). **`player.setBossBar(title, progress[, color])`** shows the
+  bar across the top — cross-edition where a client can draw one: Java 1.12.2 (dedicated packet), Java 1.8
+  (an invisible wither ridden by the player, the classic illusion) and Bedrock 1.1.5 (native BossEvent).
+  The scoreboard is Java-only (1.8 has it, the legacy Bedrock clients don't); 0.14 predates both. And
+  **`menus`** gives scripts a **virtual chest**: `menus.create(title, rows)`, laid out with `setItem`,
+  opened with `open(player)` — with an `onClick` it's a read-only **button menu** (a class picker, a shop),
+  without one a transient **storage chest**. Java and Bedrock **0.14** open a real chest window; on **1.1.5**
+  (which crashes on one) a button menu degrades to a text **list** — labelled buttons (`menu.button(slot,
+  item, label)`) become options the player chooses with a built-in **`/pick <label>`**. Packet ids are from
+  minecraft-data / PocketMine; on-client behaviour isn't verified here. Try `/sb on`, `/boss 50 red` and
+  `/menu` in `plugins/example.js`.
 - ✅ **Player-facing UI — titles, subtitles and the action bar.** `player.sendTitle(title, subtitle[, fadeIn,
   stay, fadeOut])`, `sendActionBar(text)` and `clearTitle()` show a large centred title or a line above the
   hotbar, authored in the unified markup and rendered per edition: the JE Title packet (id 0x45 on 1.8, 0x48
@@ -242,8 +256,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   plugin's ticking costs one scheduled task. Try `/guard`.
 
 - ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
-  backend, not the compiled core: a script gets nine globals — `server` / `events` / `scheduler` /
-  `commands` / `packets` / `world` / `entities` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
+  backend, not the compiled core: a script gets ten globals — `server` / `events` / `scheduler` /
+  `commands` / `packets` / `world` / `entities` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
   name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
   work (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too
@@ -579,8 +593,11 @@ simulation stays out (see non-goals).
   drag, a survival window click, or `setArmor` from code). And **script state now survives a restart** —
   the `storage` global, the last thing this section was waiting on (see [What works today](#what-works-today)).
   **Typed command arguments and tab-completion** landed too — a command declares its arguments and the core
-  parses them and completes them (Java clients), scripts included. What it still wants: **scoreboards, boss
-  bars and Bedrock forms**.
+  parses them and completes them (Java clients), scripts included. And the **illusion toolkit** grew a
+  **sidebar scoreboard** (Java), a **boss bar** (Java 1.8 + 1.12.2 and Bedrock 1.1.5), and **virtual
+  chests** for scripts (the `menus` global — a window on Java and 0.14, a `/pick` list on 1.1.5). What it
+  still wants: the scoreboard on Bedrock, and a real-client pass on the unverified PE wire — **forms** stay
+  out, since the legacy PE clients predate them.
 - **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
   **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
   cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry
@@ -611,8 +628,10 @@ simulation stays out (see non-goals).
   equipment relay** (what a player holds and wears, on avatars and puppets alike), **titles / action
   bars**, **sounds and particles**, **weather**, `getPing` and chat **display names**, and a fuller
   **command framework** (a `CommandSender` abstraction, a unified console, op + group **permissions**).
-  Typed command args and tab-completion have since landed. Still open: the rest of the illusion toolkit
-  (**scoreboards, boss bars, Bedrock forms**), and a **sharper judge** (per-axis limits, interaction ray-casts).
+  Typed command args and tab-completion have since landed, as have a **sidebar scoreboard**, a **boss bar**
+  and script-driven **virtual chests** (`menus`) — all Java for now. Still open: those illusions on
+  **Bedrock 1.1.5** (against a real client; **forms** stay out — the legacy PE clients predate them), and a
+  **sharper judge** (per-axis limits, interaction ray-casts).
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
   runtime world simulation or physics, no 1.13+ flattening. Knockback is deliberately excluded for the
   same reason — the server simulates no physics. Custom logic that wants any of these lives in a script

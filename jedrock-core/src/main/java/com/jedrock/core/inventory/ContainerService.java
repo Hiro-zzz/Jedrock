@@ -8,6 +8,7 @@ import com.jedrock.api.event.player.PlayerHeldItemChangeEvent;
 import com.jedrock.api.player.ArmorSlot;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
+import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Blocks;
 import com.jedrock.core.player.CorePlayer;
 import com.jedrock.core.player.PlayerBroadcast;
@@ -100,6 +101,71 @@ public final class ContainerService {
      * on every edition (Java accepts any container window id).
      */
     private static final int CHEST_WINDOW_ID = 10;
+    /** Window id for a script-opened virtual menu; distinct from the chest id (a player has one open anyway). */
+    private static final int MENU_WINDOW_ID = 11;
+
+    /**
+     * Open a script-owned virtual menu — a chest window backed by {@code container}, not by any world
+     * block. A non-null {@code onClick} makes it a read-only button menu whose clicks call the handler;
+     * a null one makes it a transient storage container (its edits are not persisted).
+     *
+     * <p>Java and Bedrock <b>0.14</b>, which open real chest windows. The retail <b>1.1.5</b> client crashes
+     * on a chest window (it binds the GUI to a block tile a virtual menu has no equivalent of — the same
+     * reason world chests trade through click-transfer there), so opening one to a 1.1.5 player is refused.
+     * On the client-authoritative PE window a storage menu works cleanly; a button menu's read-only
+     * revert is best-effort (see {@link #onContainerSetSlot}).
+     *
+     * <p>The retail <b>1.1.5</b> can't show a window, so a <em>button</em> menu there degrades to a text
+     * <b>list</b>: the labelled slots ({@code labels}) become options the player chooses with {@code /pick}.
+     * A menu with no labels (or no click handler) has nothing to list, so it's refused on 1.1.5.
+     *
+     * @param labels per-slot option labels for the list fallback, or {@code null} entries for plain items
+     * @return {@code true} if the menu was shown (as a window or a list), {@code false} if it couldn't be
+     */
+    public boolean openMenu(CorePlayer player, String title, Container container, String[] labels,
+                            MenuClick onClick) {
+        PlayerConnection connection = player.getConnection();
+        if (connection.getProtocolVersion() == ProtocolVersion.PE_1_1_5) {
+            return openAsList(player, title, container, labels, onClick);
+        }
+        player.openContainer(MENU_WINDOW_ID, container, false, onClick);
+        connection.openContainer(MENU_WINDOW_ID, title, container.size(), 0, 0, 0);
+        sendChestContents(player, connection);
+        return true;
+    }
+
+    /**
+     * Show a button menu as a text list on a client that can't open a window (1.1.5): store it as the
+     * player's pending {@link ListMenu} and print the options, which they pick with {@code /pick <label>}.
+     * Needs a click handler and at least one labelled button, or there is nothing to offer.
+     */
+    private boolean openAsList(CorePlayer player, String title, Container container, String[] labels,
+                               MenuClick onClick) {
+        if (onClick == null || labels == null) {
+            return false;
+        }
+        java.util.List<String> optionLabels = new java.util.ArrayList<>();
+        java.util.List<Integer> optionSlots = new java.util.ArrayList<>();
+        java.util.List<Integer> optionStates = new java.util.ArrayList<>();
+        for (int slot = 0; slot < labels.length && slot < container.size(); slot++) {
+            if (labels[slot] != null && !labels[slot].isEmpty()) {
+                optionLabels.add(labels[slot]);
+                optionSlots.add(slot);
+                optionStates.add(container.stateAt(slot));
+            }
+        }
+        if (optionLabels.isEmpty()) {
+            return false; // no labelled buttons — nothing a list can offer
+        }
+        int[] slots = optionSlots.stream().mapToInt(Integer::intValue).toArray();
+        int[] states = optionStates.stream().mapToInt(Integer::intValue).toArray();
+        player.setPendingMenu(new ListMenu(title, optionLabels, slots, states, onClick));
+        player.sendMessage(title == null || title.isEmpty() ? "{gold}Pick one:" : title);
+        for (String label : optionLabels) {
+            player.sendMessage(" {gray}• {white}/pick " + label);
+        }
+        return true;
+    }
 
     public boolean onUseBlock(PlayerConnection connection, int x, int y, int z) {
         CorePlayer clicker = players.getByConnectionOrNull(connection);
@@ -233,17 +299,31 @@ public final class ContainerService {
             return; // works in creative too — the chest window is server-authoritative in both modes
         }
         Container chest = player.getOpenContainer();
+        int chestSize = chest.size();
+        boolean inChest = windowSlot >= 0 && windowSlot < chestSize;
+
+        // A button menu: its slots never move items — a click on one is a signal, and the window is
+        // redrawn as it was. The handler runs (under the script lock, in the menu's implementation).
+        MenuClick menu = player.getOpenMenuClick();
+        if (menu != null) {
+            if (inChest) {
+                menu.onClick(player, windowSlot, chest.stateAt(windowSlot));
+            }
+            sendChestContents(player, connection); // resync: nothing moved
+            return;
+        }
+
         Container inv = player.getInventory();
-        // Chest-window layout: 0-26 the chest, 27-53 the player's main (core 9-35), 54-62 the hotbar (0-8).
-        boolean inChest = windowSlot >= 0 && windowSlot < 27;
+        // Chest-window layout for an N-slot chest: 0..N-1 the chest, then the player's main (core 9-35),
+        // then the hotbar (core 0-8).
         Container target;
         int index;
         if (inChest) {
             target = chest; index = windowSlot;
-        } else if (windowSlot >= 27 && windowSlot < 54) {
-            target = inv; index = 9 + (windowSlot - 27);
-        } else if (windowSlot >= 54 && windowSlot < 63) {
-            target = inv; index = windowSlot - 54;
+        } else if (windowSlot >= chestSize && windowSlot < chestSize + 27) {
+            target = inv; index = 9 + (windowSlot - chestSize);
+        } else if (windowSlot >= chestSize + 27 && windowSlot < chestSize + 36) {
+            target = inv; index = windowSlot - (chestSize + 27);
         } else {
             target = null; index = -1; // outside / unmodelled — resync only
         }
@@ -253,12 +333,14 @@ public final class ContainerService {
                 if (inChest) {
                     InventoryClick.shiftTo(chest, index, inv, 0, 36);
                 } else {
-                    InventoryClick.shiftTo(inv, index, chest, 0, 27);
+                    InventoryClick.shiftTo(inv, index, chest, 0, chestSize);
                 }
             } else {
                 InventoryClick.normal(target, player.getCursor(), index, button == 1);
             }
-            world.markDirty(); // a chest edit must be persisted by autosave / shutdown
+            if (player.isOpenContainerPersistent()) {
+                world.markDirty(); // a world-chest edit must be persisted; a menu's is transient
+            }
         }
         sendChestContents(player, connection);
     }
@@ -276,21 +358,22 @@ public final class ContainerService {
             connection.setWindowItems(windowId, chest.states(), chest.counts());
             return;
         }
+        int chestSize = chest.size();
         int[] ps = player.inventoryStates();
         int[] pc = player.inventoryCounts();
-        int[] states = new int[63];
-        int[] counts = new int[63];
-        for (int i = 0; i < 27; i++) {                 // chest
+        int[] states = new int[chestSize + 36];
+        int[] counts = new int[chestSize + 36];
+        for (int i = 0; i < chestSize; i++) {          // chest
             states[i] = chest.stateAt(i);
             counts[i] = chest.countAt(i);
         }
         for (int i = 0; i < 27; i++) {                 // player main (core 9-35)
-            states[27 + i] = ps[9 + i];
-            counts[27 + i] = pc[9 + i];
+            states[chestSize + i] = ps[9 + i];
+            counts[chestSize + i] = pc[9 + i];
         }
         for (int i = 0; i < 9; i++) {                  // player hotbar (core 0-8)
-            states[54 + i] = ps[i];
-            counts[54 + i] = pc[i];
+            states[chestSize + 27 + i] = ps[i];
+            counts[chestSize + 27 + i] = pc[i];
         }
         connection.setWindowItems(windowId, states, counts);
         connection.setCursorItem(player.getCursor().state(), player.getCursor().count());
@@ -305,9 +388,22 @@ public final class ContainerService {
         // tells us the new slot value.
         if (player.hasContainerOpen() && windowId == player.getOpenWindowId()) {
             Container chest = player.getOpenContainer();
+            MenuClick menu = player.getOpenMenuClick();
+            if (menu != null) {
+                // A button menu: slots are read-only. Fire the click for the tapped slot, then re-send the
+                // window so the client's optimistic move is undone. (Cross-window moves on the client-
+                // authoritative PE path can't be perfectly reverted — button menus there are best-effort.)
+                if (slot < chest.size()) {
+                    menu.onClick(player, slot, chest.stateAt(slot));
+                }
+                connection.setWindowItems(windowId, chest.states(), chest.counts());
+                return;
+            }
             if (slot < chest.size()) {
                 chest.set(slot, state, count);
-                world.markDirty();
+                if (player.isOpenContainerPersistent()) {
+                    world.markDirty(); // a world-chest edit persists; a menu's is transient
+                }
             }
         } else if (windowId == 0 && player.getGameMode() == GameMode.CREATIVE) {
             // The player's own inventory (PE window 0: 0-8 hotbar, 9-35 main). Only trust the client's

@@ -9,6 +9,8 @@
 //   world      — the shared world: getBlock / setBlock / fill / getHighestY / getBiome / spawn / weather /
 //                playSound / spawnParticle. Edits render live on every client, cross-edition.
 //   entities   — spawn and drive puppets, props and labels; group() builds a scene. See /guard and /decor.
+//   menus      — menus.create(title, rows): a virtual chest (Java + 0.14 windows; 1.1.5 gets a /pick list).
+//                onClick + button(slot,item,label) makes a button menu; setItem alone is a storage chest.
 //   storage    — the only thing that survives a restart: get / set / has / remove / keys / size / clear,
 //                plus forPlayer(p) for per-player state. Strings, numbers, booleans, objects and arrays.
 //   events     — events.on(name, fn): subscribe to a built-in event (28 below) OR a custom, script-defined
@@ -339,6 +341,78 @@ commands.register('title', function (player, args) {
     var text = args.length ? args.join(' ') : 'Hello!';
     player.sendTitle('{gold}' + text, '{gray}subtitle here', 5, 40, 10); // fadeIn/stay/fadeOut in ticks
     player.sendActionBar('{aqua}action bar: {white}' + player.getName());
+});
+
+// /sb on|off — a live sidebar scoreboard (Java clients; Bedrock ignores it). setSidebar takes a title
+// and an array of lines (markup rendered per line); calling it again only sends what changed, so it's
+// cheap to refresh on a timer with no flicker. A per-player timer is kept in storage-free local state.
+var sbTasks = {};   // player uuid -> timer handle
+commands.register({
+    name: 'sb', description: 'Toggle a live sidebar', usage: '/sb <on|off>',
+    complete: function (player, args) { return args.length === 1 ? ['on', 'off'] : []; },
+    execute: function (player, args) {
+        var id = String(player.getUniqueId());
+        if (args[0] === 'off') {
+            if (sbTasks[id]) { sbTasks[id].cancel(); delete sbTasks[id]; }
+            player.clearSidebar();
+            player.sendMessage('{gray}Sidebar off.');
+            return;
+        }
+        var t = 0;
+        function draw() {
+            var loc = player.getLocation();
+            player.setSidebar('{gold}{bold}Jedrock', [
+                '{gray}Player: {white}' + player.getName(),
+                '{gray}Ping: {white}' + player.getPing() + 'ms',
+                '{gray}At: {white}' + Math.round(loc.x()) + ', ' + Math.round(loc.z()),
+                '{gray}Uptime: {white}' + (t++) + 's'
+            ]);
+        }
+        draw();
+        if (sbTasks[id]) sbTasks[id].cancel();
+        sbTasks[id] = scheduler.runTimer(draw, 20);   // redraw every second (20 ticks)
+        player.sendMessage('{green}Sidebar on. {gray}/sb off to hide.');
+    }
+});
+
+// /boss <0-100> [color] — a boss bar across the top (Java 1.12.2; 1.8 and Bedrock ignore it). setBossBar
+// takes a title, a 0..1 fill, and an optional colour name; calling it again updates the same bar.
+commands.register({
+    name: 'boss', description: 'Show a boss bar', usage: '/boss <0-100> [color]',
+    complete: function (player, args) {
+        return args.length === 2 ? ['pink', 'blue', 'red', 'green', 'yellow', 'purple', 'white'] : [];
+    },
+    execute: function (player, args) {
+        if (args[0] === 'off') { player.clearBossBar(); return; }
+        var pct = args.length ? parseInt(args[0]) : 100;
+        if (isNaN(pct)) { player.sendMessage('{red}Usage: /boss <0-100> [color]  (or /boss off)'); return; }
+        player.setBossBar('{red}The Boss {gray}(' + pct + '%)', Math.max(0, Math.min(100, pct)) / 100,
+            args.length > 1 ? args[1] : 'purple');
+    }
+});
+
+// /menu — a virtual chest opened as a BUTTON menu (Java and Bedrock 0.14; a 1.1.5 player is told it can't
+// show, since that client crashes on a chest window).
+// The slots are read-only: clicking one fires onClick instead of moving the item, so each slot is a button.
+// (Drop the onClick and it's a plain storage chest the player can move items in and out of, backed by no
+// world block — nothing persists.)
+commands.register('menu', function (player, args) {
+    var m = menus.create('{dark_purple}Pick a class', 1);   // 1 row = 9 slots
+    // button(slot, item, label): the label is what the 1.1.5 list fallback shows and /pick matches; the
+    // window clients (Java, 0.14) just show the item. Give every choice a label so 1.1.5 can list it.
+    m.button(2, Blocks.state(276, 0), 'Warrior');   // diamond sword
+    m.button(4, Blocks.state(261, 0), 'Archer');    // bow
+    m.button(6, Blocks.state(345, 0), 'Scout');     // compass
+    m.onClick(function (p, slot, state) {
+        var pick = slot === 2 ? 'Warrior' : slot === 4 ? 'Archer' : slot === 6 ? 'Scout' : null;
+        if (pick) {
+            p.sendMessage('{green}You chose {white}' + pick + '{green}!');
+            storage.forPlayer(p).set('class', pick);   // remembered across restarts
+        }
+    });
+    // Java / 0.14 open a chest window; 1.1.5 gets a text list it picks from with /pick <label>. open()
+    // returns true in both cases, so there's nothing to fall back on here.
+    m.open(player);
 });
 
 // /inv — exercise the scripting inventory API (survival: give / set / count / remove / clear).

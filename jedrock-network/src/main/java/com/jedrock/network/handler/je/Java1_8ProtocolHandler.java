@@ -81,10 +81,12 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
         var listener = connection.getListener();
         if (id == SB_POSITION) {
             double x = in.readDouble(), y = in.readDouble(), z = in.readDouble();
+            bossBarFollow(connection, x, y, z); // keep the boss-bar wither on the player
             connection.clientMoved(x, y, z, null, null);
         } else if (id == SB_POSITION_LOOK) {
             double x = in.readDouble(), y = in.readDouble(), z = in.readDouble();
             float yaw = in.readFloat(), pitch = in.readFloat();
+            bossBarFollow(connection, x, y, z);
             connection.clientMoved(x, y, z, yaw, pitch);
         } else if (id == SB_LOOK) {
             float yaw = in.readFloat(), pitch = in.readFloat();
@@ -238,6 +240,7 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
             b.writeFloat(spawn.yaw()); b.writeFloat(spawn.pitch());
             b.writeByte(0);                                  // flags: all absolute (no teleport id in 1.8)
         });
+        this.bossX = spawn.x(); this.bossY = spawn.y(); this.bossZ = spawn.z(); // seed the boss-bar follow pos
         sendKeepAlive(c);
     }
 
@@ -578,6 +581,149 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     public void sendTabComplete(JedrockConnection c, java.util.List<String> matches) {
         // Tab-Complete (0x3A at 47): the shared JE body — VarInt count + strings, same as 1.12.2.
         send(c, CB_TAB_COMPLETE, b -> JeTabComplete.write(b, matches));
+    }
+
+    // ===== Sidebar scoreboard (1.8: Objective 0x3B, Score 0x3C, Display 0x3D) =====
+    // Same packets as 1.12.2 but the objective value is a plain legacy string with a "type" string
+    // (1.12.2 uses a JSON component + VarInt type), so the wire is spelled out here separately.
+
+    private JeScoreboard sidebar;
+
+    private JeScoreboard sidebar(JedrockConnection c) {
+        if (sidebar == null) {
+            sidebar = new JeScoreboard(new JeScoreboard.Wire() {
+                @Override public void objectiveCreate(String obj, String title) { objective(c, obj, 0, title); }
+                @Override public void objectiveUpdateTitle(String obj, String title) { objective(c, obj, 2, title); }
+                @Override public void objectiveRemove(String obj) { objective(c, obj, 1, ""); }
+                @Override public void displaySidebar(String obj) {
+                    send(c, CB_DISPLAY_OBJECTIVE, b -> { b.writeByte(1); ByteBufUtils.writeString(b, obj); });
+                }
+                @Override public void scoreSet(String entry, String obj, int value) {
+                    send(c, CB_UPDATE_SCORE, b -> {
+                        ByteBufUtils.writeString(b, entry);
+                        b.writeByte(0);                         // action 0 = create/update
+                        ByteBufUtils.writeString(b, obj);       // scoreName is always present
+                        ByteBufUtils.writeVarInt(b, value);
+                    });
+                }
+                @Override public void scoreRemove(String entry, String obj) {
+                    send(c, CB_UPDATE_SCORE, b -> {
+                        ByteBufUtils.writeString(b, entry);
+                        b.writeByte(1);                         // action 1 = remove (no value follows)
+                        ByteBufUtils.writeString(b, obj);
+                    });
+                }
+            });
+        }
+        return sidebar;
+    }
+
+    /** Scoreboard Objective (0x3B): name, mode; for create/update a plain display string + a type string. */
+    private void objective(JedrockConnection c, String name, int mode, String title) {
+        send(c, CB_SCOREBOARD_OBJECTIVE, b -> {
+            ByteBufUtils.writeString(b, name);
+            b.writeByte(mode);
+            if (mode == 0 || mode == 2) {
+                ByteBufUtils.writeString(b, title);   // 1.8 wants a plain legacy string here
+                ByteBufUtils.writeString(b, "integer");
+            }
+        });
+    }
+
+    @Override
+    public void setSidebar(JedrockConnection c, String title, String[] lines) {
+        sidebar(c).set(title, java.util.List.of(lines));
+    }
+
+    @Override
+    public void clearSidebar(JedrockConnection c) {
+        sidebar(c).clear();
+    }
+
+    // ===== Boss bar (1.8 has no boss-bar packet, so a classic wither-entity illusion) =====
+    // The client draws a boss health bar for a loaded wither / dragon. Spawn an invisible wither a few
+    // blocks below the player (clear of their collision box), name it the title, drive the fill through its
+    // health (max 300), and teleport it to follow the player so it stays loaded as they travel. This is
+    // what battle-tested 1.8 bar plugins do. Unverified on a real client; its failure mode is cosmetic.
+
+    private static final int WITHER_TYPE_ID = 64;       // classic 1.8 mob id
+    private static final float WITHER_MAX_HEALTH = 300f; // the client's fixed wither max — the bar denominator
+    /** A fixed, very high id for the boss-bar wither; core ids start at 1000 and never approach this. */
+    private static final int BOSS_BAR_ENTITY_ID = Integer.MAX_VALUE - 1;
+    /** The wither sits this far below the player's feet: close enough for the bar, clear of collision. */
+    private static final double BOSS_BAR_Y_OFFSET = -5.0;
+
+    private boolean bossBarShown;
+    /** Last known player position; the wither is teleported here (offset down) so it follows and stays loaded. */
+    private double bossX, bossY = 64, bossZ;
+
+    @Override
+    public void setBossBar(JedrockConnection c, String title, float progress, int color) {
+        float health = Math.max(1f, progress * WITHER_MAX_HEALTH); // >0 so the wither (and its bar) stays alive
+        if (!bossBarShown) {
+            // Spawn Mob (0x0F): an invisible wither carrying the title as its name and the fill as its health.
+            send(c, CB_SPAWN_MOB, b -> {
+                ByteBufUtils.writeVarInt(b, BOSS_BAR_ENTITY_ID);
+                b.writeByte(WITHER_TYPE_ID);
+                b.writeInt(fixed(bossX)); b.writeInt(fixed(bossY + BOSS_BAR_Y_OFFSET)); b.writeInt(fixed(bossZ));
+                b.writeByte(0); b.writeByte(0); b.writeByte(0);                    // yaw, pitch, head yaw
+                b.writeShort(0); b.writeShort(0); b.writeShort(0);                 // velocity
+                writeMetaByte(b, META_INDEX_FLAGS, FLAG_INVISIBLE);
+                writeBossName(b, title);
+                b.writeByte((META_TYPE_FLOAT << 5) | META_INDEX_HEALTH);
+                b.writeFloat(health);
+                b.writeByte(META_END);
+            });
+            bossBarShown = true;
+            return;
+        }
+        // Already up: update the wither's name (title) and health (fill) via Entity Metadata (0x1C).
+        send(c, CB_ENTITY_METADATA, b -> {
+            ByteBufUtils.writeVarInt(b, BOSS_BAR_ENTITY_ID);
+            writeBossName(b, title);
+            b.writeByte((META_TYPE_FLOAT << 5) | META_INDEX_HEALTH);
+            b.writeFloat(health);
+            b.writeByte(META_END);
+        });
+    }
+
+    /**
+     * The boss wither's title as its custom name (metadata index 2) <em>without</em> the always-visible
+     * flag (index 3): the boss bar reads the name from {@code getDisplayName()} regardless, and a visible
+     * nametag on the invisible wither would be a floating-text artifact under the player.
+     */
+    private static void writeBossName(ByteBuf b, String title) {
+        b.writeByte((META_TYPE_STRING << 5) | META_INDEX_CUSTOM_NAME);
+        ByteBufUtils.writeString(b, title == null ? "" : title);
+    }
+
+    @Override
+    public void clearBossBar(JedrockConnection c) {
+        if (bossBarShown) {
+            send(c, CB_ENTITY_DESTROY, b -> {
+                ByteBufUtils.writeVarInt(b, 1);
+                ByteBufUtils.writeVarInt(b, BOSS_BAR_ENTITY_ID);
+            });
+            bossBarShown = false;
+        }
+    }
+
+    /**
+     * Remember the player's position and, if the boss bar is up, teleport its wither to follow — so a
+     * player who walks off doesn't leave the wither (and its bar) behind to unload. Called on every move.
+     */
+    private void bossBarFollow(JedrockConnection c, double x, double y, double z) {
+        this.bossX = x;
+        this.bossY = y;
+        this.bossZ = z;
+        if (bossBarShown) {
+            send(c, CB_ENTITY_TELEPORT, b -> {
+                ByteBufUtils.writeVarInt(b, BOSS_BAR_ENTITY_ID);
+                b.writeInt(fixed(x)); b.writeInt(fixed(y + BOSS_BAR_Y_OFFSET)); b.writeInt(fixed(z));
+                b.writeByte(0); b.writeByte(0);   // yaw, pitch
+                b.writeBoolean(false);            // on ground
+            });
+        }
     }
 
     @Override

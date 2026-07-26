@@ -65,11 +65,16 @@ public final class Java1_8Protocol {
     public static final int SB_CREATIVE_ACTION = 0x10;      // creative set-slot (slot short + item)
     public static final int SB_TAB_COMPLETE = 0x14;         // serverbound Tab-Complete request (text + flags)
     public static final int CB_TAB_COMPLETE = 0x3A;         // clientbound Tab-Complete: VarInt count + strings
+    public static final int CB_SCOREBOARD_OBJECTIVE = 0x3B; // create/update/remove a scoreboard objective
+    public static final int CB_UPDATE_SCORE = 0x3C;         // set/remove one score entry
+    public static final int CB_DISPLAY_OBJECTIVE = 0x3D;    // bind an objective to a display slot (1 = sidebar)
 
     // ===== 1.8 entity metadata (old format): header = (type << 5) | index, list ends with 0x7F =====
     // Type ids are 1.8's own (byte 0, short 1, int 2, float 3, string 4, …) — 1.12.2 renumbered them.
     public static final int META_TYPE_BYTE = 0;
     public static final int META_TYPE_STRING = 4;
+    public static final int META_TYPE_FLOAT = 3;
+    public static final int META_INDEX_HEALTH = 6;              // float — drives a wither's boss-bar fill
     public static final int META_INDEX_FLAGS = 0;   // shared entity flags byte
     public static final int META_INDEX_CUSTOM_NAME = 2;          // string
     public static final int META_INDEX_CUSTOM_NAME_VISIBLE = 3;  // byte (1.8 has no boolean type)

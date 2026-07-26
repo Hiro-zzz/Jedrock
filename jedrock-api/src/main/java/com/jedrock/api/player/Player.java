@@ -223,6 +223,45 @@ public interface Player extends Entity, CommandSender {
     void clearTitle();
 
     /**
+     * Show a <b>sidebar scoreboard</b>: a title and lines of text, top to bottom, authored in the unified
+     * markup. Purely presentational — the server tracks no real scores; the lines are whatever you set,
+     * and calling this again replaces them (updating only what changed, so it's cheap on a timer).
+     *
+     * <p>Java only (1.8 and 1.12.2). Bedrock ignores it — its legacy clients either predate scoreboards
+     * (0.14) or aren't wired here yet (1.1.5). At most {@value com.jedrock.api.player.Player#SIDEBAR_MAX_LINES}
+     * lines are shown; the pre-1.13 client draws a small red number beside each line (the vanilla look).
+     */
+    void setSidebar(String title, java.util.List<String> lines);
+
+    /** Remove the sidebar scoreboard, if one is shown. */
+    void clearSidebar();
+
+    /** The most lines a {@link #setSidebar} sidebar shows; extra lines are dropped. */
+    int SIDEBAR_MAX_LINES = 16;
+
+    /**
+     * Show a <b>boss bar</b> across the top of the screen: a title and a fill fraction, in the default
+     * purple. Purely presentational — no entity, no combat; the bar shows whatever you set. Calling it
+     * again updates the same bar. Cross-edition where the client can show one: Java 1.12.2 (its dedicated
+     * packet), Java 1.8 (an invisible wither ridden by the player — the classic illusion) and Bedrock
+     * 1.1.5 (BossEvent). Bedrock 0.14 predates boss bars and ignores it.
+     *
+     * @param progress the fill, {@code 0.0}..{@code 1.0} (clamped)
+     */
+    default void setBossBar(String title, float progress) {
+        setBossBar(title, progress, "purple");
+    }
+
+    /**
+     * As {@link #setBossBar(String, float)} but with a bar colour: {@code pink}, {@code blue}, {@code red},
+     * {@code green}, {@code yellow}, {@code purple} or {@code white} (unknown falls back to purple).
+     */
+    void setBossBar(String title, float progress, String color);
+
+    /** Remove the boss bar, if one is shown. */
+    void clearBossBar();
+
+    /**
      * @return true if the player is still connected
      */
     boolean isOnline();

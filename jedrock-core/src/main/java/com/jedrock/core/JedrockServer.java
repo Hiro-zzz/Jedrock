@@ -47,6 +47,7 @@ import com.jedrock.core.command.MsgCommand;
 import com.jedrock.core.command.OpCommand;
 import com.jedrock.core.command.DeopCommand;
 import com.jedrock.core.command.PermCommand;
+import com.jedrock.core.command.PickCommand;
 import com.jedrock.core.command.SayCommand;
 import com.jedrock.core.command.SpawnCommand;
 import com.jedrock.core.command.TeleportCommand;
@@ -192,6 +193,7 @@ public class JedrockServer implements Server, ConnectionListener {
         commandManager.register(new OpCommand());
         commandManager.register(new DeopCommand());
         commandManager.register(new PermCommand());
+        commandManager.register(new PickCommand());
     }
 
     /** The in-game command registry — used by commands (e.g. {@code /help}) to introspect. */
@@ -527,6 +529,21 @@ public class JedrockServer implements Server, ConnectionListener {
     /** The script plugin manager — used by the console {@code plugins} command. */
     public PluginManager getPlugins() {
         return plugins;
+    }
+
+    /**
+     * Open a script-owned virtual menu (a chest window backed by {@code container}, no world block) to a
+     * player. A non-null {@code onClick} makes it a read-only button menu; null makes it a storage
+     * container. Java only — see {@link ContainerService#openMenu}.
+     *
+     * @return {@code true} if it opened, {@code false} if the player is offline or on an edition that can't show it
+     */
+    public boolean openMenu(Player player, String title, com.jedrock.core.inventory.Container container,
+                            String[] labels, com.jedrock.core.inventory.MenuClick onClick) {
+        if (!(player instanceof CorePlayer cp)) {
+            return false;
+        }
+        return containers.openMenu(cp, title, container, labels, onClick);
     }
 
     // ===== ConnectionListener: network → core state bridge =====

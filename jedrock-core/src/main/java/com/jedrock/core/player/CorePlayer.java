@@ -95,10 +95,14 @@ public final class CorePlayer implements Player {
         return cursor;
     }
 
-    // ===== Open container (a chest) =====
+    // ===== Open container (a world chest, or a script-owned virtual menu) =====
 
     private int openWindowId = 0;      // 0 = only the player's own inventory is open
-    private Container openContainer;   // the chest container being viewed (null when none)
+    private Container openContainer;   // the chest / menu container being viewed (null when none)
+    /** True for a world chest (its edits persist); false for a transient script menu. */
+    private boolean openContainerPersistent;
+    /** Non-null when the open container is a button menu: its slots are read-only and clicks call this. */
+    private com.jedrock.core.inventory.MenuClick openMenuClick;
 
     public int getOpenWindowId() {
         return openWindowId;
@@ -112,14 +116,49 @@ public final class CorePlayer implements Player {
         return openContainer != null;
     }
 
+    /** Whether the open container's edits should be persisted (a world chest) rather than dropped (a menu). */
+    public boolean isOpenContainerPersistent() {
+        return openContainerPersistent;
+    }
+
+    /** The click handler if the open container is a button menu, or {@code null} for a storage container. */
+    public com.jedrock.core.inventory.MenuClick getOpenMenuClick() {
+        return openMenuClick;
+    }
+
+    /** Open a world chest: a storage container whose edits persist. */
     public void openContainer(int windowId, Container container) {
+        openContainer(windowId, container, true, null);
+    }
+
+    /**
+     * Open a container of any kind. {@code persistent} marks a world chest (edits saved) from a transient
+     * menu; a non-null {@code menuClick} makes it a read-only button menu whose clicks fire the handler.
+     */
+    public void openContainer(int windowId, Container container, boolean persistent,
+                              com.jedrock.core.inventory.MenuClick menuClick) {
         this.openWindowId = windowId;
         this.openContainer = container;
+        this.openContainerPersistent = persistent;
+        this.openMenuClick = menuClick;
     }
 
     public void closeContainer() {
         this.openWindowId = 0;
         this.openContainer = null;
+        this.openContainerPersistent = false;
+        this.openMenuClick = null;
+    }
+
+    /** A button menu shown as a text list (the 1.1.5 fallback), pickable with {@code /pick}; null if none. */
+    private volatile com.jedrock.core.inventory.ListMenu pendingMenu;
+
+    public com.jedrock.core.inventory.ListMenu getPendingMenu() {
+        return pendingMenu;
+    }
+
+    public void setPendingMenu(com.jedrock.core.inventory.ListMenu menu) {
+        this.pendingMenu = menu;
     }
 
     /** Canonical state per inventory slot (0-8 hotbar, 9-35 main, 36-39 armor, 40 off-hand); 0 = empty. */
@@ -558,6 +597,54 @@ public final class CorePlayer implements Player {
     @Override
     public void clearTitle() {
         connection.clearTitle();
+    }
+
+    @Override
+    public void setSidebar(String title, java.util.List<String> lines) {
+        // Render the markup here (like sendTitle); the connection frames the legacy strings per version.
+        // Read the elements as Object, not String: Rhino's NativeArray *is* a java.util.List, so a script's
+        // array arrives unconverted and a concatenated line is a ConsString, not a String — a String local
+        // here would checkcast and throw. Every CharSequence stringifies the same way.
+        java.util.List<?> raw = lines;
+        String renderedTitle = ChatText.toLegacy(title == null ? "" : title);
+        String[] rendered = new String[raw == null ? 0 : raw.size()];
+        for (int i = 0; i < rendered.length; i++) {
+            Object line = raw.get(i);
+            rendered[i] = ChatText.toLegacy(line == null ? "" : line.toString());
+        }
+        connection.setSidebar(renderedTitle, rendered);
+    }
+
+    @Override
+    public void clearSidebar() {
+        connection.clearSidebar();
+    }
+
+    @Override
+    public void setBossBar(String title, float progress, String color) {
+        float clamped = progress < 0f ? 0f : (progress > 1f ? 1f : progress);
+        connection.setBossBar(ChatText.toLegacy(title == null ? "" : title), clamped, bossBarColorId(color));
+    }
+
+    @Override
+    public void clearBossBar() {
+        connection.clearBossBar();
+    }
+
+    /** Map a colour name to the canonical boss-bar colour id (the JE wire values); unknown → purple. */
+    private static int bossBarColorId(String color) {
+        if (color == null) {
+            return 5;
+        }
+        return switch (color.toLowerCase(java.util.Locale.ROOT)) {
+            case "pink" -> 0;
+            case "blue" -> 1;
+            case "red" -> 2;
+            case "green" -> 3;
+            case "yellow" -> 4;
+            case "white" -> 6;
+            default -> 5; // purple
+        };
     }
 
     @Override

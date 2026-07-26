@@ -268,6 +268,10 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
      *  2 action-bar, 3 times, 4 hide, 5 reset. Verified against minecraft-data for protocol 340. */
     private static final int SB_TAB_COMPLETE = 0x01;    // serverbound Tab-Complete request (text + flags)
     private static final int CB_TAB_COMPLETE = 0x0E;    // clientbound Tab-Complete: VarInt count + strings
+    private static final int CB_SCOREBOARD_OBJECTIVE = 0x42; // create/update/remove a scoreboard objective
+    private static final int CB_UPDATE_SCORE = 0x45;    // set/remove one score entry
+    private static final int CB_DISPLAY_OBJECTIVE = 0x3B; // bind an objective to a display slot (1 = sidebar)
+    private static final int CB_BOSS_BAR = 0x0C;        // add/remove/update a boss bar
     private static final int CB_TITLE = 0x48;
     private static final int CB_NAMED_SOUND = 0x19;      // named sound effect (name + category + pos*8 + volume + pitch)
     private static final int CB_WORLD_PARTICLES = 0x22;  // particle burst (same body as 1.8's 0x2a)
@@ -487,6 +491,116 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     public void sendTabComplete(JedrockConnection c, java.util.List<String> matches) {
         // Tab-Complete (0x0E at 340): VarInt count + strings, the shared JE body.
         send(c, CB_TAB_COMPLETE, b -> JeTabComplete.write(b, matches));
+    }
+
+    // ===== Sidebar scoreboard (1.12.2: Objective 0x42, Score 0x45, Display 0x3B) =====
+
+    /** Per-connection sidebar state; the wire below is this version's packet formats. */
+    private JeScoreboard sidebar;
+
+    private JeScoreboard sidebar(JedrockConnection c) {
+        if (sidebar == null) {
+            sidebar = new JeScoreboard(new JeScoreboard.Wire() {
+                @Override public void objectiveCreate(String obj, String title) { objective(c, obj, 0, title); }
+                @Override public void objectiveUpdateTitle(String obj, String title) { objective(c, obj, 2, title); }
+                @Override public void objectiveRemove(String obj) { objective(c, obj, 1, ""); }
+                @Override public void displaySidebar(String obj) {
+                    send(c, CB_DISPLAY_OBJECTIVE, b -> { b.writeByte(1); ByteBufUtils.writeString(b, obj); });
+                }
+                @Override public void scoreSet(String entry, String obj, int value) {
+                    send(c, CB_UPDATE_SCORE, b -> {
+                        ByteBufUtils.writeString(b, entry);
+                        b.writeByte(0);                       // action 0 = create/update
+                        ByteBufUtils.writeString(b, obj);
+                        ByteBufUtils.writeVarInt(b, value);
+                    });
+                }
+                @Override public void scoreRemove(String entry, String obj) {
+                    send(c, CB_UPDATE_SCORE, b -> {
+                        ByteBufUtils.writeString(b, entry);
+                        b.writeByte(1);                       // action 1 = remove (no objective/value follow)
+                        ByteBufUtils.writeString(b, obj);
+                    });
+                }
+            });
+        }
+        return sidebar;
+    }
+
+    /** Scoreboard Objective (0x42): name, mode; and for create/update a JSON display value + VarInt type. */
+    private void objective(JedrockConnection c, String name, int mode, String title) {
+        send(c, CB_SCOREBOARD_OBJECTIVE, b -> {
+            ByteBufUtils.writeString(b, name);
+            b.writeByte(mode);
+            if (mode == 0 || mode == 2) {
+                ByteBufUtils.writeString(b, json(title)); // 1.12.2 wants a chat component here
+                ByteBufUtils.writeVarInt(b, 0);            // type 0 = integer
+            }
+        });
+    }
+
+    @Override
+    public void setSidebar(JedrockConnection c, String title, String[] lines) {
+        sidebar(c).set(title, java.util.List.of(lines));
+    }
+
+    @Override
+    public void clearSidebar(JedrockConnection c) {
+        sidebar(c).clear();
+    }
+
+    // ===== Boss bar (1.12.2 Boss Bar 0x0C; 1.8 has no such packet, so it degrades) =====
+
+    private final java.util.UUID bossBarId = java.util.UUID.randomUUID();
+    private JeBossBar bossBar;
+
+    private JeBossBar bossBar(JedrockConnection c) {
+        if (bossBar == null) {
+            bossBar = new JeBossBar(new JeBossBar.Wire() {
+                @Override public void add(String title, float progress, int color) {
+                    bossBarPacket(c, 0, b -> {
+                        ByteBufUtils.writeString(b, json(title));
+                        b.writeFloat(progress);
+                        ByteBufUtils.writeVarInt(b, color);
+                        ByteBufUtils.writeVarInt(b, 0);   // division 0 = no notches
+                        b.writeByte(0);                    // flags
+                    });
+                }
+                @Override public void updateHealth(float progress) {
+                    bossBarPacket(c, 2, b -> b.writeFloat(progress));
+                }
+                @Override public void updateTitle(String title) {
+                    bossBarPacket(c, 3, b -> ByteBufUtils.writeString(b, json(title)));
+                }
+                @Override public void updateStyle(int color) {
+                    bossBarPacket(c, 4, b -> { ByteBufUtils.writeVarInt(b, color); ByteBufUtils.writeVarInt(b, 0); });
+                }
+                @Override public void remove() {
+                    bossBarPacket(c, 1, b -> {});
+                }
+            });
+        }
+        return bossBar;
+    }
+
+    /** Boss Bar (0x0C): the bar uuid, the action, then the action-specific body. */
+    private void bossBarPacket(JedrockConnection c, int action, Consumer<ByteBuf> body) {
+        send(c, CB_BOSS_BAR, b -> {
+            b.writeLong(bossBarId.getMostSignificantBits());
+            b.writeLong(bossBarId.getLeastSignificantBits());
+            ByteBufUtils.writeVarInt(b, action);
+            body.accept(b);
+        });
+    }
+
+    @Override
+    public void setBossBar(JedrockConnection c, String title, float progress, int color) {
+        bossBar(c).set(title, progress, color);
+    }
+
+    @Override
+    public void clearBossBar(JedrockConnection c) {
+        bossBar(c).clear();
     }
 
     @Override

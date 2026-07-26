@@ -3,6 +3,7 @@ package com.jedrock.core.plugin;
 import com.jedrock.api.Server;
 import com.jedrock.api.command.CommandSender;
 import com.jedrock.api.event.EventBus;
+import com.jedrock.core.JedrockServer;
 import com.jedrock.core.command.Command;
 import com.jedrock.core.command.CommandManager;
 import com.jedrock.core.net.PacketEvent;
@@ -234,6 +235,10 @@ public final class PluginManager {
                     ScriptableObject.putProperty(scope, "entities",
                             Context.javaToJS(new ScriptEntities(this, plugin), scope));
                 }
+                // menus needs no server to be built (only open() does, which guards for one), so it is
+                // always available — a script can lay a menu out even where opening it would no-op.
+                ScriptableObject.putProperty(scope, "menus",
+                        Context.javaToJS(new ScriptMenus(this, plugin), scope));
                 ScriptableObject.putProperty(scope, "storage",
                         Context.javaToJS(new ScriptStorage(storage, name, scope), scope));
                 ScriptableObject.putProperty(scope, "console",
@@ -486,6 +491,37 @@ public final class PluginManager {
         } finally {
             scriptLock.unlock();
         }
+    }
+
+    /**
+     * Fire a virtual menu's click handler with {@code (player, slot, state)}, under the script lock and a
+     * Rhino context like every other callback. A thrown error is caught and logged, never propagated — a
+     * broken handler must not take the window (or the click packet) down.
+     */
+    void callMenuClick(ScriptPlugin plugin, Function handler, com.jedrock.api.player.Player player,
+                       int slot, int state) {
+        scriptLock.lock();
+        try {
+            Context cx = contextFactory.enterContext();
+            try {
+                Scriptable scope = plugin.scope();
+                handler.call(cx, scope, scope, new Object[]{
+                        Context.javaToJS(player, scope), (double) slot, (double) state});
+            } catch (RuntimeException e) {
+                LOGGER.warn("Plugin " + plugin.name() + " menu click handler threw: " + e);
+            } finally {
+                Context.exit();
+            }
+        } finally {
+            scriptLock.unlock();
+        }
+    }
+
+    /** Open a virtual menu to a player through the server (a no-op returning false without a live server). */
+    boolean openMenu(com.jedrock.api.player.Player player, String title,
+                     com.jedrock.core.inventory.Container container, String[] labels,
+                     com.jedrock.core.inventory.MenuClick onClick) {
+        return server instanceof JedrockServer js && js.openMenu(player, title, container, labels, onClick);
     }
 
     /** Build a JS array of primitive strings (see {@link #callCommand} for why primitives, not wrappers). */

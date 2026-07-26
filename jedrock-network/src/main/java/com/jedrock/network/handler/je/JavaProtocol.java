@@ -113,6 +113,18 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Send tab-completion matches for the token the client is completing, in this version's packet format. */
     default void sendTabComplete(JedrockConnection c, java.util.List<String> matches) {}
 
+    /** Show / update this client's sidebar scoreboard (title + legacy-rendered lines, top to bottom). */
+    default void setSidebar(JedrockConnection c, String title, String[] lines) {}
+
+    /** Remove this client's sidebar scoreboard, if shown. */
+    default void clearSidebar(JedrockConnection c) {}
+
+    /** Show / update this client's boss bar (title, fill 0..1, canonical colour id), in this version's format. */
+    default void setBossBar(JedrockConnection c, String title, float progress, int color) {}
+
+    /** Remove this client's boss bar, if shown. */
+    default void clearBossBar(JedrockConnection c) {}
+
     /** Switch this client's own game mode live (HUD + fly ability), in this version's packet format. */
     void setGameMode(JedrockConnection c, GameMode mode);
 
