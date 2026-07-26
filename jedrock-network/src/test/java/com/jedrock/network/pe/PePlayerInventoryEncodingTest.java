@@ -29,7 +29,7 @@ class PePlayerInventoryEncodingTest {
         states[9] = stone; counts[9] = 64;     // first main slot
 
         ByteBuf b = Unpooled.buffer();
-        PeSession.writePlayerInventory(b, slot -> states[slot], slot -> counts[slot]);
+        McpePackets.playerInventory(b, 1L, slot -> states[slot], slot -> counts[slot]);
 
         assertEquals(ID_CONTAINER_SET_CONTENT, ByteBufUtils.readVarInt(b), "packet id 0x34");
         assertEquals(WINDOW_ID_PLAYER, ByteBufUtils.readVarInt(b), "window id 0");

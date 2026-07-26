@@ -402,10 +402,12 @@ jedrock
 │   └── pe/              # Bedrock 1.1.5: PeRakNetServer (RakNet transport) + PeSession (MCPE game
 │                        #   layer) delegating to McpeProtocol, McpeCodec, McpeChunkSerializer,
 │                        #   McpeLoginIdentity, McpeSkin, PeBlockEditDecoder, McpeCompression
+│       │                #   (McpePackets holds every clientbound body, as Mcpe014Packets does for 0.14)
 │       └── v014/         # Bedrock 0.14 (protocol 45): Pe014RakNetServer + PeSession014 + the
 │                         #   pre-VarInt codec (Mcpe014Codec/Login/Packets/ChunkSerializer/Batch)
 ├── jedrock-gameloop     # Dedicated 20 TPS drift-correcting loop + Scheduler (Tickable)
-└── jedrock-core         # The server: JedrockServer, PlayerRegistry, CoreWorld/BlockStorage
+└── jedrock-core         # The server: JedrockServer + ConnectionBridge (network → core),
+    │                    #   PlayerRegistry, CoreWorld/BlockStorage
     ├── plugin/          #   the Rhino script host (the only non-api dep besides network) + its globals
     ├── entity/          #   CorePuppet / PuppetRegistry: the entity behind mobs, holograms and props
     ├── command/         #   CommandManager + the built-ins, on one CommandSender surface

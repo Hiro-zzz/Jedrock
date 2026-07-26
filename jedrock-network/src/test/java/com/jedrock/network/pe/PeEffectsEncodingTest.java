@@ -22,7 +22,7 @@ class PeEffectsEncodingTest {
     @Test
     void levelEvent113BodyMatchesPmmp() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeLevelEvent(b, 1000, 1.5, 64.0, -2.5, 1000); // a click at pitch 1
+        McpePackets.levelEvent(b, 1000, 1.5, 64.0, -2.5, 1000); // a click at pitch 1
 
         assertEquals(0x1a, ByteBufUtils.readVarInt(b), "packet id LEVEL_EVENT");
         assertEquals(1000, ByteBufUtils.readSignedVarInt(b), "event id (signed varint)");
@@ -37,7 +37,7 @@ class PeEffectsEncodingTest {
     @Test
     void levelSoundEvent113BodyMatchesPmmp() {
         ByteBuf b = Unpooled.buffer();
-        PeSession.writeLevelSoundEvent(b, 55, 0.5, 65.0, 0.5); // SOUND_LEVELUP
+        McpePackets.levelSoundEvent(b, 55, 0.5, 65.0, 0.5); // SOUND_LEVELUP
 
         assertEquals(0x19, ByteBufUtils.readVarInt(b), "packet id LEVEL_SOUND_EVENT");
         assertEquals(55, b.readUnsignedByte(), "sound id (byte)");

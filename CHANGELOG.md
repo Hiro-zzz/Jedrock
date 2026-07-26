@@ -294,6 +294,25 @@ unstable — anything may change between entries.
 
 ### Fixed
 
+- **The 1.8 boss bar still didn't show — the wither has to be in front of you.** Second attempt at this
+  (the first swapped riding the player for spawn-and-follow, which was also invisible). The missing fact:
+  the 1.8 client draws its boss health bar from the wither it is **rendering**, not merely from one it has
+  been told about — so an invisible wither parked five blocks under the player's feet, permanently out of
+  frame, never produces a bar no matter how correct its packets are. Ground truth this time is
+  **ViaRewind**, which has to solve the identical problem (give a 1.8 client the boss bar of a modern
+  server) and whose recipe explains itself: it holds the wither **48 blocks straight down the player's line
+  of sight** and re-places it on every **look** packet as well as every move. That trigonometry only makes
+  sense if the entity has to stay in view — which is the whole answer.
+  Now copied field for field: the placement (`x - cos(pitch)·sin(yaw)·48`, `y - sin(pitch)·48`,
+  `z + cos(pitch)·cos(yaw)·48`), the follow on look as well as position, the wither's
+  invulnerable-time metadata (index 20 = 880, which keeps the client's copy out of its spawn sequence),
+  and an empty bar as *almost* zero health rather than zero (a wither at 0 is dead and draws nothing).
+  The spawn seed now carries the facing too, so a bar shown before the client's first position report is
+  already placed correctly. Tested: the placement is pinned in four directions plus the invariant that the
+  wither always sits exactly 48 blocks away — the kind of mistake that is invisible otherwise, since the
+  packets send happily either way. One deliberate difference from ViaRewind remains: it also sets the
+  always-show-nametag flag, which would hang the title in the world as floating text, so that stays off.
+
 - **A sidebar line built by concatenation crashed the script.** `player.setSidebar(title, [lines])` threw
   `ClassCastException: ConsString cannot be cast to String` for any line a script assembled with `+` — which
   is every interesting line, since a static sidebar has no reason to exist. The cause is one Rhino detail:
@@ -306,6 +325,33 @@ unstable — anything may change between entries.
   string *literals* — which really are `java.lang.String` — so the regression test now concatenates.
 
 ### Changed
+
+- **`PeSession` split: the 1.1.5 encoders move out (1749 → 1218 lines).** The 0.14 layer has always been
+  two classes — `PeSession014` for the session, `Mcpe014Packets` for the bytes — and 1.1.5 never got the
+  same treatment, so its session had accumulated every packet body it sends inline, most of them as
+  lambdas inside the method that sent them. New **`McpePackets`** is the 1.1.5 counterpart: ~35 clientbound
+  encoders (chat and popups, titles, boss-bar events, level events, the PlayerList/AddPlayer pair, entities
+  and props, metadata, animations, blocks, equipment, inventories, and the whole join sequence from
+  PlayStatus through StartGame to the command manifest), each a pure function of its arguments.
+  The point isn't the line count, it's what the split buys: an encoder that touches no session state can be
+  read against PocketMine field by field and pinned by a unit test that needs no client, no socket and no
+  login — which is exactly how these layouts were verified in the first place. The eight existing PE
+  encoding tests now call `McpePackets` directly, and they are what proves the move was byte-for-byte: the
+  wire is unchanged. Where an encoder needed the player's own entity id it takes it as an argument rather
+  than reaching for a constant, so nothing in the new class knows what a session is. Behaviour is identical
+  — even the boss bar still sends its fill and title as two separate batches, which is what it did before.
+
+- **`JedrockServer` split again: the network bridge moves out (1099 → 622 lines).** The last split pulled
+  out what the server *does* (broadcasting, combat, containers, entities, the level). What stayed was two
+  things that never share a line of code: the server's own life — config, the collaborators it owns,
+  bootstrap, the tick, the api surface — and the ~470 lines of *inbound decisions*, one per thing a client
+  can report. New **`ConnectionBridge`** takes the second half, and the split is the one
+  `ConnectionListener` was always shaped for: the network layer holds a listener, not a server, so it now
+  holds exactly that and `JedrockServer` stops implementing the interface entirely. Where a decision is
+  genuinely the server's — which mode a returning player joins in, what commands there are to advertise —
+  the bridge forwards rather than keeping a second copy of the state. Everything else was already
+  delegated and stays so. No behaviour change: the bodies moved verbatim, and 18 imports went dead in the
+  process, which is its own measure of how much did not belong there.
 
 - **`JedrockServer` split into five collaborators (1822 → 1043 lines).** The class had accumulated every
   responsibility that ever needed the roster, and its next feature would have made that worse. What came

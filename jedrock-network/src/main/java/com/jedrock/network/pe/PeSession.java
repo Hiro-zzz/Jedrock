@@ -38,10 +38,12 @@ import static com.jedrock.network.pe.McpeProtocol.*;
  * machine that walks a client from Login to spawn, AND the {@link PlayerConnection} the core sees —
  * so a Bedrock player lands in the same PlayerRegistry as a Java one.
  *
- * <p>Wire concerns are delegated out: {@link McpeCodec} frames packets and items, {@link McpeSkin}
- * builds the placeholder avatar texture, {@link McpeChunkSerializer} serializes chunk columns,
- * {@link McpeLoginIdentity} pulls the gamertag from the Login JWTs, and {@link PeBlockEditDecoder}
- * turns inbound break/place packets into edits. This class owns only the session state and flow.
+ * <p>Wire concerns are delegated out: {@link McpePackets} encodes every clientbound body (as a pure
+ * function, so a layout can be pinned by a test with no client in sight), {@link McpeCodec} frames
+ * packets and items, {@link McpeSkin} builds the placeholder avatar texture, {@link McpeChunkSerializer}
+ * serializes chunk columns, {@link McpeLoginIdentity} pulls the gamertag from the Login JWTs, and
+ * {@link PeBlockEditDecoder} turns inbound break/place packets into edits. What is left here is the part
+ * that genuinely has state: the session flow, the inbound decisions, and the batching that carries them.
  */
 final class PeSession implements RakNetSessionListener, PlayerConnection {
 
@@ -113,33 +115,30 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
 
     @Override
     public void sendMessage(String message) {
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_TEXT);
-            b.writeByte(TEXT_TYPE_RAW);
-            ByteBufUtils.writeString(b, message);
-        });
+        sendGameBatch(b -> McpePackets.text(b, message));
     }
 
     @Override
     public void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut) {
         // Native SetTitle (0x59), byte-verified against PMMP at protocol 113. Send the animation times, then
         // the subtitle, then the title (the title packet triggers the on-screen display).
-        sendGameBatch(b -> writeSetTitle(b, TITLE_TYPE_TIMES, "", fadeIn, stay, fadeOut));
+        sendGameBatch(b -> McpePackets.setTitle(b, TITLE_TYPE_TIMES, "", fadeIn, stay, fadeOut));
         if (subtitle != null && !subtitle.isEmpty()) {
-            sendGameBatch(b -> writeSetTitle(b, TITLE_TYPE_SUBTITLE, subtitle, fadeIn, stay, fadeOut));
+            sendGameBatch(b -> McpePackets.setTitle(b, TITLE_TYPE_SUBTITLE, subtitle, fadeIn, stay, fadeOut));
         }
-        sendGameBatch(b -> writeSetTitle(b, TITLE_TYPE_TITLE, title == null ? "" : title, fadeIn, stay, fadeOut));
+        sendGameBatch(b -> McpePackets.setTitle(b, TITLE_TYPE_TITLE, title == null ? "" : title,
+                fadeIn, stay, fadeOut));
     }
 
     @Override
     public void sendActionBar(String text) {
         // The action bar is its own SetTitle type; give it modest fade/stay so it lingers ~1s per call.
-        sendGameBatch(b -> writeSetTitle(b, TITLE_TYPE_ACTIONBAR, text == null ? "" : text, 1, 20, 1));
+        sendGameBatch(b -> McpePackets.setTitle(b, TITLE_TYPE_ACTIONBAR, text == null ? "" : text, 1, 20, 1));
     }
 
     @Override
     public void clearTitle() {
-        sendGameBatch(b -> writeSetTitle(b, TITLE_TYPE_CLEAR, "", 0, 0, 0));
+        sendGameBatch(b -> McpePackets.setTitle(b, TITLE_TYPE_CLEAR, "", 0, 0, 0));
     }
 
     /**
@@ -157,14 +156,14 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         int shift = properties.peSidebarShift();
         String head = pad(title == null ? "" : title, shift);
         String body = joinSidebarLines(lines, raise, shift);
-        sendGameBatch(b -> writePopup(b, head, body));
+        sendGameBatch(b -> McpePackets.popup(b, head, body));
     }
 
     @Override
     public void clearSidebar() {
         // An empty popup is how it goes away — there is nothing to tear down, so this is also what a
         // fade does on its own. Sent once; the repaint stops with it because the core drops the state.
-        sendGameBatch(b -> writePopup(b, "", ""));
+        sendGameBatch(b -> McpePackets.popup(b, "", ""));
     }
 
     @Override
@@ -218,87 +217,29 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         return shift > 0 ? spaces + line : line + spaces;
     }
 
-    /**
-     * Write one TextPacket popup. Layout, verbatim from PMMP {@code TextPacket} at protocol 113:
-     * {@code type} (byte) then, for {@code TYPE_POPUP}, two strings — {@code source} (the popup line) and
-     * {@code message} (the subtitle under it). Both are the era's unsigned-varint-length strings.
-     */
-    static void writePopup(ByteBuf b, String source, String message) {
-        ByteBufUtils.writeVarInt(b, ID_TEXT);
-        b.writeByte(TEXT_TYPE_POPUP);
-        ByteBufUtils.writeString(b, source == null ? "" : source);
-        ByteBufUtils.writeString(b, message == null ? "" : message);
-    }
-
-    /** BossEvent event types (PMMP {@code BossEventPacket} @ 113). */
-    private static final int BOSS_SHOW = 0;
-    private static final int BOSS_HIDE = 2;
-    private static final int BOSS_HEALTH = 4;
-    private static final int BOSS_TITLE = 5;
-
     private boolean bossBarShown;
 
     @Override
     public void setBossBar(String title, float progress, int color) {
         // The bar binds to an entity; use the player's own id (StartGame gave it SELF_ENTITY_ID), so no
-        // extra entity has to be spawned. Verified against PMMP's BossEventPacket @ 113; unverified on a
-        // real client. A malformed field could disconnect the client, so every field mirrors PMMP exactly.
+        // extra entity has to be spawned.
         String shown = title == null ? "" : title;
         if (!bossBarShown) {
-            // TYPE_SHOW falls through to the texture fields in PMMP, so the packet carries title, health,
-            // an unknown short, then colour + overlay — all of them, in that order.
-            sendGameBatch(b -> {
-                ByteBufUtils.writeVarInt(b, ID_BOSS_EVENT);
-                ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID); // bossEid (putEntityUniqueId)
-                ByteBufUtils.writeVarInt(b, BOSS_SHOW);
-                ByteBufUtils.writeString(b, shown);
-                b.writeFloatLE(progress);
-                b.writeShortLE(0);                                   // unknownShort
-                ByteBufUtils.writeVarInt(b, color);                 // colour
-                ByteBufUtils.writeVarInt(b, 0);                     // overlay
-            });
+            sendGameBatch(b -> McpePackets.bossEventShow(b, SELF_ENTITY_ID, shown, progress, color));
             bossBarShown = true;
             return;
         }
         // Already up: update the fill and the title (colour changes after the first show are ignored).
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_BOSS_EVENT);
-            ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);
-            ByteBufUtils.writeVarInt(b, BOSS_HEALTH);
-            b.writeFloatLE(progress);
-        });
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_BOSS_EVENT);
-            ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);
-            ByteBufUtils.writeVarInt(b, BOSS_TITLE);
-            ByteBufUtils.writeString(b, shown);
-        });
+        sendGameBatch(b -> McpePackets.bossEventHealth(b, SELF_ENTITY_ID, progress));
+        sendGameBatch(b -> McpePackets.bossEventTitle(b, SELF_ENTITY_ID, shown));
     }
 
     @Override
     public void clearBossBar() {
         if (bossBarShown) {
-            sendGameBatch(b -> {
-                ByteBufUtils.writeVarInt(b, ID_BOSS_EVENT);
-                ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);
-                ByteBufUtils.writeVarInt(b, BOSS_HIDE);
-            });
+            sendGameBatch(b -> McpePackets.bossEventHide(b, SELF_ENTITY_ID));
             bossBarShown = false;
         }
-    }
-
-    /**
-     * Write one SetTitle (0x59) packet. Layout, verbatim from PMMP {@code SetTitlePacket} at protocol 113:
-     * {@code type} (signed varint), {@code text} (string), then {@code fadeIn} / {@code stay} /
-     * {@code fadeOut} (signed varints, in ticks). {@code type} is one of the {@code TITLE_TYPE_*} values.
-     */
-    static void writeSetTitle(ByteBuf b, int type, String text, int fadeIn, int stay, int fadeOut) {
-        ByteBufUtils.writeVarInt(b, ID_SET_TITLE);
-        ByteBufUtils.writeSignedVarInt(b, type);
-        ByteBufUtils.writeString(b, text == null ? "" : text);
-        ByteBufUtils.writeSignedVarInt(b, fadeIn);
-        ByteBufUtils.writeSignedVarInt(b, stay);
-        ByteBufUtils.writeSignedVarInt(b, fadeOut);
     }
 
     @Override
@@ -316,14 +257,14 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         // Weather events carry no coordinates (PMMP: "Weather effects don't have coordinates").
         switch (weather) {
             case CLEAR -> sendGameBatch(
-                    b -> writeLevelEvent(b, 3003, 0, 0, 0, 0),
-                    b -> writeLevelEvent(b, 3004, 0, 0, 0, 0));
+                    b -> McpePackets.levelEvent(b,3003, 0, 0, 0, 0),
+                    b -> McpePackets.levelEvent(b,3004, 0, 0, 0, 0));
             case RAIN -> sendGameBatch(
-                    b -> writeLevelEvent(b, 3001, 0, 0, 0, WEATHER_INTENSITY),
-                    b -> writeLevelEvent(b, 3004, 0, 0, 0, 0));
+                    b -> McpePackets.levelEvent(b,3001, 0, 0, 0, WEATHER_INTENSITY),
+                    b -> McpePackets.levelEvent(b,3004, 0, 0, 0, 0));
             case THUNDER -> sendGameBatch(
-                    b -> writeLevelEvent(b, 3001, 0, 0, 0, WEATHER_INTENSITY),
-                    b -> writeLevelEvent(b, 3002, 0, 0, 0, WEATHER_INTENSITY));
+                    b -> McpePackets.levelEvent(b,3001, 0, 0, 0, WEATHER_INTENSITY),
+                    b -> McpePackets.levelEvent(b,3002, 0, 0, 0, WEATHER_INTENSITY));
         }
     }
 
@@ -333,10 +274,10 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         if (evid >= 0) {
             // LevelEvent sounds carry pitch in the data field ×1000 (PMMP GenericSound); no volume slot.
             int data = Math.round(pitch * 1000f);
-            sendGameBatch(b -> writeLevelEvent(b, evid, x, y, z, data));
+            sendGameBatch(b -> McpePackets.levelEvent(b,evid, x, y, z, data));
         } else {
             int soundId = PeEffects.levelSound113(sound);
-            sendGameBatch(b -> writeLevelSoundEvent(b, soundId, x, y, z));
+            sendGameBatch(b -> McpePackets.levelSoundEvent(b, soundId, x, y, z));
         }
     }
 
@@ -351,44 +292,13 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         java.util.concurrent.ThreadLocalRandom rnd = java.util.concurrent.ThreadLocalRandom.current();
         for (int i = 0; i < n; i++) {
             final double px = x + offset(rnd, spread), py = y + offset(rnd, spread), pz = z + offset(rnd, spread);
-            sendGameBatch(b -> writeLevelEvent(b, evid, px, py, pz, 0));
+            sendGameBatch(b -> McpePackets.levelEvent(b,evid, px, py, pz, 0));
         }
     }
 
     /** A uniform scatter in ±spread (0 spread → exactly at the point). */
     private static double offset(java.util.concurrent.ThreadLocalRandom rnd, double spread) {
         return spread <= 0 ? 0 : (rnd.nextDouble() * 2.0 - 1.0) * spread;
-    }
-
-    /**
-     * Write one LevelEvent (0x1a) packet. Layout, verbatim from PMMP {@code LevelEventPacket} at
-     * protocol 113: event id (signed varint — a 1000-series sound or {@code 0x4000 | particle type}),
-     * position (Vector3f = 3 LE floats), data (signed varint — pitch×1000 for sounds, 0 for particles).
-     */
-    static void writeLevelEvent(ByteBuf b, int evid, double x, double y, double z, int data) {
-        ByteBufUtils.writeVarInt(b, ID_LEVEL_EVENT);
-        ByteBufUtils.writeSignedVarInt(b, evid);
-        b.writeFloatLE((float) x);
-        b.writeFloatLE((float) y);
-        b.writeFloatLE((float) z);
-        ByteBufUtils.writeSignedVarInt(b, data);
-    }
-
-    /**
-     * Write one LevelSoundEvent (0x19) packet. Layout, verbatim from PMMP {@code LevelSoundEventPacket}
-     * at protocol 113: sound (byte), position (Vector3f), extraData (signed varint, -1 = none), pitch
-     * (signed varint, 1 = normal), isBabyMob (bool), disableRelativeVolume (bool).
-     */
-    static void writeLevelSoundEvent(ByteBuf b, int soundId, double x, double y, double z) {
-        ByteBufUtils.writeVarInt(b, ID_LEVEL_SOUND_EVENT);
-        b.writeByte(soundId);
-        b.writeFloatLE((float) x);
-        b.writeFloatLE((float) y);
-        b.writeFloatLE((float) z);
-        ByteBufUtils.writeSignedVarInt(b, -1);
-        ByteBufUtils.writeSignedVarInt(b, 1);
-        b.writeBoolean(false);
-        b.writeBoolean(false);
     }
 
     @Override
@@ -409,179 +319,50 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         McpeSkin.Skin shownSkin = skins.getOrDefault(uuid, McpeSkin.syntheticSkin(uuid));
         // PlayerList ADD must precede AddPlayer — it carries the skin the avatar renders with.
         sendGameBatch(
-                b -> {
-                    ByteBufUtils.writeVarInt(b, ID_PLAYER_LIST);
-                    b.writeByte(PLAYER_LIST_ADD);
-                    ByteBufUtils.writeVarInt(b, 1);                    // entry count
-                    McpeCodec.writeUuid(b, uuid);
-                    ByteBufUtils.writeSignedVarLong(b, entityId);      // entity unique id
-                    ByteBufUtils.writeString(b, name);
-                    ByteBufUtils.writeString(b, shownSkin.id());       // skin id / geometry
-                    ByteBufUtils.writeByteArray(b, shownSkin.data());  // skin RGBA texture
-                },
-                b -> {
-                    ByteBufUtils.writeVarInt(b, ID_ADD_PLAYER);
-                    McpeCodec.writeUuid(b, uuid);
-                    ByteBufUtils.writeString(b, name);
-                    ByteBufUtils.writeSignedVarLong(b, entityId);      // entity unique id
-                    ByteBufUtils.writeVarLong(b, entityId);            // entity runtime id
-                    b.writeFloatLE((float) x);
-                    b.writeFloatLE((float) y);                         // AddPlayer takes feet y
-                    b.writeFloatLE((float) z);
-                    b.writeFloatLE(0f);                                // motion x
-                    b.writeFloatLE(0f);                                // motion y
-                    b.writeFloatLE(0f);                                // motion z
-                    b.writeFloatLE(pitch);
-                    b.writeFloatLE(yaw);                               // head yaw
-                    b.writeFloatLE(yaw);
-                    ByteBufUtils.writeSignedVarInt(b, 0);              // held item: air
-                    // Entity metadata: the flags long (nametag always visible) + the nametag string,
-                    // so the player's name floats above the avatar the way it does on Java.
-                    ByteBufUtils.writeVarInt(b, 2);                    // metadata entry count
-                    ByteBufUtils.writeVarInt(b, DATA_FLAGS_INDEX);     // key = DATA_FLAGS (0)
-                    ByteBufUtils.writeVarInt(b, DATA_TYPE_LONG);       // type = LONG (7)
-                    ByteBufUtils.writeSignedVarLong(b, BASE_ENTITY_FLAGS);
-                    ByteBufUtils.writeVarInt(b, DATA_NAMETAG_INDEX);   // key = DATA_NAMETAG (4)
-                    ByteBufUtils.writeVarInt(b, DATA_TYPE_STRING);     // type = STRING (4)
-                    ByteBufUtils.writeString(b, name);                 // the floating nametag
-                });
+                b -> McpePackets.playerListAdd(b, uuid, entityId, name, shownSkin.id(), shownSkin.data()),
+                b -> McpePackets.addPlayer(b, uuid, name, entityId, x, y, z, yaw, pitch));
     }
 
     @Override
     public void hidePlayer(UUID uuid, long entityId) {
         sendGameBatch(
-                b -> {
-                    ByteBufUtils.writeVarInt(b, ID_REMOVE_ENTITY);
-                    ByteBufUtils.writeSignedVarLong(b, entityId);
-                },
-                b -> {
-                    ByteBufUtils.writeVarInt(b, ID_PLAYER_LIST);
-                    b.writeByte(PLAYER_LIST_REMOVE);
-                    ByteBufUtils.writeVarInt(b, 1);
-                    McpeCodec.writeUuid(b, uuid);
-                });
+                b -> McpePackets.removeEntity(b, entityId),
+                b -> McpePackets.playerListRemove(b, uuid));
     }
 
     @Override
     public void spawnEntity(long entityId, UUID uuid, com.jedrock.api.entity.EntityType type,
                             double x, double y, double z, float yaw, float pitch) {
-        // A puppet carries the nametag-visibility flags from birth, so a later setEntityNameTag shows up
-        // without having to re-send the flags (they share one DATA_FLAGS long).
         int typeId = EntityTypeIds.bedrockId(type);
-        sendGameBatch(b -> writeAddEntity(b, entityId, typeId, x, y, z, yaw, pitch,
-                meta -> {
-                    ByteBufUtils.writeVarInt(meta, 1);         // metadata entry count
-                    writeFlagsEntry(meta, BASE_ENTITY_FLAGS);
-                }));
+        sendGameBatch(b -> McpePackets.addPuppet(b, entityId, typeId, x, y, z, yaw, pitch));
     }
 
     @Override
     public void spawnTextLine(long entityId, UUID uuid, double x, double y, double z, String text) {
-        sendGameBatch(b -> writeAddTextLine(b, entityId, x, y, z, text));
-    }
-
-    /**
-     * Encode one hologram line: an item entity with no item — nothing renders but the name floating where
-     * the body would be, immobile so it can't be nudged. PocketMine's own floating-text hack, which
-     * deliberately does <em>not</em> set the invisible flag at protocol 113: an item entity that was never
-     * given an item draws nothing anyway.
-     */
-    static void writeAddTextLine(ByteBuf b, long entityId, double x, double y, double z, String text) {
-        long flags = BASE_ENTITY_FLAGS | (1L << DATA_FLAG_IMMOBILE_BIT);
-        writeAddEntity(b, entityId, ITEM_ENTITY_TYPE_ID, x, y + TEXT_LINE_Y_OFFSET, z, 0f, 0f,
-                meta -> {
-                    ByteBufUtils.writeVarInt(meta, 2);         // metadata entry count
-                    writeFlagsEntry(meta, flags);
-                    writeNameTagEntry(meta, text);
-                });
+        sendGameBatch(b -> McpePackets.addTextLine(b, entityId, x, y, z, text));
     }
 
     @Override
     public void setEntityNameTag(long entityId, String nameTag) {
-        // Only the nametag string: metadata is a merge, and the visibility bits already rode in on spawn.
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_SET_ENTITY_DATA);
-            ByteBufUtils.writeVarLong(b, entityId);            // entity runtime id
-            ByteBufUtils.writeVarInt(b, 1);                    // metadata entry count
-            writeNameTagEntry(b, nameTag);
-        });
+        sendGameBatch(b -> McpePackets.setEntityNameTag(b, entityId, nameTag));
     }
 
     @Override
     public void setEntityFlags(long entityId, int flags) {
-        // DATA_FLAGS is one long holding both the canonical flags and the nametag-visibility bits, so it
-        // is always written whole — dropping the base bits here would silently hide the puppet's name.
+        // The canonical flags are merged with the base (nametag-visibility) bits before they go out —
+        // DATA_FLAGS is one long, so dropping the base bits here would silently hide the puppet's name.
         long bits = BASE_ENTITY_FLAGS | EntityFlagIds.bedrockBits(flags);
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_SET_ENTITY_DATA);
-            ByteBufUtils.writeVarLong(b, entityId);            // entity runtime id
-            ByteBufUtils.writeVarInt(b, 1);                    // metadata entry count
-            writeFlagsEntry(b, bits);
-        });
-    }
-
-    /**
-     * Encode an AddEntity body (0x0D): entity ids, the MCPE entity type, feet position, motion, rotation
-     * (pitch before yaw), then attributes, the metadata dictionary and entity links. Verbatim from
-     * PocketMine-MP at protocol 113 ({@code AddEntityPacket::encodePayload}).
-     */
-    static void writeAddEntity(ByteBuf b, long entityId, int typeId,
-                               double x, double y, double z, float yaw, float pitch,
-                               Consumer<ByteBuf> metadata) {
-        ByteBufUtils.writeVarInt(b, ID_ADD_ENTITY);
-        ByteBufUtils.writeSignedVarLong(b, entityId);      // entity unique id
-        ByteBufUtils.writeVarLong(b, entityId);            // entity runtime id
-        ByteBufUtils.writeVarInt(b, typeId);               // entity type (uvarint, MCPE id)
-        b.writeFloatLE((float) x);
-        b.writeFloatLE((float) y);                         // feet
-        b.writeFloatLE((float) z);
-        b.writeFloatLE(0f);                                // motion x
-        b.writeFloatLE(0f);                                // motion y
-        b.writeFloatLE(0f);                                // motion z
-        b.writeFloatLE(pitch);
-        b.writeFloatLE(yaw);
-        ByteBufUtils.writeVarInt(b, 0);                    // attributes: none
-        metadata.accept(b);                                // metadata dictionary (count + entries)
-        ByteBufUtils.writeVarInt(b, 0);                    // entity links: none
-    }
-
-    /** One DATA_FLAGS metadata entry (a zigzag long). */
-    private static void writeFlagsEntry(ByteBuf b, long flags) {
-        ByteBufUtils.writeVarInt(b, DATA_FLAGS_INDEX);     // key = DATA_FLAGS (0)
-        ByteBufUtils.writeVarInt(b, DATA_TYPE_LONG);       // type = LONG (7)
-        ByteBufUtils.writeSignedVarLong(b, flags);         // putVarLong (zigzag)
-    }
-
-    /** One DATA_NAMETAG metadata entry — index 4 at protocol 113 (0.14 puts it at 2). */
-    private static void writeNameTagEntry(ByteBuf b, String nameTag) {
-        ByteBufUtils.writeVarInt(b, DATA_NAMETAG_INDEX);   // key = DATA_NAMETAG (4)
-        ByteBufUtils.writeVarInt(b, DATA_TYPE_STRING);     // type = STRING (4)
-        ByteBufUtils.writeString(b, nameTag == null ? "" : nameTag);
+        sendGameBatch(b -> McpePackets.setEntityFlags(b, entityId, bits));
     }
 
     @Override
     public void moveEntity(long entityId, double x, double y, double z, float yaw, float pitch) {
-        // MoveEntity (0x12): runtime id, feet position, then byte-angle pitch / yaw / headYaw and a flags
-        // byte. Unlike MovePlayer (0x13, player-only) this addresses any entity runtime id.
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_MOVE_ENTITY);
-            ByteBufUtils.writeVarLong(b, entityId);
-            b.writeFloatLE((float) x);
-            b.writeFloatLE((float) y);                         // feet
-            b.writeFloatLE((float) z);
-            ByteBufUtils.writeAngle(b, pitch);
-            ByteBufUtils.writeAngle(b, yaw);
-            ByteBufUtils.writeAngle(b, yaw);                    // head yaw
-            b.writeByte(0);                                     // flags (on-ground / teleport)
-        });
+        sendGameBatch(b -> McpePackets.moveEntity(b, entityId, x, y, z, yaw, pitch));
     }
 
     @Override
     public void removeEntity(long entityId) {
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_REMOVE_ENTITY);
-            ByteBufUtils.writeSignedVarLong(b, entityId);
-        });
+        sendGameBatch(b -> McpePackets.removeEntity(b, entityId));
     }
 
     @Override
@@ -600,203 +381,66 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     }
 
     /**
-     * Write one typed UpdateBlock (0x16): a single block instead of re-sending the whole chunk. Position is
-     * x/z zigzag-varint and y unsigned-varint (the layout the inbound edit decoder reads); the canonical
-     * state splits into a legacy id and 4-bit meta. Used for a normal (server-authored) edit the client has
-     * no opinion about — the retail 1.1.5 client honours those, but NOT a correction to a cell it edited
-     * itself (see {@link #resyncAround}, which re-sends the chunk instead).
+     * Send a typed UpdateBlock: a single block instead of re-sending the whole chunk. Used for a normal
+     * (server-authored) edit the client has no opinion about — the retail 1.1.5 client honours those, but
+     * NOT a correction to a cell it edited itself (see {@link #resyncAround}, which re-sends the chunk).
      */
     private void writeUpdateBlock(int x, int y, int z, int state) {
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_UPDATE_BLOCK);
-            ByteBufUtils.writeSignedVarInt(b, x);
-            ByteBufUtils.writeVarInt(b, y);
-            ByteBufUtils.writeSignedVarInt(b, z);
-            ByteBufUtils.writeVarInt(b, (state >> 4) & 0xFF);                            // legacy block id
-            ByteBufUtils.writeVarInt(b, (UPDATE_BLOCK_FLAG_ALL << 4) | (state & 0xF));   // (flags << 4) | meta
-        });
+        sendGameBatch(b -> McpePackets.updateBlock(b, x, y, z, state));
     }
 
     @Override
     public void moveAvatar(long entityId, double x, double y, double z, float yaw, float pitch) {
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_MOVE_PLAYER);
-            ByteBufUtils.writeVarLong(b, entityId);
-            b.writeFloatLE((float) x);
-            b.writeFloatLE((float) (y + EYE_HEIGHT));          // MovePlayer takes eye y
-            b.writeFloatLE((float) z);
-            b.writeFloatLE(pitch);
-            b.writeFloatLE(yaw);                               // head yaw
-            b.writeFloatLE(yaw);
-            b.writeByte(0);                                    // mode: normal (interpolated)
-            b.writeBoolean(true);                              // on ground
-            ByteBufUtils.writeVarLong(b, 0);                   // riding runtime id: none
-        });
+        sendGameBatch(b -> McpePackets.movePlayer(b, entityId, x, y + EYE_HEIGHT, z, yaw, pitch, 0));
     }
 
     @Override
     public void teleport(double x, double y, double z, float yaw, float pitch) {
         // Reposition our own player via MovePlayer in teleport mode (the judge snapping back a move).
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_MOVE_PLAYER);
-            ByteBufUtils.writeVarLong(b, SELF_ENTITY_ID);      // our own runtime id
-            b.writeFloatLE((float) x);
-            b.writeFloatLE((float) (y + EYE_HEIGHT));          // MovePlayer takes eye y
-            b.writeFloatLE((float) z);
-            b.writeFloatLE(pitch);
-            b.writeFloatLE(yaw);                               // head yaw
-            b.writeFloatLE(yaw);
-            b.writeByte(MOVE_MODE_TELEPORT);                   // server-forced reposition
-            b.writeBoolean(true);                              // on ground
-            ByteBufUtils.writeVarLong(b, 0);                   // riding runtime id: none
-        });
+        sendGameBatch(b -> McpePackets.movePlayer(b, SELF_ENTITY_ID, x, y + EYE_HEIGHT, z, yaw, pitch,
+                MOVE_MODE_TELEPORT));
     }
 
     @Override
     public void swingArm(long entityId) {
-        sendGameBatch(b -> writeAnimate(b, ANIMATE_SWING_ARM, entityId));
+        sendGameBatch(b -> McpePackets.animate(b, ANIMATE_SWING_ARM, entityId));
     }
 
     @Override
     public void playHurtAnimation(long entityId) {
-        sendGameBatch(b -> writeEntityEvent(b, entityId, ENTITY_EVENT_HURT, 0));
-    }
-
-    /**
-     * Encode an EntityEvent body (protocol 113): entity runtime id, byte event, then a {@code putVarInt}
-     * data field (signed). {@code event} 2 = hurt (the damage flash + sound); {@code data} is unused for it.
-     */
-    static void writeEntityEvent(ByteBuf b, long entityRuntimeId, int event, int data) {
-        ByteBufUtils.writeVarInt(b, ID_ENTITY_EVENT);
-        ByteBufUtils.writeVarLong(b, entityRuntimeId); // entity runtime id
-        b.writeByte(event);
-        ByteBufUtils.writeSignedVarInt(b, data);       // data (putVarInt, signed)
+        sendGameBatch(b -> McpePackets.entityEvent(b, entityId, ENTITY_EVENT_HURT, 0));
     }
 
     @Override
     public void setPose(long entityId, boolean sneaking, boolean sprinting, boolean usingItem) {
-        sendGameBatch(b -> writeSetEntityDataFlags(b, entityId, sneaking, sprinting, usingItem));
+        sendGameBatch(b -> McpePackets.setEntityPose(b, entityId, sneaking, sprinting, usingItem));
     }
 
     @Override
     public void showHeldItem(long entityId, int state) {
-        sendGameBatch(b -> writeMobEquipment(b, entityId, state));
-    }
-
-    /**
-     * Encode a MobEquipment (0x1f) body, verbatim from PMMP at protocol 113: entity runtime id
-     * (unsigned varlong), the item Slot, inventorySlot (byte), hotbarSlot (byte), windowId (byte 0).
-     * The slot bytes only matter for the holder's own inventory; a viewer just renders the item.
-     */
-    static void writeMobEquipment(ByteBuf b, long entityRuntimeId, int state) {
-        ByteBufUtils.writeVarInt(b, ID_MOB_EQUIPMENT);
-        ByteBufUtils.writeVarLong(b, entityRuntimeId);
-        McpeCodec.writeSlot(b, state, state == 0 ? 0 : 1);
-        b.writeByte(0);
-        b.writeByte(0);
-        b.writeByte(0);
+        sendGameBatch(b -> McpePackets.mobEquipment(b, entityId, state));
     }
 
     @Override
     public void showArmor(long entityId, int helmet, int chestplate, int leggings, int boots) {
-        sendGameBatch(b -> writeMobArmorEquipment(b, entityId, helmet, chestplate, leggings, boots));
+        sendGameBatch(b -> McpePackets.mobArmorEquipment(b, entityId, helmet, chestplate, leggings, boots));
     }
 
     @Override
     public void spawnItemEntity(long entityId, UUID uuid, double x, double y, double z, int state) {
-        sendGameBatch(b -> writeAddItemEntity(b, entityId, x, y, z, state));
-    }
-
-    /**
-     * Encode an AddItemEntity (0x0f) body, verbatim from PMMP at protocol 113: unique id (signed
-     * varlong) and runtime id (unsigned varlong) — both the entity id here — the item Slot, the
-     * position and a zero speed Vector3f, then metadata. The metadata carries the immobile flag, the
-     * same lever holograms use so a prop can never drift or be nudged.
-     */
-    static void writeAddItemEntity(ByteBuf b, long entityId, double x, double y, double z, int state) {
-        ByteBufUtils.writeVarInt(b, ID_ADD_ITEM_ENTITY);
-        ByteBufUtils.writeSignedVarLong(b, entityId);
-        ByteBufUtils.writeVarLong(b, entityId);
-        McpeCodec.writeSlot(b, state, state == 0 ? 0 : 1);
-        b.writeFloatLE((float) x); b.writeFloatLE((float) y); b.writeFloatLE((float) z);
-        b.writeFloatLE(0f); b.writeFloatLE(0f); b.writeFloatLE(0f); // speed: none, it's a prop
-        ByteBufUtils.writeVarInt(b, 1);                             // one metadata entry
-        writeFlagsEntry(b, BASE_ENTITY_FLAGS | (1L << DATA_FLAG_IMMOBILE_BIT));
+        sendGameBatch(b -> McpePackets.addItemEntity(b, entityId, x, y, z, state));
     }
 
     @Override
     public void spawnFallingBlock(long entityId, UUID uuid, double x, double y, double z, int state) {
-        // A falling block is an ordinary AddEntity of PMMP's FallingSand type; the block it renders
-        // rides in DATA_VARIANT (index 2 at protocol 113) as id | (meta << 8). Immobile, so it hangs.
-        int blockInfo = Blocks.idOf(state) | (Blocks.metaOf(state) << 8);
-        sendGameBatch(b -> writeAddEntity(b, entityId, EntityTypeIds.BEDROCK_FALLING_BLOCK,
-                x, y, z, 0f, 0f,
-                meta -> {
-                    ByteBufUtils.writeVarInt(meta, 2);                  // two metadata entries
-                    writeFlagsEntry(meta, BASE_ENTITY_FLAGS | (1L << DATA_FLAG_IMMOBILE_BIT));
-                    ByteBufUtils.writeVarInt(meta, DATA_VARIANT_INDEX);
-                    ByteBufUtils.writeVarInt(meta, DATA_TYPE_INT);
-                    ByteBufUtils.writeSignedVarInt(meta, blockInfo);
-                }));
+        sendGameBatch(b -> McpePackets.addFallingBlock(b, entityId, x, y, z, state));
     }
 
     @Override
     public void sendOwnArmor(int helmet, int chestplate, int leggings, int boots) {
-        // PMMP's sendArmorContents sends the WEARER a ContainerSetContent for the armor window rather
-        // than the MobArmorEquipment other players get — without it a Bedrock player sees everyone's
-        // armor but their own. Body per protocol 113: windowId, targetEid, slot count, slots, then a
-        // hotbar-link count of 0 (links are only written for the inventory window).
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_CONTENT);
-            ByteBufUtils.writeVarInt(b, WINDOW_ID_ARMOR);
-            ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);
-            ByteBufUtils.writeVarInt(b, 4);
-            for (int state : new int[]{helmet, chestplate, leggings, boots}) {
-                McpeCodec.writeSlot(b, state, state == 0 ? 0 : 1);
-            }
-            ByteBufUtils.writeVarInt(b, 0);
-        });
-    }
-
-    /**
-     * Encode a MobArmorEquipment (0x20) body, verbatim from PMMP at protocol 113: entity runtime id
-     * (unsigned varlong) then exactly four Slots, head-to-feet. One packet dresses the whole avatar.
-     */
-    static void writeMobArmorEquipment(ByteBuf b, long entityRuntimeId,
-                                       int helmet, int chestplate, int leggings, int boots) {
-        ByteBufUtils.writeVarInt(b, ID_MOB_ARMOR_EQUIPMENT);
-        ByteBufUtils.writeVarLong(b, entityRuntimeId);
-        for (int state : new int[]{helmet, chestplate, leggings, boots}) {
-            McpeCodec.writeSlot(b, state, state == 0 ? 0 : 1);
-        }
-    }
-
-    /** Encode an Animate packet body (protocol 113): action (putVarInt), then entity runtime id. */
-    static void writeAnimate(ByteBuf b, int action, long entityRuntimeId) {
-        ByteBufUtils.writeVarInt(b, ID_ANIMATE);
-        ByteBufUtils.writeSignedVarInt(b, action);     // action (putVarInt, signed)
-        ByteBufUtils.writeVarLong(b, entityRuntimeId); // entity runtime id
-        // no trailing float — only actions with bit 0x80 carry one
-    }
-
-    /**
-     * Encode a SetEntityData body carrying the pose: entity runtime id, then a one-entry metadata
-     * dictionary DATA_FLAGS (a long) with the sneaking / sprinting bits set (both together, since
-     * they live in the same long).
-     */
-    static void writeSetEntityDataFlags(ByteBuf b, long entityRuntimeId,
-                                        boolean sneaking, boolean sprinting, boolean usingItem) {
-        // Keep the nametag-visibility flags on every write, or updating the pose would hide the name.
-        long flags = BASE_ENTITY_FLAGS
-                | (sneaking ? (1L << DATA_FLAG_SNEAKING_BIT) : 0L)
-                | (sprinting ? (1L << DATA_FLAG_SPRINTING_BIT) : 0L)
-                | (usingItem ? (1L << DATA_FLAG_ACTION_BIT) : 0L);
-        ByteBufUtils.writeVarInt(b, ID_SET_ENTITY_DATA);
-        ByteBufUtils.writeVarLong(b, entityRuntimeId); // entity runtime id
-        ByteBufUtils.writeVarInt(b, 1);                // metadata entry count
-        ByteBufUtils.writeVarInt(b, DATA_FLAGS_INDEX); // key = DATA_FLAGS (0)
-        ByteBufUtils.writeVarInt(b, DATA_TYPE_LONG);   // type = LONG (7)
-        ByteBufUtils.writeSignedVarLong(b, flags);     // putVarLong (zigzag)
+        // The wearer needs their own armor pushed to the armor window — MobArmorEquipment dresses only
+        // other players' copies of the avatar.
+        sendGameBatch(b -> McpePackets.ownArmor(b, SELF_ENTITY_ID, helmet, chestplate, leggings, boots));
     }
 
     // ===== RakNet session callbacks =====
@@ -1207,16 +851,8 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         // Respawn Y is eye-level (like MovePlayer / 0.14's Respawn), not feet like StartGame — sending
         // the feet Y spawned the player 1.62 blocks embedded in the ground.
         float eyeY = (float) spawn.y() + EYE_HEIGHT;
-        sendGameBatch(b -> writeRespawn(b, (float) spawn.x(), eyeY, (float) spawn.z()));
+        sendGameBatch(b -> McpePackets.respawn(b, (float) spawn.x(), eyeY, (float) spawn.z()));
         setHealth(20); // MAX_HEALTH — refill the bar the death screen emptied
-    }
-
-    /** Encode a Respawn body (protocol 113): the spawn position as three little-endian floats. */
-    static void writeRespawn(ByteBuf b, float x, float y, float z) {
-        ByteBufUtils.writeVarInt(b, ID_RESPAWN);
-        b.writeFloatLE(x);
-        b.writeFloatLE(y);
-        b.writeFloatLE(z);
     }
 
     // Pack a block position into one long so a survival mine can remember its target across packets.
@@ -1336,79 +972,23 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     /** Reply to Login: PlayStatus(success) + an empty ResourcePacksInfo. */
     private void sendLoginResponse() {
         sendGameBatch(
-                b -> {
-                    ByteBufUtils.writeVarInt(b, ID_PLAY_STATUS);
-                    ByteBufUtils.writeIntBE(b, PLAY_STATUS_LOGIN_SUCCESS); // status is a big-endian int32
-                },
-                b -> {
-                    ByteBufUtils.writeVarInt(b, ID_RESOURCE_PACKS_INFO);
-                    b.writeBoolean(false);   // must accept
-                    b.writeShortLE(0);       // behaviour pack count
-                    b.writeShortLE(0);       // resource pack count
-                });
+                b -> McpePackets.playStatus(b, PLAY_STATUS_LOGIN_SUCCESS),
+                McpePackets::resourcePacksInfo);
     }
 
     /** Reply to the resource-pack response with the world's StartGame. */
     private void sendStartGame() {
         Location spawn = world.getSpawnLocation();
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_START_GAME);
-
-            // Player entity ids + gamemode
-            ByteBufUtils.writeSignedVarLong(b, 1L);
-            ByteBufUtils.writeVarLong(b, 1L);
-            ByteBufUtils.writeSignedVarInt(b, joinGameMode().getId()); // join game mode (remembered / config)
-
-            // Position + rotation
-            b.writeFloatLE((float) spawn.x());
-            b.writeFloatLE((float) spawn.y());
-            b.writeFloatLE((float) spawn.z());
-            b.writeFloatLE(0.0f);
-            b.writeFloatLE(0.0f);
-
-            // World generation basics
-            ByteBufUtils.writeSignedVarInt(b, 12345);
-            ByteBufUtils.writeSignedVarInt(b, 0);
-            ByteBufUtils.writeSignedVarInt(b, 1);
-            ByteBufUtils.writeSignedVarInt(b, 1);
-            ByteBufUtils.writeSignedVarInt(b, 1);
-
-            // World spawn block coords
-            ByteBufUtils.writeSignedVarInt(b, spawn.getBlockX());
-            ByteBufUtils.writeSignedVarInt(b, spawn.getBlockY());
-            ByteBufUtils.writeSignedVarInt(b, spawn.getBlockZ());
-
-            b.writeBoolean(true);
-            ByteBufUtils.writeSignedVarInt(b, 0);
-            b.writeBoolean(false);
-            b.writeFloatLE(0.0f);
-            b.writeFloatLE(0.0f);
-
-            b.writeBoolean(true);
-            b.writeBoolean(true);
-            b.writeBoolean(false);
-
-            b.writeBoolean(true);
-            b.writeBoolean(false);
-
-            ByteBufUtils.writeVarInt(b, 0);
-
-            ByteBufUtils.writeString(b, "jedrock_level");
-            ByteBufUtils.writeString(b, "Jedrock PE World");
-            ByteBufUtils.writeString(b, "");
-
-            b.writeBoolean(false);
-            b.writeLongLE(0L);
-        });
+        int mode = joinGameMode().getId();   // the remembered choice this run, else the config default
+        sendGameBatch(b -> McpePackets.startGame(b, SELF_ENTITY_ID, mode,
+                spawn.x(), spawn.y(), spawn.z(),
+                spawn.getBlockX(), spawn.getBlockY(), spawn.getBlockZ()));
         // Only StartGame is sent here; the spawn PlayStatus is sent once, after the chunks.
     }
 
     /** Reply to the chunk-radius request: set the radius, stream the initial window, spawn. */
     private void sendWorld(int radius) {
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_CHUNK_RADIUS_UPDATED);
-            ByteBufUtils.writeSignedVarInt(b, radius);
-        });
+        sendGameBatch(b -> McpePackets.chunkRadiusUpdated(b, radius));
         // Flight is only allowed outside survival (creative / spectator).
         sendAdventureSettings(joinGameMode().allowsFlight());
 
@@ -1421,10 +1001,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         chunkView.recenter(spawn.getBlockX() >> 4, spawn.getBlockZ() >> 4, chunkSink);
 
         // Terrain is in; kick the client out of the load screen
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_PLAY_STATUS);
-            ByteBufUtils.writeIntBE(b, PLAY_STATUS_PLAYER_SPAWN);
-        });
+        sendGameBatch(b -> McpePackets.playStatus(b, PLAY_STATUS_PLAYER_SPAWN));
 
         // Movement-speed attribute — sent *after* PLAYER_SPAWN. A 1.1.5 client only applies attributes to
         // an already-spawned local player (PocketMine syncs them post-spawn); sent before the spawn status
@@ -1448,10 +1025,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
      * which {@link #handleCommandStep} turns back into a {@code "/…"} line for the core.
      */
     private void sendCommandData() {
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_SET_COMMANDS_ENABLED);
-            b.writeBoolean(true);
-        });
+        sendGameBatch(b -> McpePackets.setCommandsEnabled(b, true));
         if (listener == null) {
             return;
         }
@@ -1461,36 +1035,17 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         }
         String json = McpeAvailableCommands.buildJson(commands);
         LOGGER.debug(() -> "[PE] AvailableCommands: " + json);
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_AVAILABLE_COMMANDS);
-            ByteBufUtils.writeString(b, json);
-            ByteBufUtils.writeString(b, ""); // unused second JSON blob
-        });
+        sendGameBatch(b -> McpePackets.availableCommands(b, json));
     }
 
-    /**
-     * Send AdventureSettings — mainly the flight permission. {@code allowFlight} rides the flags field;
-     * the player entity id is an LE long (NOT a varint — a short write drops the whole packet, so flight
-     * would never apply). OP command/permission level is kept so the creative menu and edits work.
-     */
+    /** Grant or revoke flight (and keep the OP permission level the creative menu and edits need). */
     private void sendAdventureSettings(boolean allowFlight) {
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_ADVENTURE_SETTINGS);
-            ByteBufUtils.writeVarInt(b, allowFlight ? ADVENTURE_ALLOW_FLIGHT : 0);
-            ByteBufUtils.writeVarInt(b, 2);           // command permission (OP)
-            ByteBufUtils.writeVarInt(b, 0);           // action permissions
-            ByteBufUtils.writeVarInt(b, 2);           // permission level (OP)
-            ByteBufUtils.writeVarInt(b, 0);           // custom extension flags
-            b.writeLongLE(1L);                        // player entity unique id (LE long)
-        });
+        sendGameBatch(b -> McpePackets.adventureSettings(b, SELF_ENTITY_ID, allowFlight));
     }
 
     @Override
     public void setHealth(int health) {
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_SET_HEALTH);
-            ByteBufUtils.writeSignedVarInt(b, health); // PMMP SetHealth uses a signed (zigzag) varint
-        });
+        sendGameBatch(b -> McpePackets.setHealth(b, health));
     }
 
     /** The mode this client joins in: its remembered choice this run, else the config default. */
@@ -1501,84 +1056,26 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     @Override
     public void setGameMode(GameMode mode) {
         // SetPlayerGameType flips the HUD; AdventureSettings re-grants/revokes flight to match.
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_SET_PLAYER_GAME_TYPE);
-            ByteBufUtils.writeSignedVarInt(b, mode.getId());
-        });
+        sendGameBatch(b -> McpePackets.setPlayerGameType(b, mode.getId()));
         sendAdventureSettings(mode.allowsFlight());
     }
 
     @Override
     public void setInventorySlot(int slot, int state, int count) {
-        // ContainerSetSlot (0x32): a single-slot update, which refreshes the hotbar HUD live (a full
-        // ContainerSetContent updates the data but the client only shows it after the inventory opens).
-        // Layout matches PMMP's ContainerSetSlotPacket exactly: windowId, slot, hotbarSlot (0), item,
-        // selectSlot (0) — PMMP leaves hotbarSlot/selectSlot at their defaults, so we do too.
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_SLOT);
-            b.writeByte(WINDOW_ID_PLAYER);            // window id (byte, not a varint here)
-            ByteBufUtils.writeSignedVarInt(b, slot);  // inventory slot
-            ByteBufUtils.writeSignedVarInt(b, 0);     // hotbarSlot (PMMP default)
-            McpeCodec.writeSlot(b, state, count);
-            b.writeByte(0);                           // selectSlot (PMMP default)
-        });
+        // A single-slot update refreshes the hotbar HUD live; a full ContainerSetContent updates the data
+        // but the client only shows it once the inventory is opened.
+        sendGameBatch(b -> McpePackets.containerSetSlot(b, WINDOW_ID_PLAYER, slot, state, count));
     }
-
-    /** The core inventory's storage slots (0-8 hotbar / 9-35 main) that map 1:1 onto PE window 0. */
-    private static final int PE_PLAYER_SLOTS = 36;
-
-    /**
-     * The slot count PE 1.1.5 expects in the player window: {@code getSize() + getHotbarSize()} = 36 + 9 =
-     * 45. PMMP appends 9 trailing air slots after the 36 storage slots, and the client won't wire up its
-     * hotbar HUD unless the window has exactly this shape.
-     */
-    private static final int PE_PLAYER_WINDOW_SLOTS = 45;
 
     @Override
     public void setInventory(int[] states, int[] counts) {
         sendPlayerInventory(slot -> states[slot], slot -> counts[slot]);
     }
 
-    /**
-     * Send the player's own inventory (window 0) exactly as PMMP does at protocol 113, so the client
-     * renders the hotbar HUD. Two details a plain ContainerSetContent misses — and the reason mined
-     * items showed only with the inventory GUI open:
-     * <ul>
-     *   <li><b>45 slots, not 36.</b> PMMP sends {@code getSize() + getHotbarSize()} — the 36 storage
-     *       slots (core 0-8 hotbar / 9-35 main, 1:1) followed by 9 trailing air slots.</li>
-     *   <li><b>A 9-entry hotbar-link array.</b> Each on-screen hotbar position {@code i} maps to inventory
-     *       slot {@code i}; PMMP writes the link as {@code index + getHotbarSize()} (= {@code i + 9}).
-     *       Without these links the client fills storage but leaves the hotbar empty.</li>
-     * </ul>
-     * The core's armor / off-hand slots (36-40) live in separate PE windows (not modelled here yet).
-     */
+    /** Send the player's own inventory (window 0) — see {@link McpePackets#playerInventory}. */
     private void sendPlayerInventory(java.util.function.IntUnaryOperator state,
                                      java.util.function.IntUnaryOperator count) {
-        sendGameBatch(b -> writePlayerInventory(b, state, count));
-    }
-
-    /**
-     * Encode the ContainerSetContent body for the player window (0), PMMP-exact so the client wires up its
-     * hotbar HUD: window id, targetEid, 45 slots (36 storage then 9 air), then a 9-entry hotbar-link array
-     * ({@code i + 9}). See {@link #sendPlayerInventory} for why the count and links matter.
-     */
-    static void writePlayerInventory(ByteBuf b, java.util.function.IntUnaryOperator state,
-                                     java.util.function.IntUnaryOperator count) {
-        ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_CONTENT);
-        ByteBufUtils.writeVarInt(b, WINDOW_ID_PLAYER);
-        ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);
-        ByteBufUtils.writeVarInt(b, PE_PLAYER_WINDOW_SLOTS);
-        for (int slot = 0; slot < PE_PLAYER_WINDOW_SLOTS; slot++) {
-            if (slot < PE_PLAYER_SLOTS) {
-                McpeCodec.writeSlot(b, state.applyAsInt(slot), count.applyAsInt(slot));
-            } else {
-                McpeCodec.writeSlot(b, Blocks.AIR, 0); // 9 trailing hotbar-area slots are air
-            }
-        }
-        ByteBufUtils.writeVarInt(b, 9);                       // hotbar-link count
-        for (int i = 0; i < 9; i++) {
-            ByteBufUtils.writeSignedVarInt(b, i + 9);         // hotbar pos i -> slot i (index + hotbarSize)
-        }
+        sendGameBatch(b -> McpePackets.playerInventory(b, SELF_ENTITY_ID, state, count));
     }
 
     @Override
@@ -1597,19 +1094,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
 
     /** Send the standard movement-speed attribute (0.1) to stop the PE client's runaway acceleration. */
     private void sendAttributes() {
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_UPDATE_ATTRIBUTES);
-            ByteBufUtils.writeVarLong(b, 1L);  // player runtime id
-            ByteBufUtils.writeVarInt(b, 1);    // attribute count
-
-            b.writeFloatLE(0.0f);              // min
-            b.writeFloatLE(3.4028235E38f);     // max
-            b.writeFloatLE(0.1f);              // current (vanilla walk speed)
-            b.writeFloatLE(0.1f);              // default
-            ByteBufUtils.writeString(b, "minecraft:movement");
-
-            ByteBufUtils.writeVarInt(b, 0);    // modifier count
-        });
+        sendGameBatch(b -> McpePackets.movementSpeedAttribute(b, SELF_ENTITY_ID));
     }
 
     /** The 1.1.5 creative menu — variant-rich blocks plus items (tools / armor / food / materials). */
@@ -1639,21 +1124,11 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         sendContainerContent(WINDOW_ID_CREATIVE, CREATIVE.length, slot -> CREATIVE[slot], 1);
     }
 
-    /**
-     * Send a ContainerSetContent (0x34) for protocol 113: windowId, targetEid, slot count, the slots
-     * themselves, then a hotbar-link count (0 — we don't remap the hotbar). Verified against PMMP.
-     */
-    private void sendContainerContent(int windowId, int slotCount, java.util.function.IntUnaryOperator slotState, int count) {
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_CONTENT);
-            ByteBufUtils.writeVarInt(b, windowId);                 // window id (unsigned varint)
-            ByteBufUtils.writeSignedVarLong(b, SELF_ENTITY_ID);    // targetEid (zigzag varlong)
-            ByteBufUtils.writeVarInt(b, slotCount);                // slot count
-            for (int slot = 0; slot < slotCount; slot++) {
-                McpeCodec.writeSlot(b, slotState.applyAsInt(slot), count);
-            }
-            ByteBufUtils.writeVarInt(b, 0);                        // hotbar-link count (none)
-        });
+    /** Fill any window with a run of identical-count slots (the creative palette is the only user). */
+    private void sendContainerContent(int windowId, int slotCount,
+                                      java.util.function.IntUnaryOperator slotState, int count) {
+        sendGameBatch(b -> McpePackets.containerSetContent(b, windowId, SELF_ENTITY_ID,
+                slotCount, slotState, count));
     }
 
     /**
@@ -1663,13 +1138,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     private void sendChunk(int chunkX, int chunkZ) {
         byte[] chunkData = McpeChunkSerializer.serialize(world, chunkX, chunkZ);
         LOGGER.debug(() -> "[PE] chunk (" + chunkX + "," + chunkZ + ") = " + chunkData.length + " bytes");
-        sendGameBatch(b -> {
-            ByteBufUtils.writeVarInt(b, ID_FULL_CHUNK_DATA);
-            ByteBufUtils.writeSignedVarInt(b, chunkX);
-            ByteBufUtils.writeSignedVarInt(b, chunkZ);
-            ByteBufUtils.writeVarInt(b, chunkData.length);
-            b.writeBytes(chunkData);
-        });
+        sendGameBatch(b -> McpePackets.fullChunkData(b, chunkX, chunkZ, chunkData));
     }
 
     /** Send a single MCPE packet as its own 0xFE zlib batch. */
