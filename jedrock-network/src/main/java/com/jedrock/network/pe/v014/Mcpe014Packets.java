@@ -583,7 +583,8 @@ public final class Mcpe014Packets {
         b.writeShort(id);
         b.writeByte(count);
         b.writeShort(state & 0x0F);                  // meta / damage
-        Mcpe014ItemNbt.writeSlotNbt(b, display);     // length-prefixed; 0 for a plain item
+        // Shared with 1.1.5: an item's NBT is little-endian on BOTH eras (see McpeItemNbt).
+        com.jedrock.network.pe.McpeItemNbt.writeSlotNbt(b, display);
     }
 
     /** Single-block change. {@code id}/{@code meta} are the split canonical state. */

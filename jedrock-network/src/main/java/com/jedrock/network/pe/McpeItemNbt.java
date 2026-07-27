@@ -1,16 +1,14 @@
 package com.jedrock.network.pe;
 
 import com.jedrock.api.item.ItemDisplay;
-import com.jedrock.utils.ByteBufUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 
 import java.nio.charset.StandardCharsets;
 
 /**
- * The item-name tag for protocol 113, in <b>network NBT</b> — the same dialect the chest tile already uses
- * ({@link McpeCodec#writeChestTile}): unsigned-varint string lengths and zigzag-varint ints, whatever the
- * "little-endian" label on PocketMine's stream suggests. Its {@code write(true)} forces exactly this.
+ * The item-name tag for <b>both</b> Bedrock eras — 1.1.5 and 0.14 alike — in <b>little-endian NBT</b>:
+ * LE-short string lengths, LE ints, length-prefixed by the Slot's own LE short.
  *
  * <pre>
  *   TAG_Compound("")
@@ -19,12 +17,21 @@ import java.nio.charset.StandardCharsets;
  *       TAG_List("Lore") of TAG_String
  * </pre>
  *
- * <p>The one structural difference from the Java side is that a Bedrock Slot carries its NBT
- * <b>length-prefixed</b> (a little-endian short), so the compound has to be built before it can be
- * announced. It is written into a scratch buffer and copied — a cost paid only by a stack that actually
- * has a name, since an ordinary one still writes the plain {@code 0} length it always did.
+ * <h2>Not the dialect the chunk tiles use — the distinction that cost a client test</h2>
+ *
+ * <p>Protocol 113 speaks two NBT dialects and the choice is per <em>call site</em>, not per protocol.
+ * A chunk's block-entity tail goes through PocketMine's {@code write(TRUE)}, which forces <b>network</b>
+ * NBT (unsigned-varint string lengths, zigzag ints) — that is what {@link McpeCodec#writeChestTile} writes.
+ * An <b>item's</b> NBT does not: {@code Item::writeCompoundTag} builds it with
+ * {@code new NBT(NBT::LITTLE_ENDIAN)} and plain {@code write()}, so it stays little-endian.
+ *
+ * <p>Written the network way first, the retail 1.1.5 client did not complain — it simply ignored the
+ * compound and went on showing the vanilla item name, which is the quietest possible failure and the
+ * reason this comment exists.
+ *
+ * <p>Since 0.14 is little-endian too, one encoder now serves both eras: the same bytes, for once.
  */
-final class McpeItemNbt {
+public final class McpeItemNbt {
 
     private static final int TAG_END = 0x00;
     private static final int TAG_STRING = 0x08;
@@ -34,11 +41,10 @@ final class McpeItemNbt {
     private McpeItemNbt() {}
 
     /**
-     * Write the Slot's NBT field: a little-endian short length, then that many bytes of compound. An
-     * absent or empty display writes {@code 0} — byte-identical to what this server sent before custom
-     * items existed.
+     * Write the Slot's NBT field: an LE-short length, then that many bytes of compound. An absent or empty
+     * display writes {@code 0} — byte-identical to what this server sent before custom items existed.
      */
-    static void writeSlotNbt(ByteBuf b, ItemDisplay display) {
+    public static void writeSlotNbt(ByteBuf b, ItemDisplay display) {
         if (display == null || display.isEmpty()) {
             b.writeShortLE(0);
             return;
@@ -68,8 +74,8 @@ final class McpeItemNbt {
         if (lore.length > 0) {
             b.writeByte(TAG_LIST);
             writeString(b, "Lore");
-            b.writeByte(TAG_STRING);                        // element type
-            ByteBufUtils.writeSignedVarInt(b, lore.length);  // network NBT: a zigzag varint length
+            b.writeByte(TAG_STRING);   // the list's element type
+            b.writeIntLE(lore.length); // little-endian NBT: an LE int length
             for (String line : lore) {
                 writeString(b, line == null ? "" : line);
             }
@@ -81,7 +87,7 @@ final class McpeItemNbt {
 
     private static void writeString(ByteBuf b, String value) {
         byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-        ByteBufUtils.writeVarInt(b, bytes.length); // network NBT: unsigned-varint length
+        b.writeShortLE(bytes.length);    // little-endian NBT: an LE-short length
         b.writeBytes(bytes);
     }
 }

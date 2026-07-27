@@ -13,8 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The protocol-113 item name on the wire: a <b>network NBT</b> compound (unsigned-varint string lengths,
- * zigzag ints — the same dialect the chest tile uses) inside the Slot's little-endian-short NBT length.
+ * The Bedrock item name on the wire — <b>little-endian</b> NBT behind the Slot's LE-short length, on both
+ * eras. Written the network way (varint strings, zigzag ints) first, which is the dialect the chunk tiles
+ * use; the retail 1.1.5 client answered by silently ignoring the compound and showing the vanilla name, so
+ * these assertions are deliberately about the exact encoding rather than "some NBT is present".
  *
  * <p>The plain case matters as much as the named one: an ordinary item must still write the bare {@code 0}
  * length it always did, so nothing about an ordinary inventory changed on the wire.
@@ -23,8 +25,9 @@ class McpeItemNbtEncodingTest {
 
     private static final int SWORD = 276 << 4;
 
-    private static String readNetworkString(ByteBuf b) {
-        int length = ByteBufUtils.readVarInt(b);
+    /** Little-endian NBT string: an LE-short length, then the bytes. */
+    private static String readLeString(ByteBuf b) {
+        int length = b.readShortLE() & 0xFFFF;
         byte[] bytes = new byte[length];
         b.readBytes(bytes);
         return new String(bytes, StandardCharsets.UTF_8);
@@ -45,7 +48,7 @@ class McpeItemNbtEncodingTest {
     }
 
     @Test
-    void aNamedItemCarriesALengthPrefixedDisplayCompound() {
+    void aNamedItemCarriesALengthPrefixedLittleEndianCompound() {
         ByteBuf b = Unpooled.buffer();
 
         McpeCodec.writeSlot(b, SWORD, 1, ItemDisplay.of("§bFrostblade"));
@@ -57,12 +60,12 @@ class McpeItemNbtEncodingTest {
 
         ByteBuf nbt = b.readSlice(nbtLength);
         assertEquals(0x0A, nbt.readByte(), "TAG_Compound (root)");
-        assertEquals("", readNetworkString(nbt), "unnamed root");
+        assertEquals("", readLeString(nbt), "unnamed root");
         assertEquals(0x0A, nbt.readByte(), "TAG_Compound");
-        assertEquals("display", readNetworkString(nbt));
+        assertEquals("display", readLeString(nbt));
         assertEquals(0x08, nbt.readByte(), "TAG_String");
-        assertEquals("Name", readNetworkString(nbt));
-        assertEquals("§bFrostblade", readNetworkString(nbt));
+        assertEquals("Name", readLeString(nbt));
+        assertEquals("§bFrostblade", readLeString(nbt));
         assertEquals(0x00, nbt.readByte());
         assertEquals(0x00, nbt.readByte());
         assertEquals(0, nbt.readableBytes(), "the announced length matched the compound exactly");
@@ -72,24 +75,42 @@ class McpeItemNbtEncodingTest {
     }
 
     @Test
-    void loreIsAStringListWithAZigzagVarintLength() {
+    void loreIsAStringListWithALittleEndianIntLength() {
         ByteBuf b = Unpooled.buffer();
 
-        McpeCodec.writeSlot(b, SWORD, 1, new ItemDisplay("§bBlade", new String[]{"§7one", "§7two"}));
+        McpeCodec.writeSlot(b, SWORD, 1,
+                new ItemDisplay("§bBlade", new String[]{"§7one", "§7two"}));
 
         ByteBufUtils.readSignedVarInt(b);
         ByteBufUtils.readSignedVarInt(b);
         ByteBuf nbt = b.readSlice(b.readShortLE() & 0xFFFF);
-        nbt.readByte(); readNetworkString(nbt);           // root
-        nbt.readByte(); readNetworkString(nbt);           // display
-        nbt.readByte(); readNetworkString(nbt); readNetworkString(nbt); // Name
+        nbt.readByte(); readLeString(nbt);                     // root
+        nbt.readByte(); readLeString(nbt);                     // display
+        nbt.readByte(); readLeString(nbt); readLeString(nbt);  // Name
 
         assertEquals(0x09, nbt.readByte(), "TAG_List");
-        assertEquals("Lore", readNetworkString(nbt));
+        assertEquals("Lore", readLeString(nbt));
         assertEquals(0x08, nbt.readByte(), "of TAG_String");
-        assertEquals(2, ByteBufUtils.readSignedVarInt(nbt), "network NBT: a zigzag varint length");
-        assertEquals("§7one", readNetworkString(nbt));
-        assertEquals("§7two", readNetworkString(nbt));
+        assertEquals(2, nbt.readIntLE(), "little-endian NBT: an LE int length, not a zigzag varint");
+        assertEquals("§7one", readLeString(nbt));
+        assertEquals("§7two", readLeString(nbt));
+    }
+
+    @Test
+    void theZeroFourteenSlotWritesTheSameCompound() {
+        ByteBuf b = Unpooled.buffer();
+
+        com.jedrock.network.pe.v014.Mcpe014Packets.writeSlot(b, SWORD, 1,
+                ItemDisplay.of("§bFrostblade"));
+
+        assertEquals(276, b.readShort(), "id (big-endian, as 0.14 slots are)");
+        assertEquals(1, b.readByte(), "count");
+        assertEquals(0, b.readShort(), "meta");
+        ByteBuf nbt = b.readSlice(b.readShortLE() & 0xFFFF);
+        assertEquals(0x0A, nbt.readByte());
+        assertEquals("", readLeString(nbt));
+        assertEquals(0x0A, nbt.readByte());
+        assertEquals("display", readLeString(nbt), "one encoder, both eras");
     }
 
     @Test

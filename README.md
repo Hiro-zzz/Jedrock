@@ -309,12 +309,13 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   registered only while some item actually has a behaviour, so a purely cosmetic item — or none at all —
   costs nothing. Try `/forge` in `plugins/example.js`.
   **The name and lore reach the client on all four protocols**, as item NBT in the Slot's own NBT field —
-  three dialects, because these eras genuinely disagree: Java is big-endian named NBT written inline (plain
-  §-coded strings, since text components in `Name` arrived in 1.13), **1.1.5** is length-prefixed *network*
-  NBT (varint string lengths, zigzag ints — the same dialect the chest tile uses), and **0.14** is
-  length-prefixed *little-endian* NBT. An ordinary item still writes the exact bytes it always did, so
-  nothing changed for a server that defines no items. ⚠️ Pinned by byte-level tests but **not yet seen on a
-  real client** — the two legacy Bedrock clients are the ones to try it on.
+  two dialects: **Java** is big-endian named NBT written inline (plain §-coded strings, since text
+  components in `Name` arrived in 1.13), and **both Bedrock eras** are length-prefixed *little-endian* NBT.
+  Note that protocol 113 speaks two dialects and the choice is per *call site* — a chunk's block-entity tail
+  is *network* NBT (varint lengths, zigzag ints), an item's is not. Getting that backwards cost one client
+  test: the 1.1.5 client neither crashed nor complained, it just kept showing the vanilla name. An ordinary
+  item still writes the exact bytes it always did, so nothing changed for a server that defines no items.
+  **Confirmed on a real 1.1.5 client**; Java is still unverified.
 
 - ✅ **Permissions from a script.** A script could always *read* rights (`player.hasPermission`); now it can
   set them. The **`permissions`** global builds groups (`createGroup(n).inherit('default').add(node)

@@ -12,15 +12,22 @@ unstable — anything may change between entries.
   custom items. Until now no item NBT was written anywhere: every serializer explicitly sent "no NBT" (a
   bare `TAG_End` on Java, a zero length on both Bedrock eras), so a custom item was correct server-side and
   nameless on screen.
-  It is **three encoders, not one with a flag**, because these eras genuinely disagree about NBT:
+  It is **two encoders**, and finding out which two cost a trip to a real client:
   **Java 1.8 / 1.12.2** — big-endian named NBT written *inline* in the Slot's trailing field, with
   unsigned-short string lengths and a big-endian int list length. `Name` is a plain §-coded string, since
   text components there arrived in 1.13 — so one encoder serves both target versions and nothing has to
   know which it is writing for.
-  **1.1.5** — *network* NBT (unsigned-varint string lengths, zigzag ints), the same dialect the chest tile
-  already used, carried behind the Slot's little-endian-short NBT length.
-  **0.14** — *little-endian* NBT (LE-short string lengths, LE int list lengths), also length-prefixed. This
-  era predates the varint network NBT entirely.
+  **Both Bedrock eras** — *little-endian* NBT (LE-short string lengths, LE int list lengths) behind the
+  Slot's own LE-short length. The same bytes on 1.1.5 and 0.14, for once, so one encoder serves both.
+  **The dialect mistake, recorded because the failure was silent.** Protocol 113 speaks *two* NBT dialects
+  and the choice is per **call site**, not per protocol. A chunk's block-entity tail goes through
+  PocketMine's `NBT->write(TRUE)`, which forces *network* NBT (unsigned-varint string lengths, zigzag
+  ints) — that is what the chest tile writes, and what this project's protocol notes described, so it was
+  the obvious thing to reach for. An item's NBT does **not**: `Item::writeCompoundTag` builds it with
+  `new NBT(NBT::LITTLE_ENDIAN)` and plain `write()`. Written the network way, the retail 1.1.5 client
+  neither crashed nor logged anything — it **silently ignored the compound** and kept showing the vanilla
+  item name, which is the quietest failure available. If a renamed item shows its vanilla name, suspect the
+  dialect before the plumbing; the encoder now carries that paragraph as a comment.
   Both Bedrock forms are length-prefixed, so the compound is built into a scratch buffer and measured
   before it is announced — a cost paid only by a stack that actually has a name.
   Threaded through as a new `ItemDisplay` (name + legacy-rendered lore, `null` = ordinary) on
@@ -29,11 +36,13 @@ unstable — anything may change between entries.
   vanilla one — the honest degradation, since the item is still the right item. `CorePlayer` resolves a
   slot's key through the registry only when there *is* a key, and hands down a `null` array when nothing in
   the inventory is custom: **an ordinary inventory's bytes are unchanged**.
-  ⚠️ Pinned by byte-level tests on all three dialects (13 new) but **not yet seen on a real client** —
-  the two legacy Bedrock clients are the ones to try it on, and the ones most likely to object. Tested: the
-  plain case writing exactly the bytes it always did on each protocol, the display compound's full byte
-  sequence, lore as a string list with each era's own length encoding, an empty display treated as
-  ordinary, lore without a name, and air ignoring a display entirely.
+  Pinned by byte-level tests on both dialects (10 new), written to assert the **exact** encoding rather
+  than "some NBT is present" — the first version passed its tests and still failed on the client, because
+  the tests agreed with the encoder about the wrong dialect. Tested: the plain case writing exactly the
+  bytes it always did on each protocol, the display compound's full byte sequence, lore as a string list
+  with each dialect's own length encoding, 0.14 and 1.1.5 producing the same compound, an empty display
+  treated as ordinary, lore without a name, and air ignoring a display entirely.
+  **Confirmed on a real 1.1.5 client**; Java is still unverified.
 
 - **Custom items — a name, lore and programmable behaviour on a vanilla item.** The honest version of the
   feature, and the only one this server can offer: there is **no resource pack** (it would break the promise
