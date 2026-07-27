@@ -428,16 +428,32 @@ public final class ContainerService {
                     world.markDirty(); // a world-chest edit persists; a menu's is transient
                 }
             }
-        } else if (windowId == 0 && player.getGameMode() == GameMode.CREATIVE) {
-            // The player's own inventory (PE window 0: 0-8 hotbar, 9-35 main). Only trust the client's
-            // report in CREATIVE, where the inventory is client-authoritative and we merely mirror it so a
-            // chest deposit knows the held item. In SURVIVAL the server owns the inventory (mining, placing
-            // and chest transfers all flow through it), so a client echo must be IGNORED — otherwise the
-            // 1.1.5 client's ContainerSetSlot echo right after a chest deposit re-adds the just-moved stack,
-            // duplicating it (the item ends up in the chest AND back in the inventory).
+        } else if (windowId == 0 && slot < CorePlayer.STORAGE_SLOTS) {
+            // The player's own inventory (PE window 0: 0-8 hotbar, 9-35 main). Bedrock is
+            // client-authoritative here in BOTH modes: the client moves the item in its own GUI and this
+            // report is the only notice the server gets. In CREATIVE it is a pure mirror (kept so a chest
+            // deposit knows the held item). In SURVIVAL it has to be applied too — ignoring it wholesale
+            // (which is what closed the chest-deposit dupe) meant the next full resync, i.e. closing the
+            // inventory, put every moved item back where the server still had it, so a survival player
+            // could not rearrange their inventory at all.
+            //
+            // What must still be refused is the *echo*: the same client reports a slot the server has just
+            // changed, carrying the value it held before. Content can't tell an echo from a real move, so
+            // timing does — a freshly pushed slot is guarded and the server's value is re-asserted instead
+            // (the client drew the stale one, so it needs correcting either way). See CorePlayer.
             Container inv = player.getInventory();
-            if (slot < 36) {
-                inv.set(slot, state, count);
+            if (player.getGameMode() != GameMode.SURVIVAL) {
+                inv.set(slot, state, count); // creative: mirror it, the client is the owner
+                return;
+            }
+            if (player.isSlotEchoGuarded(slot)) {
+                player.syncSlot(slot);
+                return;
+            }
+            int before = inv.stateAt(slot);
+            inv.set(slot, state, count);
+            if (slot == player.getHeldItemSlot() && inv.stateAt(slot) != before) {
+                broadcast.heldItem(player); // the hand itself changed — redraw it on every other client
             }
         }
     }

@@ -6,6 +6,31 @@ unstable — anything may change between entries.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A survival player couldn't rearrange their own inventory on Bedrock.** Moving the held stack into
+  storage (or back out of it) held only until the inventory was closed, at which point the item jumped
+  back to where it started. Creative was unaffected. This was the known trade-off of the chest-deposit
+  dupe fix coming due: Bedrock owns window 0 — the client moves the item in its own GUI and the inbound
+  `ContainerSetSlot` is the **only** notice the server ever gets — and that report was being dropped
+  outright in survival, so the server's copy never changed and the resync that closing the window
+  triggers put the item back. Nothing was lost; the server simply never agreed the move had happened.
+  Applying the report again on its own would re-open the dupe, because the same client also **echoes** a
+  slot the *server* just changed, carrying the value it held **before** — right after a chest deposit that
+  echo re-added the stack the deposit had consumed, so the item ended up in the chest and in the hand at
+  once. The two reports are identical in content: an echo is a stale move, not a malformed one. What
+  separates them is **time** — an echo answers a push that has only just gone out. So every
+  server-authored push (`CorePlayer.syncSlot` / `syncInventory`) now arms a short per-slot guard
+  (`SlotEchoGuard`, 750 ms, `-Djedrock.pe.slotEchoGuardMs=<ms>`, `0` = off), and a report landing inside
+  it is answered with a correction rather than trusted; past the window the client is believed and its
+  move sticks. Same shape, and the same reason, as the `PeEditDebounce` on the block path: this client
+  reports one action more than once. Creative is untouched — it owns its inventory outright, so its
+  report stays a plain mirror and is never second-guessed. The fix is core-side, so **0.14 gets it too**.
+  Tested: a move out of the hand and back into it both survive the close, a stale echo is refused and
+  corrected, a survival chest deposit is not undone by the echo that follows it, creative is still a
+  mirror, armor (its own PE window) is not reachable through window 0, and the timing rule itself —
+  expiry, per-slot independence, a full resync, and the off switch — against an explicit clock.
+
 ### Added
 
 - **Scenes survive the restart — decoration stops being a demo.** Everything a script spawned died with

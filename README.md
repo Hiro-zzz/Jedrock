@@ -233,9 +233,12 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
 - ✅ **Chests on Bedrock 1.1.5 — click-transfer.** The retail 1.1.5 client crashes on a real chest window,
   so chests there use a **click-transfer** instead: a right-click withdraws the first stack, a sneaking
   right-click deposits the held hotbar slot. Works in survival and creative (creative deposits its held
-  item without consuming and never mints items on withdrawal). The server stays authoritative for the
-  survival inventory — the client's own inventory echo is ignored — so a deposit→withdraw cycle can't
-  duplicate items.
+  item without consuming and never mints items on withdrawal). Bedrock owns its own inventory window, so a
+  survival player's moves there are applied as the client reports them — except for the **echo** that
+  client sends of a slot the *server* just changed, which is what would duplicate a deposit. The two are
+  told apart by timing: a freshly pushed slot is guarded for a moment and the server's value re-asserted
+  (`SlotEchoGuard`), so a deposit→withdraw cycle can't duplicate items and a rearranged inventory still
+  sticks.
 - ✅ **Puppets and holograms — visuals the server drives, cross-edition.** A **puppet** is a mob / NPC the
   server puppeteers and never simulates: spawn it, move it, turn it to face a player (`lookAt`), give it a
   floating **name tag**, set it alight / invisible / crouching, make it swing or flinch — and hitting one
