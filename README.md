@@ -196,10 +196,14 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   without one a transient **storage chest**. **Java** opens a real chest window; **neither Bedrock era does**
   (1.1.5 crashes on one, 0.14 doesn't bring it up), so there a button menu degrades to a text **list** —
   labelled buttons (`menu.button(slot, item, label)`) become options the player chooses with a built-in
-  **`/pick <label>`**, which fires the same handler. That makes button menus work on all four editions;
-  a Bedrock *storage* menu is the remaining gap (a list can't move items — on 0.14 it still tries the
-  window, on 1.1.5 it's refused). Packet ids are from minecraft-data / PocketMine; on-client behaviour
-  isn't verified here. Try `/sb on`, `/boss 50 red` and `/menu` in `plugins/example.js`.
+  **`/pick <label>`**, which fires the same handler. A **storage** menu takes the same route with its
+  *contents* as the options: `/pick <n>` takes the stack in slot n, `/pick put` puts the held one in,
+  `/pick close` is done, and the list redraws after every transfer so it stays up the way a window would.
+  So **both menu shapes now work on all four editions** — the transfer moved into the list rather than
+  waiting for a window these clients won't raise, the same trade world chests already make on 1.1.5. The
+  one case still refused is a button menu whose buttons carry no labels: a list has nothing to offer and,
+  unlike storage, there's no content to fall back on. Try `/sb on`, `/boss 50 red` and `/menu` in
+  `plugins/example.js`.
 - ✅ **Player-facing UI — titles, subtitles and the action bar.** `player.sendTitle(title, subtitle[, fadeIn,
   stay, fadeOut])`, `sendActionBar(text)` and `clearTitle()` show a large centred title or a line above the
   hotbar, authored in the unified markup and rendered per edition: the JE Title packet (id 0x45 on 1.8, 0x48
@@ -617,9 +621,12 @@ simulation stays out (see non-goals).
   parses them and completes them (Java clients), scripts included. And the **illusion toolkit** grew a
   **sidebar** (a scoreboard on Java, the displaced item-name line on both Bedrock eras), a **boss bar**
   (Java 1.8 + 1.12.2 and Bedrock 1.1.5), and **virtual chests** for scripts (the `menus` global — a window
-  on Java, a `/pick` list on Bedrock). What it still wants: a **storage** menu on Bedrock (a list can only
-  offer buttons), and a real-client pass on the unverified PE wire — **forms** stay out, since the legacy
-  PE clients predate them.
+  on Java, a `/pick` list on Bedrock). **Storage menus reached Bedrock too** — the last gap in that
+  toolkit: a list could only ever *signal*, so the transfer moved into it (`/pick <n>` takes, `/pick put`
+  puts, and it redraws after each one), rather than waiting for a window neither legacy client will raise.
+  What it still wants: a real-client pass on the unverified PE wire, and item **names** — a storage list
+  addresses stacks by slot number because a block is an id by design, which is honest but not friendly.
+  **Forms** stay out, since the legacy PE clients predate them.
 - **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
   **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
   cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry

@@ -4,6 +4,7 @@ import com.jedrock.api.event.EventBus;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
+import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.Dimension;
 import com.jedrock.core.player.CorePlayer;
 import com.jedrock.core.player.PlayerBroadcast;
@@ -20,7 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Virtual menus at the core level: opening one, the read-only button behaviour (a click is a signal, no
  * item moves), the storage behaviour (moves apply but aren't persisted), the generalized non-27 window
- * slot math, and the Bedrock refusal.
+ * slot math, and what each Bedrock era gets instead of a window (a list, or a refusal when even a list
+ * has nothing to offer). The storage list's own transfers live in {@link BedrockStorageListTest}.
  */
 class ContainerMenuTest {
 
@@ -59,14 +61,16 @@ class ContainerMenuTest {
     }
 
     @Test
-    void aRetail115PlayerIsRefused() {
+    void aRetail115StorageMenuBecomesATransferList() {
         Conn conn = new Conn(ProtocolVersion.PE_1_1_5);
         CorePlayer player = join(conn);
 
         boolean opened = containers.openMenu(player, "Shop", new Container(27), null, null);
 
-        assertFalse(opened, "the 1.1.5 client crashes on a chest window");
-        assertFalse(player.hasContainerOpen());
+        assertTrue(opened, "storage has contents to list even when a window is impossible");
+        assertFalse(player.hasContainerOpen(), "the 1.1.5 client crashes on a chest window — no window");
+        assertEquals(java.util.List.of("put", "close"), player.getPendingMenu().labels(),
+                "an empty container still offers the verb that fills it");
     }
 
     @Test
@@ -130,7 +134,7 @@ class ContainerMenuTest {
     }
 
     @Test
-    void a014PlayerCanOpenAMenu() {
+    void a014StorageMenuBecomesATransferListToo() {
         Conn conn = new Conn(ProtocolVersion.PE_0_14);
         CorePlayer player = join(conn);
         Container menu = new Container(27);
@@ -138,10 +142,11 @@ class ContainerMenuTest {
 
         boolean opened = containers.openMenu(player, "Shop", menu, null, null);
 
-        assertTrue(opened, "0.14 opens a real chest window");
-        assertTrue(player.hasContainerOpen());
-        assertEquals(27, conn.lastWindowItems.length, "PE window is just the chest slots");
-        assertEquals(DIAMOND, conn.lastWindowItems[0]);
+        assertTrue(opened);
+        assertFalse(player.hasContainerOpen(),
+                "a menu window doesn't come up on a real 0.14 client either — the list is the mechanism");
+        assertEquals(java.util.List.of("1", "put", "close"), player.getPendingMenu().labels(),
+                "the occupied slot is listed by its 1-based number");
     }
 
     @Test
@@ -166,38 +171,34 @@ class ContainerMenuTest {
     }
 
     @Test
-    void a014ButtonMenuClickRoutesThroughContainerSetSlotAndReverts() {
+    void aButtonMenuWithNoLabelsIsRefusedOn014Too() {
         Conn conn = new Conn(ProtocolVersion.PE_0_14);
         CorePlayer player = join(conn);
         Container menu = new Container(27);
-        menu.set(3, DIAMOND, 1);
-        int[] clicked = {-1, -1};
-        containers.openMenu(player, "Menu", menu, null, (p, slot, state) -> { clicked[0] = slot; clicked[1] = state; });
-        int windowId = player.getOpenWindowId();
+        menu.set(3, DIAMOND, 1); // an item, but no label — and a button menu has no contents to fall back on
 
-        // The client (authoritative) reports it emptied the button slot; the menu fires the click and
-        // re-sends the window so the button is restored.
-        containers.onContainerSetSlot(conn, windowId, 3, 0, 0);
+        boolean opened = containers.openMenu(player, "Menu", menu, null, (p, slot, state) -> { });
 
-        assertEquals(3, clicked[0], "the handler saw the tapped slot");
-        assertEquals(DIAMOND, clicked[1], "and the button item");
-        assertEquals(DIAMOND, menu.stateAt(3), "the button is untouched (the report was rejected)");
-        assertEquals(DIAMOND, conn.lastWindowItems[3], "the window was re-sent to revert the client");
+        assertFalse(opened, "a list can't offer an unlabelled button, and 0.14 raises no menu window");
+        assertFalse(player.hasContainerOpen());
     }
 
     @Test
-    void a014StorageMenuAppliesTheClientsMoveButDoesNotPersist() {
+    void a014WorldChestStillTakesTheClientsMoveThroughItsWindow() {
         Conn conn = new Conn(ProtocolVersion.PE_0_14);
         CorePlayer player = join(conn);
-        Container menu = new Container(27);
-        containers.openMenu(player, "Bag", menu, null, null); // a fresh, unbaked world starts clean
+        // A real chest block: unlike a blockless menu, 0.14 does raise a window for one, so the
+        // client-authoritative report path stays live for world chests.
+        world.setBlockId(4, 70, 4, Blocks.CHEST << 4);
+        assertTrue(containers.onUseBlock(conn, 4, 70, 4));
         int windowId = player.getOpenWindowId();
 
-        containers.onContainerSetSlot(conn, windowId, 5, DIAMOND, 2); // the client says it put items in slot 5
+        containers.onContainerSetSlot(conn, windowId, 5, DIAMOND, 2); // the client says it filled slot 5
 
-        assertEquals(DIAMOND, menu.stateAt(5), "the client-authoritative move was applied");
-        assertEquals(2, menu.countAt(5));
-        assertFalse(world.isDirty(), "a menu's edits are transient");
+        Container chest = world.getChestContainer(4, 70, 4);
+        assertEquals(DIAMOND, chest.stateAt(5), "the client-authoritative move was applied");
+        assertEquals(2, chest.countAt(5));
+        assertTrue(world.isDirty(), "a world chest's edits persist, unlike a menu's");
     }
 
     @Test

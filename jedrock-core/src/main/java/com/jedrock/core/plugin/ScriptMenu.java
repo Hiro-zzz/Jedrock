@@ -22,11 +22,21 @@ import org.mozilla.javascript.Function;
  * }</pre>
  *
  * <p><b>Java</b> opens a real chest window. On <b>Bedrock</b> a window isn't available — 1.1.5 crashes on
- * one, and 0.14 doesn't bring it up — so a <em>button</em> menu there is shown as a text <b>list</b>
- * instead: give each button a {@link #button(int, int, String) label} and the player picks it with
- * {@code /pick <label>}, firing the same handler. A menu with no labels has nothing to list, so
- * {@link #open} returns {@code false} on 1.1.5; on 0.14 a storage menu (which moves items and can't be a
- * list) still attempts the window, since a window there is unreliable rather than fatal.
+ * one, and 0.14 doesn't bring it up — so a menu there becomes a text <b>list</b> driven by {@code /pick},
+ * in whichever of two shapes it is:
+ *
+ * <ul>
+ *   <li>a <b>button</b> menu lists its labelled slots — give each button a
+ *       {@link #button(int, int, String) label} and the player picks it with {@code /pick <label>},
+ *       firing the same handler the window would;</li>
+ *   <li>a <b>storage</b> menu lists its <em>contents</em>: {@code /pick <n>} takes the stack in slot
+ *       {@code n} (1-based), {@code /pick put} puts the held one in, {@code /pick close} is done. The list
+ *       redraws after every transfer, so it stays up the way a window would.</li>
+ * </ul>
+ *
+ * <p>So {@link #open} succeeds on every edition for storage, and for a button menu wherever its buttons
+ * carry labels. The one case it still refuses is a button menu with no labels on Bedrock: a list has
+ * nothing to offer, and unlike storage there is no content to fall back on.
  */
 public final class ScriptMenu {
 

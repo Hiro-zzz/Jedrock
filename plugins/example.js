@@ -9,7 +9,8 @@
 //   world      — the shared world: getBlock / setBlock / fill / getHighestY / getBiome / spawn / weather /
 //                playSound / spawnParticle. Edits render live on every client, cross-edition.
 //   entities   — spawn and drive puppets, props and labels; group() builds a scene. See /guard and /decor.
-//   menus      — menus.create(title, rows): a virtual chest (a window on Java; a /pick list on Bedrock).
+//   menus      — menus.create(title, rows): a virtual chest (a window on Java; a /pick list on Bedrock,
+//                where a storage menu is picked by slot number and /pick put / close — see /menu, /bag).
 //   entities   — …and scenes: group.save(name) freezes an arrangement, and the SERVER stands it back up
 //                at every boot (entities.loadScene / scenes / removeScene). See /scene.
 //
@@ -420,6 +421,23 @@ commands.register('menu', function (player, args) {
     // Java opens a chest window; both Bedrock eras get a text list they pick from with /pick <label>.
     // open() returns true in both cases, so there's nothing to fall back on here.
     m.open(player);
+});
+
+// /bag — the OTHER menu shape: a storage chest with no onClick, backed by no world block. The player
+// moves items in and out freely and the contents last as long as the script does (nothing persists —
+// use `storage` for that). One bag per player, so re-opening shows what you left in it.
+//
+// This is the shape that used to be Java-only. On Bedrock there is no window to open, so the menu becomes
+// a transfer list: /pick <n> takes the stack in slot n, /pick put puts the held one in, /pick close is
+// done — and the list redraws after every move, so it stays up like a window would. Stacks are addressed
+// by slot number because the core has no item-name table (a block is an id).
+var bags = {};
+commands.register('bag', function (player, args) {
+    var key = player.getUniqueId().toString();
+    if (!bags[key]) {
+        bags[key] = menus.create('{dark_purple}Backpack', 1);   // 1 row = 9 slots
+    }
+    bags[key].open(player);   // true on every edition: a window on Java, a transfer list on Bedrock
 });
 
 // /inv — exercise the scripting inventory API (survival: give / set / count / remove / clear).

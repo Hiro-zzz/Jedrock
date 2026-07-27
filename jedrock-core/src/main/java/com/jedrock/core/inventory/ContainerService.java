@@ -8,7 +8,6 @@ import com.jedrock.api.event.player.PlayerHeldItemChangeEvent;
 import com.jedrock.api.player.ArmorSlot;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
-import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Blocks;
 import com.jedrock.core.player.CorePlayer;
 import com.jedrock.core.player.PlayerBroadcast;
@@ -109,19 +108,27 @@ public final class ContainerService {
      * block. A non-null {@code onClick} makes it a read-only button menu whose clicks call the handler;
      * a null one makes it a transient storage container (its edits are not persisted).
      *
-     * <p><b>Java</b> opens a real, server-authoritative chest window. <b>Bedrock doesn't get one</b>: the
-     * retail 1.1.5 client crashes on a chest window (it binds the GUI to a block tile a virtual menu has no
-     * equivalent of — the same reason world chests trade through click-transfer there), and a menu window
-     * doesn't come up on 0.14 either. So on <em>both</em> Bedrock eras a <em>button</em> menu degrades to a
-     * text <b>list</b>: the labelled slots ({@code labels}) become options the player chooses with
-     * {@code /pick}, which fires the same click the window would.
+     * <p><b>Java</b> opens a real, server-authoritative chest window. <b>Neither Bedrock era gets one</b>,
+     * and both dead ends are client-verified: the retail 1.1.5 crashes on a block-bound chest window (it
+     * builds a chest block-entity only from chunk data, which a virtual menu has none of) and raises no GUI
+     * for an entity-bound one, while on 0.14 a menu window simply never comes up. So on Bedrock a menu
+     * becomes a <b>text list</b> driven by {@code /pick}, in one of two shapes:
      *
-     * <p>A menu with no labels (or no click handler) has nothing a list can offer. On 1.1.5 that is refused
-     * outright — a window there crashes the client, so there is no second choice. On 0.14 a window is
-     * merely unreliable rather than fatal, so a <em>storage</em> menu (which moves items and therefore
-     * can't be a list at all) still tries it: the client-authoritative window is the only mechanism that
-     * era has, and it costs nothing to attempt. Its read-only revert for a button menu is best-effort (see
-     * {@link #onContainerSetSlot}) — which is one more reason button menus take the list.
+     * <ul>
+     *   <li>a <b>button</b> menu lists its labelled slots ({@code labels}), and picking one fires the same
+     *       {@link MenuClick} the window would have;</li>
+     *   <li>a <b>storage</b> menu (no click handler) lists its <em>contents</em>: picking a slot number
+     *       takes that stack, {@code /pick put} puts the held one in, {@code /pick close} is done. The list
+     *       redraws after every transfer, so it stays up the way a window would.</li>
+     * </ul>
+     *
+     * <p>That second shape is what makes {@code menus} storage work on Bedrock at all: a window is the one
+     * mechanism these clients don't have, so the transfer moved into the list rather than waiting for one.
+     * It is the same trade world chests already make on 1.1.5 (click-transfer instead of a window), with
+     * commands standing in for the right-click a virtual menu has no block to receive.
+     *
+     * <p>The only thing still refused is a button menu whose slots carry no labels — a list has nothing to
+     * offer there, and unlike storage there is no content to fall back on.
      *
      * @param labels per-slot option labels for the list fallback, or {@code null} entries for plain items
      * @return {@code true} if the menu was shown (as a window or a list), {@code false} if it couldn't be
@@ -129,12 +136,12 @@ public final class ContainerService {
     public boolean openMenu(CorePlayer player, String title, Container container, String[] labels,
                             MenuClick onClick) {
         PlayerConnection connection = player.getConnection();
-        ProtocolVersion version = connection.getProtocolVersion();
-        if (version == ProtocolVersion.PE_1_1_5) {
-            return openAsList(player, title, container, labels, onClick);
-        }
-        if (version == ProtocolVersion.PE_0_14 && openAsList(player, title, container, labels, onClick)) {
-            return true; // a button menu: the list is the reliable path on 0.14 too
+        if (connection.getProtocolVersion().isBedrock()) {
+            if (openAsList(player, title, container, labels, onClick)) {
+                return true; // a button menu with labels
+            }
+            // No labels: storage (no click handler) becomes a transfer list; a button menu has nothing.
+            return onClick == null && openAsStorageList(player, title, container);
         }
         player.openContainer(MENU_WINDOW_ID, container, false, onClick);
         connection.openContainer(MENU_WINDOW_ID, title, container.size(), 0, 0, 0);
@@ -174,6 +181,109 @@ public final class ContainerService {
             player.sendMessage(" {gray}• {white}/pick " + label);
         }
         return true;
+    }
+
+    // ===== The storage list (Bedrock's stand-in for a chest window) =====
+    //
+    // A button list only ever signals, so it was never enough for storage — the one menu shape that has to
+    // move items. Since neither Bedrock era will raise a window for a blockless menu, the transfer moved
+    // into the list: an option per occupied slot takes that stack out, `put` puts the held one in, `close`
+    // is done. The list is reprinted after every transfer, which is what makes it behave like an open
+    // window rather than a one-shot prompt.
+
+    /** Chosen instead of a slot: put the held stack in / close the list. Outside any real slot index. */
+    private static final int PUT_SLOT = -1;
+    private static final int CLOSE_SLOT = -2;
+    private static final String PUT_LABEL = "put";
+    private static final String CLOSE_LABEL = "close";
+
+    /**
+     * Show a storage menu as a transfer list and make it the player's pending {@link ListMenu}. Always
+     * succeeds — an empty container still offers {@code put}, which is how anything gets into it.
+     */
+    private boolean openAsStorageList(CorePlayer player, String title, Container container) {
+        java.util.List<String> labels = new java.util.ArrayList<>();
+        java.util.List<Integer> slots = new java.util.ArrayList<>();
+        java.util.List<Integer> states = new java.util.ArrayList<>();
+        for (int slot = 0; slot < container.size(); slot++) {
+            if (container.isEmpty(slot)) {
+                continue; // an empty slot is nothing to take — only occupied ones are options
+            }
+            labels.add(Integer.toString(slot + 1)); // 1-based: what the player reads and types
+            slots.add(slot);
+            states.add(container.stateAt(slot));
+        }
+        labels.add(PUT_LABEL);
+        slots.add(PUT_SLOT);
+        states.add(0);
+        labels.add(CLOSE_LABEL);
+        slots.add(CLOSE_SLOT);
+        states.add(0);
+
+        player.setPendingMenu(new ListMenu(title, labels,
+                slots.stream().mapToInt(Integer::intValue).toArray(),
+                states.stream().mapToInt(Integer::intValue).toArray(),
+                (p, slot, state) -> onStorageListPick(p, title, container, slot)));
+        printStorageList(player, title, container);
+        return true;
+    }
+
+    /** Draw the list: the title, a line per occupied slot, then the two verbs. */
+    private void printStorageList(CorePlayer player, String title, Container container) {
+        player.sendMessage(title == null || title.isEmpty() ? "{gold}Хранилище:" : title);
+        boolean any = false;
+        for (int slot = 0; slot < container.size(); slot++) {
+            if (container.isEmpty(slot)) {
+                continue;
+            }
+            any = true;
+            // There is no item-name table in the core (a block is an id by design), so a stack is shown as
+            // its state and count and chosen by slot number — the number is the label, not the name.
+            player.sendMessage(" {gray}• {white}/pick " + (slot + 1)
+                    + " {dark_gray}— {gray}#" + container.stateAt(slot) + " ×" + container.countAt(slot));
+        }
+        if (!any) {
+            player.sendMessage(" {dark_gray}(пусто)");
+        }
+        player.sendMessage(" {gray}• {white}/pick " + PUT_LABEL + " {dark_gray}— положить предмет из руки");
+        player.sendMessage(" {gray}• {white}/pick " + CLOSE_LABEL + " {dark_gray}— закрыть");
+    }
+
+    /**
+     * One pick on a storage list: take a stack, put the held one in, or close. Anything that moved is
+     * followed by a redraw, so the player is looking at the container as it now stands — the list's
+     * equivalent of a window resync.
+     */
+    private void onStorageListPick(CorePlayer player, String title, Container container, int slot) {
+        if (slot == CLOSE_SLOT) {
+            player.setPendingMenu(null);
+            player.sendMessage("{gray}Закрыто.");
+            return;
+        }
+        boolean creative = player.getGameMode() == GameMode.CREATIVE;
+        if (slot == PUT_SLOT) {
+            int held = player.getHeldItemSlot();
+            int have = heldCount(player, held);
+            if (have <= 0) {
+                player.sendMessage("{gray}В руке ничего нет");
+            } else {
+                int moved = putStack(player, container, held, creative);
+                player.sendMessage(moved > 0
+                        ? "{gray}Положено ×" + moved + (moved < have ? " {dark_gray}(хранилище полно)" : "")
+                        : "{gray}Хранилище полно");
+            }
+        } else if (slot >= 0 && slot < container.size()) {
+            int have = container.countAt(slot);
+            int moved = takeStack(player, container, slot, creative);
+            if (moved > 0) {
+                player.sendMessage("{gray}" + (creative ? "Убрано ×" : "Взято ×") + moved
+                        + (moved < have ? " {dark_gray}(инвентарь полон)" : ""));
+            } else {
+                player.sendMessage("{gray}Инвентарь полон");
+            }
+        }
+        // A menu's contents are transient (never world state), so nothing is marked dirty here.
+        openAsStorageList(player, title, container); // redraw, and re-arm the pick
     }
 
     public boolean onUseBlock(PlayerConnection connection, int x, int y, int z) {
@@ -236,29 +346,11 @@ public final class ContainerService {
             if (chest.isEmpty(i)) {
                 continue;
             }
-            int state = chest.stateAt(i);
             int have = chest.countAt(i);
-            if (creative) {
-                chest.clear(i);                 // no real items to a creative player — just clear the stack
-                world.markDirty();
-                player.sendMessage("{gray}Убрано из сундука ×" + have);
-                return;
-            }
-            int prev = -1, moved = 0;
-            for (int c = 0; c < have; c++) {
-                int slot = player.addToInventory(state);
-                if (slot < 0) break; // inventory full
-                if (slot != prev) {
-                    if (prev >= 0) player.syncSlot(prev);
-                    prev = slot;
-                }
-                moved++;
-            }
-            if (prev >= 0) player.syncSlot(prev);
+            int moved = takeStack(player, chest, i, creative);
             if (moved > 0) {
-                chest.set(i, have - moved > 0 ? state : 0, have - moved);
                 world.markDirty();
-                player.sendMessage("{gray}Взято из сундука ×" + moved
+                player.sendMessage("{gray}" + (creative ? "Убрано из сундука ×" : "Взято из сундука ×") + moved
                         + (moved < have ? " {dark_gray}(инвентарь полон)" : ""));
             }
             return; // one stack per click
@@ -274,32 +366,90 @@ public final class ContainerService {
      * deposit→withdraw cycle can't inflate.
      */
     private void chestDeposit(CorePlayer player, Container chest, int heldSlot, boolean creative) {
-        if (heldSlot < 0 || heldSlot >= 9) {
-            return;
-        }
-        Container inv = player.getInventory();
-        int state = inv.stateAt(heldSlot);
-        int have = inv.countAt(heldSlot);
-        if (state == 0 || have <= 0) {
-            player.sendMessage("{gray}В руке ничего нет");
-            return;
-        }
-        int moved = 0;
-        for (int c = 0; c < have; c++) {
-            if (chest.give(state, 0, chest.size()) < 0) break; // chest full
-            moved++;
-        }
-        if (moved > 0) {
-            if (!creative) { // survival consumes the deposited items; creative's are infinite
-                inv.set(heldSlot, have - moved > 0 ? state : 0, have - moved);
-                player.syncSlot(heldSlot);
+        int have = heldCount(player, heldSlot);
+        if (have <= 0) {
+            if (have == 0) {
+                player.sendMessage("{gray}В руке ничего нет");
             }
+            return;
+        }
+        int moved = putStack(player, chest, heldSlot, creative);
+        if (moved > 0) {
             world.markDirty();
             player.sendMessage("{gray}Положено в сундук ×" + moved
                     + (moved < have ? " {dark_gray}(сундук полон)" : ""));
         } else {
             player.sendMessage("{gray}Сундук полон");
         }
+    }
+
+    // ===== The two transfer primitives =====
+    //
+    // Shared by the world-chest click-transfer and the Bedrock storage list, because the rule that keeps
+    // them honest is subtle enough to be worth having in exactly one place: a CREATIVE player's inventory
+    // is infinite and client-managed, so handing them real items out of a container would let a
+    // put→take cycle mint items (the duplication this cost us once already — a deposit never consumes an
+    // infinite hand, so taking the copy back is pure gain). Creative therefore takes by *destroying* the
+    // stack and puts without consuming. Survival moves real items both ways and is symmetric.
+    //
+    // Both return how many items actually moved, and neither words a message or marks the world dirty —
+    // that belongs to the caller, which knows whether it is holding a world chest or a transient menu.
+
+    /** How many items the player holds in {@code heldSlot}, or {@code -1} if that isn't a hotbar slot. */
+    private static int heldCount(CorePlayer player, int heldSlot) {
+        if (heldSlot < 0 || heldSlot >= 9) {
+            return -1;
+        }
+        Container inv = player.getInventory();
+        return inv.stateAt(heldSlot) == 0 ? 0 : inv.countAt(heldSlot);
+    }
+
+    /** Move {@code container[slot]} into the player's inventory (as much as fits). @return how many moved */
+    private int takeStack(CorePlayer player, Container container, int slot, boolean creative) {
+        if (container.isEmpty(slot)) {
+            return 0;
+        }
+        int state = container.stateAt(slot);
+        int have = container.countAt(slot);
+        if (creative) {
+            container.clear(slot); // no real items to a creative player — just clear the stack
+            return have;
+        }
+        int prev = -1, moved = 0;
+        for (int c = 0; c < have; c++) {
+            int into = player.addToInventory(state);
+            if (into < 0) break; // inventory full
+            if (into != prev) {
+                if (prev >= 0) player.syncSlot(prev);
+                prev = into;
+            }
+            moved++;
+        }
+        if (prev >= 0) player.syncSlot(prev);
+        if (moved > 0) {
+            container.set(slot, have - moved > 0 ? state : 0, have - moved);
+        }
+        return moved;
+    }
+
+    /** Move the player's held stack into {@code container} (as much as fits). @return how many moved */
+    private int putStack(CorePlayer player, Container container, int heldSlot, boolean creative) {
+        int have = heldCount(player, heldSlot);
+        if (have <= 0) {
+            return 0;
+        }
+        Container inv = player.getInventory();
+        int state = inv.stateAt(heldSlot);
+        int moved = 0;
+        for (int c = 0; c < have; c++) {
+            if (container.give(state, 0, container.size()) < 0) break; // container full
+            moved++;
+        }
+        if (moved > 0 && !creative) { // survival consumes what was deposited; creative's hand is infinite
+            inv.set(heldSlot, have - moved > 0 ? state : 0, have - moved);
+            player.syncSlot(heldSlot);
+        }
+        return moved;
     }
 
     public void onChestClick(PlayerConnection connection, int windowSlot, int button, boolean shift) {

@@ -6,6 +6,36 @@ unstable — anything may change between entries.
 
 ## [Unreleased]
 
+### Added
+
+- **Storage menus reach Bedrock — the transfer moves into the list.** The last gap in the illusion toolkit,
+  and the one the `menus` global had been carrying since it landed: a button menu degrades to a `/pick`
+  list on Bedrock, but a list can only ever *signal*, and storage is the one menu shape that has to move
+  items. So it was refused on 1.1.5 and, on 0.14, sent a window that a real client never brings up. Both
+  dead ends are client-verified and neither is going to change: 1.1.5 crashes on a block-bound chest window
+  (it builds a chest block-entity only from chunk data, which a blockless menu has none of) and raises no
+  GUI for an entity-bound one, and 0.14 simply ignores the menu window.
+  Rather than keep waiting for a window, the **transfer moved into the list**: a storage menu now lists its
+  *contents*, one option per occupied slot, plus two verbs. `/pick <n>` takes the stack in slot `n`
+  (1-based), **`/pick put`** puts the held one in, **`/pick close`** is done — and the list **redraws after
+  every transfer**, so it stays up and pickable the way an open window does instead of being consumed by
+  one choice. That is the same trade world chests already make on 1.1.5 (click-transfer instead of a
+  window), with commands standing in for the right-click a virtual menu has no block to receive. Net
+  effect: **both menu shapes now work on all four editions.** 0.14 gives up its unreliable window for the
+  list as well — one behaviour on both eras beats a path that only sometimes appears.
+  The two transfer primitives (`takeStack` / `putStack`) are now **shared with the world-chest
+  click-transfer**, deliberately: the rule that keeps them honest is subtle enough to be worth having in
+  exactly one place — a creative player's inventory is infinite and client-managed, so creative *takes* by
+  destroying the stack and *puts* without consuming, or a put→take cycle mints items (a duplication this
+  cost us once already). Survival moves real items both ways. Each caller words its own message and decides
+  whether the world is marked dirty, since a menu's contents are transient and a chest's are not.
+  Known rough edge, called out rather than hidden: a stack is addressed by **slot number** and shown as its
+  raw state, because the core has no item-name table (a block is an id by design). Honest, not friendly —
+  names are the natural follow-up. Tested: taking a slot moves the stack and leaves the list up showing
+  what is actually left, `put` deposits the hand, `close` ends it for good, a full inventory loses nothing,
+  creative neither gains items on take nor loses them on put, a button list is still one-and-done, and the
+  world-chest click-transfer still persists through the shared primitives.
+
 ### Fixed
 
 - **A survival player couldn't rearrange their own inventory on Bedrock.** Moving the held stack into
