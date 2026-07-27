@@ -3,20 +3,31 @@
 // ============================================================================
 //
 // Drop a .js file in this folder and it loads on start; save an edit and it hot-reloads within a second,
-// no restart. Nine globals are in scope:
+// no restart. Twelve globals are in scope:
 //
 //   server     — the server: players, worlds, broadcast, puppets, holograms, status.
 //   world      — the shared world: getBlock / setBlock / fill / getHighestY / getBiome / spawn / weather /
 //                playSound / spawnParticle. Edits render live on every client, cross-edition.
 //   entities   — spawn and drive puppets, props and labels; group() builds a scene. See /guard and /decor.
-//   menus      — menus.create(title, rows): a virtual chest (a window on Java; a /pick list on Bedrock).
+//   menus      — menus.create(title, rows): a virtual chest (a window on Java; a /pick list on Bedrock,
+//                where a storage menu is picked by slot number and /pick put / close — see /menu, /bag).
 //   entities   — …and scenes: group.save(name) freezes an arrangement, and the SERVER stands it back up
 //                at every boot (entities.loadScene / scenes / removeScene). See /scene.
+//   regions    — named boxes with rules: create / get / all / at / of(player) / remove / allows /
+//                allowsFor(player,…). A region denies build / interact / pvp / damage / entry; deny wins
+//                where they overlap, and getBypassPermission(flag) names the node that exempts a player
+//                or group. Server-owned and restored at boot; fires PlayerRegionEnter / Leave. See /zone.
 //
 // `server` and every `player` you get (a global, an event, a command argument, a roster query) are the
 // script contract — the methods below and nothing else. The server's internals are not reachable, and
 // neither is a player's connection; player.getVersion() gives the edition string that used to need it.
 //                onClick + button(slot,item,label) makes a button menu; setItem alone is a storage chest.
+//   items      — custom items: define(key, state) → setName / setLore / onUse / onHit / onBreak / onHold;
+//                give(player, key, n) / set / heldKey / count. A stack carries the KEY, so a hot reload
+//                re-points every existing stack at the new definition. See /forge.
+//   permissions— groups and rights: createGroup(n) → .add(node) / .inherit(g) / .setPrefix(s);
+//                forPlayer(p or 'Name') → .addGroup / .add(node) / .has / .isOp / .setOp. Server state,
+//                written straight to permissions.txt — a script no longer builds /perm command strings.
 //   storage    — the only thing that survives a restart: get / set / has / remove / keys / size / clear,
 //                plus forPlayer(p) for per-player state. Strings, numbers, booleans, objects and arrays.
 //   events     — events.on(name, fn): subscribe to a built-in event (28 below) OR a custom, script-defined
@@ -420,6 +431,97 @@ commands.register('menu', function (player, args) {
     // Java opens a chest window; both Bedrock eras get a text list they pick from with /pick <label>.
     // open() returns true in both cases, so there's nothing to fall back on here.
     m.open(player);
+});
+
+// /zone — regions: a named box with rules, built around wherever you are standing.
+//
+// A region isn't simulated — it's six numbers and a set of allowances, checked exactly where the core was
+// already asking permission (a block edit, a hit, a step). So it costs nothing until it says no.
+//
+// It is SERVER-owned, like a saved scene: it outlives this script, a hot reload and a restart. That's why
+// create() returns null instead of replacing an existing region — reloading this file must not wipe flags
+// somebody set by hand with /region flag.
+commands.register('zone', function (player, args) {
+    var at = player.getLocation();
+    var x = Math.floor(at.x()), y = Math.floor(at.y()), z = Math.floor(at.z());
+    var zone = regions.create('demo', x - 8, y - 4, z - 8, x + 8, y + 12, z + 8);
+    if (!zone) {
+        zone = regions.get('demo');                  // already there — take it as it stands
+        player.sendMessage('{gray}Reusing the existing {white}demo{gray} region.');
+    }
+    zone.deny('build').deny('pvp');                  // no digging, no fighting; calls chain
+    player.sendMessage('{green}demo: {white}' + zone.getMinX() + ',' + zone.getMinY() + ',' + zone.getMinZ()
+        + ' .. ' + zone.getMaxX() + ',' + zone.getMaxY() + ',' + zone.getMaxZ()
+        + ' {gray}denies ' + zone.getDenied().join(', '));
+
+    // Exceptions are permission nodes, not a list kept on the region — so per player AND per group come
+    // free, with the wildcards and the explicit deny the permission system already has. Here: let whoever
+    // ran /zone keep building in their own demo region.
+    permissions.forPlayer(player).add(zone.getBypassPermission('build'));
+    player.sendMessage('{gray}You are exempt from its build rule; others are not.');
+    player.sendMessage('{gray}Try breaking a block inside it. {white}/region info demo{gray} lists the nodes.');
+});
+
+// The crossings. Fired once per region actually entered or left, not per movement packet — so this is the
+// hook to hang scripted content on, rather than polling positions on a timer.
+events.on('PlayerRegionEnter', function (e) {
+    e.getPlayer().sendMessage('{dark_aqua}» entering {white}' + e.getRegion().getName());
+    // e.setCancelled(true) here refuses the step and snaps them back — what the `entry` flag does.
+});
+events.on('PlayerRegionLeave', function (e) {
+    e.getPlayer().sendMessage('{dark_aqua}« leaving {white}' + e.getRegion().getName());
+    // Cancelling THIS keeps them in — how an arena holds somebody until a round is over.
+});
+
+// /forge — custom items: a name, lore and programmable behaviour hung on an ordinary item state.
+//
+// There is NO resource pack (it would break the promise that any unmodified client can join), so a custom
+// item is drawn as whatever vanilla item it is built on — this one is a diamond sword and looks like one.
+// What is custom is its name, its lore and what it does.
+//
+// Identity is the KEY. A stack carries 'frostblade', not a copy of this definition, so editing the code
+// below and saving re-points every frostblade already in the world — including ones sitting in a chest
+// across a restart. An item whose key nothing defines is simply the vanilla item it is drawn as.
+items.define('frostblade', Blocks.state(276, 0))
+    .setName('{aqua}Frostblade')
+    .setLore(['{gray}Cold to the touch.', '{dark_gray}Right-click to chill'])
+    .onUse(function (player, ctx) {
+        var at = player.getLocation();
+        player.sendMessage('{aqua}A chill runs down the blade.');
+        world.playSound('click', at.x(), at.y(), at.z());
+        return true;      // consumed — the core does not go on to use the item
+    })
+    .onHit(function (player, ctx) {
+        ctx.getTarget().sendMessage('{aqua}Frozen by ' + player.getName() + '!');
+        return false;     // false — let the ordinary hit land as well
+    })
+    .onBreak(function (player, ctx) {
+        player.sendMessage('{aqua}The blade is not a pickaxe. ({gray}' + ctx.getX() + ',' + ctx.getY()
+            + ',' + ctx.getZ() + '{aqua})');
+        return true;      // consumed — the block stays
+    });
+
+commands.register('forge', function (player, args) {
+    var given = items.give(player, 'frostblade');
+    player.sendMessage(given ? '{green}Forged. {gray}Hold it and right-click.'
+                             : '{red}No room in your inventory.');
+});
+
+// /bag — the OTHER menu shape: a storage chest with no onClick, backed by no world block. The player
+// moves items in and out freely and the contents last as long as the script does (nothing persists —
+// use `storage` for that). One bag per player, so re-opening shows what you left in it.
+//
+// This is the shape that used to be Java-only. On Bedrock there is no window to open, so the menu becomes
+// a transfer list: /pick <n> takes the stack in slot n, /pick put puts the held one in, /pick close is
+// done — and the list redraws after every move, so it stays up like a window would. Stacks are addressed
+// by slot number because the core has no item-name table (a block is an id).
+var bags = {};
+commands.register('bag', function (player, args) {
+    var key = player.getUniqueId().toString();
+    if (!bags[key]) {
+        bags[key] = menus.create('{dark_purple}Backpack', 1);   // 1 row = 9 slots
+    }
+    bags[key].open(player);   // true on every edition: a window on Java, a transfer list on Bedrock
 });
 
 // /inv — exercise the scripting inventory API (survival: give / set / count / remove / clear).

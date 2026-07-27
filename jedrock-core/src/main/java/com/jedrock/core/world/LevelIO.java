@@ -61,8 +61,8 @@ import java.util.zip.InflaterInputStream;
 public final class LevelIO {
 
     /** Current on-disk format version; bump on any incompatible layout change. (v2 added the biome map,
-     *  v3 the chest container contents.) */
-    public static final int FORMAT_VERSION = 3;
+     *  v3 the chest container contents, v4 the custom-item key each stack carries.) */
+    public static final int FORMAT_VERSION = 4;
 
     private static final byte[] MAGIC = {'J', 'D', 'W', 'L'};
     private static final int SECTION_SHORTS = 4096;
@@ -143,6 +143,10 @@ public final class LevelIO {
                     for (int i = 0; i < c.size(); i++) {
                         body.writeShort(c.stateAt(i));
                         body.writeByte(c.countAt(i));
+                        // v4: the custom-item key, or "" for an ordinary stack. The KEY, not a definition —
+                        // this file is read long before any plugin exists to define one.
+                        String key = c.customKeyAt(i);
+                        body.writeUTF(key == null ? "" : key);
                     }
                 }
             } finally {
@@ -172,11 +176,12 @@ public final class LevelIO {
                 throw new IOException("Not a Jedrock level file (bad magic)");
             }
             int version = header.readInt();
-            // Load v2 (no chests) as well as the current v3, so an existing world upgrades in place — it
-            // loads fine, then the next save rewrites it as v3. Save always writes {@link #FORMAT_VERSION}.
-            if (version != 2 && version != FORMAT_VERSION) {
+            // Load every older layout as well as the current one, so an existing world upgrades in place:
+            // v2 has no chests, v3 has chests but no custom-item keys. It loads fine, then the next save
+            // rewrites it at {@link #FORMAT_VERSION}, which is what save always writes.
+            if (version != 2 && version != 3 && version != FORMAT_VERSION) {
                 throw new IOException("Unsupported level format version " + version
-                        + " (expected 2 or " + FORMAT_VERSION + ")");
+                        + " (expected 2, 3 or " + FORMAT_VERSION + ")");
             }
             LevelData meta = new LevelData(
                     version,
@@ -233,7 +238,9 @@ public final class LevelIO {
                     for (int i = 0; i < slots; i++) {
                         int state = body.readUnsignedShort();
                         int count = body.readUnsignedByte();
-                        container.set(i, state, count);
+                        // v3 chests predate custom items, so every stack in one is ordinary.
+                        String key = version < 4 ? "" : body.readUTF();
+                        container.set(i, state, count, key.isEmpty() ? null : key);
                     }
                     containers.put(pos, container);
                 }

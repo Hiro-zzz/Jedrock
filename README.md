@@ -196,10 +196,14 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   without one a transient **storage chest**. **Java** opens a real chest window; **neither Bedrock era does**
   (1.1.5 crashes on one, 0.14 doesn't bring it up), so there a button menu degrades to a text **list** —
   labelled buttons (`menu.button(slot, item, label)`) become options the player chooses with a built-in
-  **`/pick <label>`**, which fires the same handler. That makes button menus work on all four editions;
-  a Bedrock *storage* menu is the remaining gap (a list can't move items — on 0.14 it still tries the
-  window, on 1.1.5 it's refused). Packet ids are from minecraft-data / PocketMine; on-client behaviour
-  isn't verified here. Try `/sb on`, `/boss 50 red` and `/menu` in `plugins/example.js`.
+  **`/pick <label>`**, which fires the same handler. A **storage** menu takes the same route with its
+  *contents* as the options: `/pick <n>` takes the stack in slot n, `/pick put` puts the held one in,
+  `/pick close` is done, and the list redraws after every transfer so it stays up the way a window would.
+  So **both menu shapes now work on all four editions** — the transfer moved into the list rather than
+  waiting for a window these clients won't raise, the same trade world chests already make on 1.1.5. The
+  one case still refused is a button menu whose buttons carry no labels: a list has nothing to offer and,
+  unlike storage, there's no content to fall back on. Try `/sb on`, `/boss 50 red` and `/menu` in
+  `plugins/example.js`.
 - ✅ **Player-facing UI — titles, subtitles and the action bar.** `player.sendTitle(title, subtitle[, fadeIn,
   stay, fadeOut])`, `sendActionBar(text)` and `clearTitle()` show a large centred title or a line above the
   hotbar, authored in the unified markup and rendered per edition: the JE Title packet (id 0x45 on 1.8, 0x48
@@ -268,9 +272,64 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   its post. Entities belong to the plugin that spawned them and despawn on hot-reload, and a whole
   plugin's ticking costs one scheduled task. Try `/guard`.
 
+- ✅ **Regions — named boxes with rules.** The primitive every game mode needs: a lobby, an arena, a shop
+  floor, a spawn nobody can dig up. A region is six numbers and a set of allowances — `build`, `interact`,
+  `pvp`, `damage`, `entry` — every one **on** until it's denied, so a new region changes nothing until you
+  say so. Where regions overlap, **deny wins** (the rule permissions already use), which means dropping a
+  small no-build box inside a big free-build one does what it looks like it does. Nothing is simulated and
+  nothing ticks: each flag is enforced by **cancelling the event the core already routes that decision
+  through**, so there is no second rulebook and a script can overrule one by listening at a higher
+  priority. Crossing a border fires **`PlayerRegionEnter` / `PlayerRegionLeave`** — once per crossing, not
+  per movement packet — and cancelling those refuses the step, which is how an arena holds someone in
+  until a round ends. **Exceptions are per player and per group**, and they're permissions rather than a
+  roster on the region — "may *this* player do *this*" already has a whole subsystem here. A denial is
+  waived for anyone holding **`jedrock.region.<name>.<flag>`**: one player, or a group and everyone in it;
+  `jedrock.region.plot7.*` covers a whole region, `-jedrock.region.plot7.build` takes it back, and an op is
+  exempt everywhere. (The permission system gained **per-player nodes** for this — `/perm user <name>
+  addnode <node>` — so "let this one player build in their own plot" doesn't need a throwaway group.)
+  Regions are **server-owned** like saved scenes: created by `/region` or a script,
+  persisted to `world/regions.jdb`, and **in force from boot before the first login**. A server with no
+  regions pays one array-length read per movement packet and nothing else — the enforcement listeners
+  aren't even registered until the first region exists. `/region pos1` / `pos2` / `create <name>`, or
+  `/region here <name> <radius>`; then `list`, `info`, `flag <name> <flag> allow|deny`, `remove`. Scripts
+  get the `regions` global. Try `/zone` in `plugins/example.js`.
+
+- ✅ **Custom items — a name, lore and programmable behaviour on a vanilla item.** There is **no resource
+  pack** by design (it would break the promise that any unmodified client can join, and 0.14 barely
+  supports one), so a custom item is *drawn* as whatever vanilla item it is built on — a diamond sword
+  still looks like a diamond sword. What is custom is everything else: `items.define('frostblade',
+  Blocks.state(276, 0)).setName('{aqua}Frostblade').setLore([…])` plus behaviours — **`onUse`**,
+  **`onHit`**, **`onBreak`**, **`onHold`**, each returning `true` to *consume* the action, which it does by
+  cancelling the event the core already routes that decision through.
+  Identity is the **key**, and a stack carries the key rather than a copy of the definition. That is what
+  makes a custom item survive what a reference could not: a hot reload re-points every existing stack at
+  the new definition, the level file (v4) restores a chest full of them long before any plugin exists, and
+  an item whose plugin was removed simply behaves as the vanilla one it is drawn as until its script comes
+  back. A custom stack never merges with an ordinary one of the same state. Dispatch listeners are
+  registered only while some item actually has a behaviour, so a purely cosmetic item — or none at all —
+  costs nothing. Try `/forge` in `plugins/example.js`.
+  **The name and lore reach the client on all four protocols**, as item NBT in the Slot's own NBT field —
+  two dialects: **Java** is big-endian named NBT written inline (plain §-coded strings, since text
+  components in `Name` arrived in 1.13), and **both Bedrock eras** are length-prefixed *little-endian* NBT.
+  Note that protocol 113 speaks two dialects and the choice is per *call site* — a chunk's block-entity tail
+  is *network* NBT (varint lengths, zigzag ints), an item's is not. Getting that backwards cost one client
+  test: the 1.1.5 client neither crashed nor complained, it just kept showing the vanilla name. An ordinary
+  item still writes the exact bytes it always did, so nothing changed for a server that defines no items.
+  **Confirmed on a real 1.1.5 client**; Java is still unverified.
+
+- ✅ **Permissions from a script.** A script could always *read* rights (`player.hasPermission`); now it can
+  set them. The **`permissions`** global builds groups (`createGroup(n).inherit('default').add(node)
+  .setPrefix('{aqua}[Builder] ')`) and edits one player's rights (`permissions.forPlayer(p).addGroup('builders')`,
+  `.add(node)`, `.remove(node)`, `.isOp()` / `.setOp(true)`) — by `Player` **or by name**, so somebody's
+  rights can be prepared before they ever log in. Server state, written to `permissions.txt` / `ops.txt`
+  immediately and not torn down with the plugin, and `createGroup` returns the group that already exists,
+  so a script declaring its roles on every load is idempotent. Before this the only way to *change* a right
+  from a script was to build a `/perm …` string and hand it to `dispatchCommand` — which is exactly what
+  the region demo had to do until this landed.
+
 - ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
-  backend, not the compiled core: a script gets ten globals — `server` / `events` / `scheduler` /
-  `commands` / `packets` / `world` / `entities` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
+  backend, not the compiled core: a script gets thirteen globals — `server` / `events` / `scheduler` /
+  `commands` / `packets` / `world` / `entities` / `regions` / `items` / `permissions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
   name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
   work (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too
@@ -495,6 +554,7 @@ scratch buffers, so encoding a chunk allocates nothing per section.
 | `EventBus` / `EventPriority` | api | Cancellable, priority-ordered events the core routes decisions through; reflection-free, with a `hasListeners` hot-path gate |
 | `PluginManager` / `ScriptPlugin` | core/plugin | The Rhino host: loads `plugins/*.js`, injects the globals, and owns each script's listeners, tasks, commands, taps and entities so a hot-reload tears them all down |
 | `PuppetEntity` / `CorePuppet` | api / core | The server-driven entity: a mob, an NPC, a hologram line or a decoration prop — moved and dressed, never simulated |
+| `Region` / `RegionManager` | api / core | Named boxes with rules; flags enforced by cancelling the events the core already routes decisions through, and registered only while a region exists |
 | `ScriptEntity` / `ScriptEntities` | core/plugin | That primitive as scripts see it: movement, state, spatial queries and an `onTick` brain, owned per plugin |
 | `EntityTypeIds` / `EntityFlagIds` | network | The entity counterpart of the block palette: canonical type / flag → each edition's wire ids |
 | `CommandManager` / `CommandSender` | core | One command surface for players and the console, gated by `PermissionManager` (groups, wildcards, deny-wins) |
@@ -606,7 +666,7 @@ simulation stays out (see non-goals).
   incl. ICU4J) to keep the tree lean; it lives only in `core`, so the `api` stays runtime-neutral. That
   gate is what the rest of the roadmap waited on, and the surface behind it has kept growing — nine
   globals now (`server` / `events` / `scheduler` / `commands` / `packets` / `world` / `entities` /
-  `storage` / `console`), covering custom events, `/slash` commands, scheduling, raw packet taps, block editing,
+  `regions` / `items` / `permissions` / `storage` / `console`), covering custom events, `/slash` commands, scheduling, raw packet taps, block editing,
   weather, sounds and particles, and **programmable entities** (see [What works today](#what-works-today)).
   The event model has since caught up with the newer features: **weather** (`WeatherChange`, cancellable and
   redirectable, posted by the world itself so `/weather`, a script and the api all pass through it) and
@@ -617,9 +677,19 @@ simulation stays out (see non-goals).
   parses them and completes them (Java clients), scripts included. And the **illusion toolkit** grew a
   **sidebar** (a scoreboard on Java, the displaced item-name line on both Bedrock eras), a **boss bar**
   (Java 1.8 + 1.12.2 and Bedrock 1.1.5), and **virtual chests** for scripts (the `menus` global — a window
-  on Java, a `/pick` list on Bedrock). What it still wants: a **storage** menu on Bedrock (a list can only
-  offer buttons), and a real-client pass on the unverified PE wire — **forms** stay out, since the legacy
-  PE clients predate them.
+  on Java, a `/pick` list on Bedrock). **Storage menus reached Bedrock too** — the last gap in that
+  toolkit: a list could only ever *signal*, so the transfer moved into it (`/pick <n>` takes, `/pick put`
+  puts, and it redraws after each one), rather than waiting for a window neither legacy client will raise.
+  What it still wants: a real-client pass on the unverified PE wire, and item **names** — a storage list
+  addresses stacks by slot number because a block is an id by design, which is honest but not friendly.
+  **Forms** stay out, since the legacy PE clients predate them.
+  **Regions landed** as the platform's next primitive (see [What works today](#what-works-today)): named
+  boxes with flags, enforced by cancelling the events the core already routes decisions through rather
+  than by a second rulebook, with `PlayerRegionEnter` / `PlayerRegionLeave` for the crossings and a
+  `world/regions.jdb` that puts them in force before the first login, and **per-player / per-group
+  exceptions** carried by permission nodes rather than a roster on the region (which is what taught the
+  permission system per-player nodes). What would grow them: a **greeting / farewell** message per region,
+  and a **priority** escape hatch for the case deny-wins can't express — an allow island inside a deny.
 - **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
   **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
   cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry

@@ -13,6 +13,11 @@ final class JeSlots {
 
     /** Write one Slot from a canonical {@code (id << 4) | meta} state; state 0 or count ≤ 0 is empty. */
     static void write(ByteBuf buf, int state, int count) {
+        write(buf, state, count, null);
+    }
+
+    /** As above, with a custom item's name and lore in the trailing NBT field ({@code null} = plain). */
+    static void write(ByteBuf buf, int state, int count, com.jedrock.api.item.ItemDisplay display) {
         if (state == 0 || count <= 0) {
             buf.writeShort(-1);
             return;
@@ -20,6 +25,6 @@ final class JeSlots {
         buf.writeShort((state >> 4) & 0xFFFF); // item id
         buf.writeByte(count);
         buf.writeShort(state & 0xF);           // damage = the block meta / variant
-        buf.writeByte(0);                      // no NBT (TAG_End)
+        JeItemNbt.write(buf, display);
     }
 }

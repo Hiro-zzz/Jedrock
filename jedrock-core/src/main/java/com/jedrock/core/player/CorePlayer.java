@@ -89,6 +89,41 @@ public final class CorePlayer implements Player {
         return inventory;
     }
 
+    /**
+     * Which regions this player is standing in, remembered between movement reports so the core can tell a
+     * crossing from a step. Owned by the movement path; see {@code RegionManager.updateMembership}. Costs
+     * one field on a server that has no regions at all.
+     */
+    private final com.jedrock.core.region.RegionMembership regionMembership =
+            new com.jedrock.core.region.RegionMembership();
+
+    public com.jedrock.core.region.RegionMembership getRegionMembership() {
+        return regionMembership;
+    }
+
+    /**
+     * The two corners this player has marked with {@code /region pos1} / {@code pos2}, {@code null} until
+     * they mark one. Kept on the player rather than in the command so two operators can select at the same
+     * time, and so a disconnect throws a half-made selection away instead of leaving it lying around.
+     */
+    private volatile int[] regionCorner1;
+    private volatile int[] regionCorner2;
+
+    public void setRegionCorner(boolean first, int x, int y, int z) {
+        int[] corner = {x, y, z};
+        if (first) {
+            regionCorner1 = corner;
+        } else {
+            regionCorner2 = corner;
+        }
+    }
+
+    /** The marked corner as {@code {x, y, z}}, or {@code null} if it hasn't been marked. */
+    public int[] getRegionCorner(boolean first) {
+        int[] corner = first ? regionCorner1 : regionCorner2;
+        return corner == null ? null : corner.clone();
+    }
+
     /** The item this player is carrying on the cursor while a window is open (empty when none). */
     private final Cursor cursor = new Cursor();
 
@@ -252,10 +287,62 @@ public final class CorePlayer implements Player {
         }
     }
 
+    /**
+     * The item registry, for turning a stack's custom-item key into the name and lore the client is shown.
+     * Null until the server wires it (and in tests), which simply means every item looks vanilla.
+     */
+    private volatile com.jedrock.core.item.ItemRegistry items;
+
+    public void setItems(com.jedrock.core.item.ItemRegistry items) {
+        this.items = items;
+    }
+
+    /** The display for one slot: the custom item's name and lore, or {@code null} for an ordinary stack. */
+    private com.jedrock.api.item.ItemDisplay displayAt(int slot) {
+        String key = inventory.customKeyAt(slot);
+        if (key == null) {
+            return null; // the overwhelmingly common case — no lookup, no allocation
+        }
+        com.jedrock.core.item.ItemRegistry registry = items;
+        com.jedrock.core.item.CoreCustomItem item = registry == null ? null : registry.get(key);
+        if (item == null) {
+            return null; // a key nothing defines: the vanilla name is the honest answer
+        }
+        return new com.jedrock.api.item.ItemDisplay(
+                ChatText.toLegacy(item.getDisplayName()), legacyLore(item.getLore()));
+    }
+
+    private static String[] legacyLore(String[] lore) {
+        if (lore.length == 0) {
+            return lore;
+        }
+        String[] out = new String[lore.length];
+        for (int i = 0; i < lore.length; i++) {
+            out[i] = ChatText.toLegacy(lore[i] == null ? "" : lore[i]);
+        }
+        return out;
+    }
+
+    /** Every slot's display, or {@code null} when nothing in the inventory is a custom item. */
+    private com.jedrock.api.item.ItemDisplay[] inventoryDisplay() {
+        com.jedrock.api.item.ItemDisplay[] display = null;
+        for (int slot = 0; slot < INV_SLOTS; slot++) {
+            com.jedrock.api.item.ItemDisplay one = displayAt(slot);
+            if (one == null) {
+                continue;
+            }
+            if (display == null) {
+                display = new com.jedrock.api.item.ItemDisplay[INV_SLOTS];
+            }
+            display[slot] = one;
+        }
+        return display; // null = an ordinary inventory, and the wire is byte-identical to before
+    }
+
     /** Push one inventory slot to the client (a live pickup / consume — refreshes the hotbar HUD). */
     public void syncSlot(int slot) {
         slotEchoGuard.arm(slot, System.nanoTime());
-        connection.setInventorySlot(slot, inventory.stateAt(slot), inventory.countAt(slot));
+        connection.setInventorySlot(slot, inventory.stateAt(slot), inventory.countAt(slot), displayAt(slot));
         if (slot == heldSlot) {
             heldItemMayHaveChanged(); // the hand itself changed — other clients must redraw it
         }
@@ -268,7 +355,7 @@ public final class CorePlayer implements Player {
      */
     public void syncInventory() {
         slotEchoGuard.armAll(System.nanoTime());
-        connection.setInventory(inventory.states(), inventory.counts());
+        connection.setInventory(inventory.states(), inventory.counts(), inventoryDisplay());
         heldItemMayHaveChanged();
         armorMayHaveChanged();
     }
@@ -494,6 +581,14 @@ public final class CorePlayer implements Player {
     @Override
     public int getHeldItemSlot() {
         return heldSlot;
+    }
+
+    /**
+     * The {@linkplain com.jedrock.api.item.CustomItem custom item} key of whatever is in hand, or
+     * {@code null} for an ordinary item. A key, not a definition — see {@code ItemRegistry}.
+     */
+    public String getHeldItemKey() {
+        return inventory.customKeyAt(heldSlot);
     }
 
     /** Record a hotbar switch reported by the client. Out-of-range slots are ignored. */

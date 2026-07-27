@@ -35,7 +35,8 @@ public final class PermCommand implements Command {
     @Override
     public String usage() {
         return "/perm groups | group <g> <info|default|prefix|add|remove|inherit|uninherit> [value] | "
-                + "creategroup <g> | delgroup <g> | user <player> <info|add|remove> [group] | reload";
+                + "creategroup <g> | delgroup <g> | "
+                + "user <player> <info|add|remove> [group] | user <player> <addnode|removenode> <node> | reload";
     }
 
     @Override
@@ -168,7 +169,8 @@ public final class PermCommand implements Command {
 
     private void user(PermissionManager perms, CommandSender sender, String[] args) {
         if (args.length < 3) {
-            sender.sendMessage("{red}Usage: /perm user <player> <info|add|remove> [group]");
+            sender.sendMessage("{red}Usage: /perm user <player> <info|add|remove> [group] "
+                    + "| <addnode|removenode> <node>");
             return;
         }
         String player = args[1];
@@ -178,6 +180,10 @@ public final class PermCommand implements Command {
                 Set<String> assigned = perms.userGroups(player);
                 sender.sendMessage("{gold}{bold}" + ChatText.escape(player) + "{gold}: {white}"
                         + (assigned.isEmpty() ? "{gray}(default group)" : String.join(", ", assigned)));
+                Set<String> own = perms.userPermissions(player);
+                if (!own.isEmpty()) {
+                    sender.sendMessage(" {gray}own nodes: {white}" + String.join(", ", own));
+                }
             }
             case "add" -> {
                 if (args.length < 4) {
@@ -199,6 +205,30 @@ public final class PermCommand implements Command {
                         ? "{green}{white}" + ChatText.escape(player) + "{green} − group {white}"
                                 + args[3].toLowerCase(Locale.ROOT)
                         : "{yellow}{white}" + ChatText.escape(player) + "{yellow} wasn't in {white}"
+                                + ChatText.escape(args[3]));
+            }
+            case "addnode" -> {
+                if (args.length < 4) {
+                    sender.sendMessage("{red}Usage: /perm user " + ChatText.escape(player)
+                            + " addnode <node>");
+                    return;
+                }
+                sender.sendMessage(perms.addUserPermission(player, args[3])
+                        ? "{green}{white}" + ChatText.escape(player) + "{green} + node {white}"
+                                + ChatText.escape(args[3])
+                        : "{yellow}{white}" + ChatText.escape(player) + "{yellow} already had {white}"
+                                + ChatText.escape(args[3]));
+            }
+            case "removenode" -> {
+                if (args.length < 4) {
+                    sender.sendMessage("{red}Usage: /perm user " + ChatText.escape(player)
+                            + " removenode <node>");
+                    return;
+                }
+                sender.sendMessage(perms.removeUserPermission(player, args[3])
+                        ? "{green}{white}" + ChatText.escape(player) + "{green} − node {white}"
+                                + ChatText.escape(args[3])
+                        : "{yellow}{white}" + ChatText.escape(player) + "{yellow} didn't have {white}"
                                 + ChatText.escape(args[3]));
             }
             default -> sender.sendMessage("{red}Unknown action: {white}" + ChatText.escape(action));

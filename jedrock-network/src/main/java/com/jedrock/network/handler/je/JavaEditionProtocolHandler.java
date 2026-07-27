@@ -612,7 +612,13 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
 
     @Override
     public void setInventory(JedrockConnection c, int[] states, int[] counts) {
-        c.send(new ClientboundWindowItems(JeInventoryCodec.encode(states, counts, JeInventoryCodec.WINDOW_SLOTS_1_12)));
+        setInventory(c, states, counts, null);
+    }
+
+    @Override
+    public void setInventory(JedrockConnection c, int[] states, int[] counts, com.jedrock.api.item.ItemDisplay[] display) {
+        c.send(new ClientboundWindowItems(
+                JeInventoryCodec.encode(states, counts, display, JeInventoryCodec.WINDOW_SLOTS_1_12)));
         // Mirror the hotbar (slots 0-8) into our held-item view: 1.12.2's Block Placement carries NO item,
         // so a survival placement's block comes from hotbarState[heldSlot]. Without this it stayed on the
         // creative-menu value (or air), so survival players placed the wrong block / nothing.
@@ -628,8 +634,13 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
 
     @Override
     public void setInventorySlot(JedrockConnection c, int slot, int state, int count) {
+        setInventorySlot(c, slot, state, count, null);
+    }
+
+    @Override
+    public void setInventorySlot(JedrockConnection c, int slot, int state, int count, com.jedrock.api.item.ItemDisplay display) {
         // Set Slot (0x16): byte windowId=0, short slot, Slot data.
-        c.send(new ClientboundSetSlot(JeInventoryCodec.windowSlot(slot), state, count));
+        c.send(new ClientboundSetSlot(JeInventoryCodec.windowSlot(slot), state, count, display));
         // Keep the held-item mirror in step with a live survival pickup / consume (see setInventory).
         if (slot >= 0 && slot < 9) {
             hotbarState[slot] = count > 0 ? state : 0;
@@ -649,7 +660,13 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
 
     @Override
     public void setWindowItems(JedrockConnection c, int windowId, int[] states, int[] counts) {
-        c.send(new ClientboundWindowItems(JeInventoryCodec.encodeRaw(windowId, states, counts)));
+        setWindowItems(c, windowId, states, counts, null);
+    }
+
+    @Override
+    public void setWindowItems(JedrockConnection c, int windowId, int[] states, int[] counts,
+                                com.jedrock.api.item.ItemDisplay[] display) {
+        c.send(new ClientboundWindowItems(JeInventoryCodec.encodeRaw(windowId, states, counts, display)));
     }
 
     @Override

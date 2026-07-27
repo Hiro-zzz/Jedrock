@@ -259,6 +259,11 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void setInventory(int[] states, int[] counts, com.jedrock.api.item.ItemDisplay[] display) {
+        protocolHandler.setInventory(this, states, counts, display);
+    }
+
+    @Override
     public void setInventory(int[] states, int[] counts) {
         protocolHandler.setInventory(this, states, counts);
     }
@@ -266,6 +271,11 @@ public class JedrockConnection implements Connection, PlayerConnection {
     @Override
     public void setHealth(int health) {
         protocolHandler.setHealth(this, health);
+    }
+
+    @Override
+    public void setInventorySlot(int slot, int state, int count, com.jedrock.api.item.ItemDisplay display) {
+        protocolHandler.setInventorySlot(this, slot, state, count, display);
     }
 
     @Override
@@ -291,6 +301,11 @@ public class JedrockConnection implements Connection, PlayerConnection {
     @Override
     public void openContainer(int windowId, String title, int slots, int x, int y, int z) {
         protocolHandler.openContainer(this, windowId, title, slots, x, y, z);
+    }
+
+    @Override
+    public void setWindowItems(int windowId, int[] states, int[] counts, com.jedrock.api.item.ItemDisplay[] display) {
+        protocolHandler.setWindowItems(this, windowId, states, counts, display);
     }
 
     @Override

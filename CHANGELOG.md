@@ -6,6 +6,203 @@ unstable — anything may change between entries.
 
 ## [Unreleased]
 
+### Added
+
+- **Custom item names and lore reach the client — item NBT on all four protocols.** The other half of
+  custom items. Until now no item NBT was written anywhere: every serializer explicitly sent "no NBT" (a
+  bare `TAG_End` on Java, a zero length on both Bedrock eras), so a custom item was correct server-side and
+  nameless on screen.
+  It is **two encoders**, and finding out which two cost a trip to a real client:
+  **Java 1.8 / 1.12.2** — big-endian named NBT written *inline* in the Slot's trailing field, with
+  unsigned-short string lengths and a big-endian int list length. `Name` is a plain §-coded string, since
+  text components there arrived in 1.13 — so one encoder serves both target versions and nothing has to
+  know which it is writing for.
+  **Both Bedrock eras** — *little-endian* NBT (LE-short string lengths, LE int list lengths) behind the
+  Slot's own LE-short length. The same bytes on 1.1.5 and 0.14, for once, so one encoder serves both.
+  **The dialect mistake, recorded because the failure was silent.** Protocol 113 speaks *two* NBT dialects
+  and the choice is per **call site**, not per protocol. A chunk's block-entity tail goes through
+  PocketMine's `NBT->write(TRUE)`, which forces *network* NBT (unsigned-varint string lengths, zigzag
+  ints) — that is what the chest tile writes, and what this project's protocol notes described, so it was
+  the obvious thing to reach for. An item's NBT does **not**: `Item::writeCompoundTag` builds it with
+  `new NBT(NBT::LITTLE_ENDIAN)` and plain `write()`. Written the network way, the retail 1.1.5 client
+  neither crashed nor logged anything — it **silently ignored the compound** and kept showing the vanilla
+  item name, which is the quietest failure available. If a renamed item shows its vanilla name, suspect the
+  dialect before the plumbing; the encoder now carries that paragraph as a comment.
+  Both Bedrock forms are length-prefixed, so the compound is built into a scratch buffer and measured
+  before it is announced — a cost paid only by a stack that actually has a name.
+  Threaded through as a new `ItemDisplay` (name + legacy-rendered lore, `null` = ordinary) on
+  `PlayerConnection.setInventory` / `setInventorySlot` / `setWindowItems`, each **defaulting to the existing
+  nameless form**, so a connection that hasn't learned to carry a name keeps working and just shows the
+  vanilla one — the honest degradation, since the item is still the right item. `CorePlayer` resolves a
+  slot's key through the registry only when there *is* a key, and hands down a `null` array when nothing in
+  the inventory is custom: **an ordinary inventory's bytes are unchanged**.
+  Pinned by byte-level tests on both dialects (10 new), written to assert the **exact** encoding rather
+  than "some NBT is present" — the first version passed its tests and still failed on the client, because
+  the tests agreed with the encoder about the wrong dialect. Tested: the plain case writing exactly the
+  bytes it always did on each protocol, the display compound's full byte sequence, lore as a string list
+  with each dialect's own length encoding, 0.14 and 1.1.5 producing the same compound, an empty display
+  treated as ordinary, lore without a name, and air ignoring a display entirely.
+  **Confirmed on a real 1.1.5 client**; Java is still unverified.
+
+- **Custom items — a name, lore and programmable behaviour on a vanilla item.** The honest version of the
+  feature, and the only one this server can offer: there is **no resource pack** (it would break the promise
+  that any unmodified client can join, and 0.14 barely supports one), so a custom item is *drawn* as
+  whatever vanilla item it is built on. A frostblade is a diamond sword to the eye. What is custom is its
+  name, its lore, and what it does.
+  **`items.define(key, state)`** → `setName` / `setLore`, plus the behaviours: **`onUse`** (right-click),
+  **`onHit`** (the victim is in `ctx.getTarget()`), **`onBreak`** (`ctx.getX/Y/Z/getBlock`) and
+  **`onHold`**. Each returns `true` to **consume** the action — which it does by cancelling the event the
+  core already routes that decision through, so an item's behaviour is exactly the cancellation a script
+  could have written by hand, and a listener at a higher priority can overrule it. `HIT` is the one
+  dispatched directly rather than through a listener, because no event carries both sides: `PlayerDamageEvent`
+  knows who was hurt, not who did it.
+  **Identity is the key, and a stack carries the key — not a copy of the definition.** That one decision is
+  what makes the rest work. A hot reload replaces the definition and every frostblade already in the world
+  reads as the new one; the level file (**format v4**, carrying the key per slot) restores a chest full of
+  them long before any plugin exists to define one; and an item whose plugin was uninstalled simply behaves
+  as the vanilla item it is drawn as, coming back the moment its script does. Nothing is migrated,
+  reconciled or garbage-collected. A custom stack never merges with an ordinary one of the same state —
+  same state *and* same key is what makes two stacks the same item.
+  Dispatch listeners are registered **only while some defined item actually has a behaviour**, so a purely
+  cosmetic item costs nothing and a server with none costs nothing at all — the same rule the region rules
+  follow, for the same reason. A hook that throws is logged and answers "not consumed", so a script's
+  mistake can't silently swallow a player's swing.
+  The name and lore now **reach the client on all four protocols** — see the item-NBT entry below.
+  Try `/forge` in `plugins/example.js`. Tested (16 new): a definition read back by key; a key that wouldn't
+  survive a file refused; re-defining replacing it with every stack following; a stack whose key nothing
+  defines staying perfectly usable; a custom stack refusing to merge with an ordinary one and merging with
+  its own kind; take and clear respecting and forgetting the key; use / break / hit / hold hooks firing,
+  seeing their context and consuming the action; a hook firing only for the item that carries it; a throwing
+  hook not consuming; dispatch appearing with the first behaviour and going with the last; and a custom item
+  in a chest keeping its key across a save and load.
+
+- **Permissions become scriptable — the `permissions` global.** A script could always *read* rights
+  (`player.hasPermission`, `isOp`, `getPrefix`) and never change them. The only way to grant anything was to
+  build a `/perm …` command line as a string and hand it to `dispatchCommand`: no return value, no failure
+  you could branch on, and a typo surfacing in the server log. The region demo written one commit earlier
+  had to do exactly that, which is as good a signal as any that the API was missing.
+  It is also the door that closed by accident. When the script surface became a written contract,
+  `server.getOpList()` was named as one of the holes and shut — correctly, since it was reachable only
+  because Rhino reflects an implementation's runtime class. Nothing was opened in its place. This is that
+  door opened **on purpose**, with a shape the `api` describes.
+  **Groups**: `permissions.createGroup(n)` → `.add(node)` / `.remove(node)` / `.inherit(g)` / `.uninherit(g)`
+  / `.setPrefix(s)` / `.makeDefault()`, plus `groups()`, `group(n)`, `deleteGroup(n)`, `defaultGroup()`,
+  `setDefaultGroup(n)`, `reload()`. **One player**: `permissions.forPlayer(p)` → `.addGroup` / `.removeGroup`
+  / `.add(node)` / `.remove(node)` / `.has(node)` / `.getNodes()` / `.getGroups()` / `.getPrefix()` /
+  `.isOp()` / `.setOp(b)`. The player may be a `Player` **or a bare name**, because the permission file is
+  keyed by name — so a script can prepare somebody's rights before they have ever logged in, which no
+  amount of `Player` objects would let it do.
+  `createGroup` is deliberately **idempotent**, unlike `regions.create` which refuses a taken name: a group
+  is a role a script wants to *declare* on every load, and handing back the existing one (nodes intact) is
+  what makes that safe. Everything here is **server state** — written to `permissions.txt` / `ops.txt` the
+  moment it changes, and not torn down with the plugin.
+  `setOp` is included rather than hidden: it is the heaviest switch on the list, but a script could already
+  throw it by sending `/op` through `dispatchCommand`, so withholding it bought nothing except a worse
+  spelling. Documented as what it is.
+  Tested (14 new): a group built and read back; `createGroup` twice keeping the nodes and not making a
+  third group; inheritance granting and then not; the default group moving and a group being deleted; a
+  player getting a role and something that is just theirs; deny winning between their own node and their
+  group; rights prepared for an offline name; removals reporting whether they did anything; op holding
+  every node and the list folding case; everything surviving a restart; `reload` discarding memory; a
+  non-player refused loudly; and a group handle whose group was deleted answering rather than throwing.
+
+- **Regions — named boxes with rules, the platform's next primitive.** The thing every game mode ends up
+  needing and nothing here could express: a lobby, an arena, a shop floor, a spawn nobody can dig up. Until
+  now a script wanting any of that had to keep its own coordinates and re-check them by hand in
+  `PlayerMove`, reinventing the same box maths — the core's own comment on that path already named "a
+  region border" as the hypothetical reason to cancel a move.
+  A region is six numbers and a set of allowances — **`build`, `interact`, `pvp`, `damage`, `entry`** —
+  every one **on** until denied, so a fresh region changes nothing until it's told to. Bounds are inclusive
+  and normalized, so two corners in any order select what they look like they select. Where regions
+  overlap, **deny wins** — the rule this server already uses for permissions — which needs no priority
+  number and makes a small no-build box inside a big free-build one behave the obvious way.
+  Nothing about it is simulated. There is no trigger volume, nothing ticks, and there is no second
+  rulebook: **each flag is enforced by cancelling the event the core already routes that decision
+  through**, so a region's refusal is the same cancellation a script could have written, and a script
+  listening at a higher priority can overrule one. Crossings fire **`PlayerRegionEnter` /
+  `PlayerRegionLeave`**, once per region actually crossed rather than per movement packet, and both are
+  cancellable — refusing an enter is what the `entry` flag does, and refusing a *leave* is how an arena
+  holds somebody until a round is over. A refused crossing is undone whole: everything is decided before
+  anything is committed, so a player never half-enters.
+  **A server with no regions pays nothing**, which is the whole reason this could go on the movement path
+  at all. Every query starts with one array-length read, and the enforcement listeners are **registered
+  only while at least one region exists** — registering them unconditionally would make every block edit on
+  every server build an event for rules nobody wrote. Movement deliberately isn't one of those listeners,
+  since a permanent `PlayerMoveEvent` listener would defeat the `hasListeners` fast path that keeps
+  movement allocation-free; the core asks the manager directly instead, behind the same emptiness check.
+  Membership lives on the player and reuses its buffers, so walking around inside a region allocates
+  nothing — only an actual crossing does.
+  Regions are **server-owned**, like saved scenes: `world/regions.jdb` (the same compact DEFLATE + atomic
+  move + dirty flag as the level and the scene store), loaded **before the first login**, so a protected
+  spawn protects itself with no script running. `create` refuses a name already taken rather than replacing
+  it, so a script that creates its regions on every load can't wipe flags an operator set by hand.
+  **Exceptions are per player and per group**, and they are permissions rather than a roster kept on the
+  region — because "may *this* player do *this*" is the one question this server already has a whole
+  subsystem for, and a region growing its own membership list would be exactly the second rulebook the
+  flags themselves avoid. A denial is waived for anyone holding **`jedrock.region.<name>.<flag>`**: grant it
+  to one player, or to a group and everyone in it (and in anything inheriting it); `jedrock.region.plot7.*`
+  covers every flag of one region, `jedrock.region.*` every region, and `-jedrock.region.plot7.build` takes
+  it back, since deny wins there as it does here. An **op holds every node**, so operators are exempt
+  everywhere — the same rule that governs commands, and the reason a region can't lock its own staff out.
+  The permission lookup only happens on a region that has *already* denied something, so the ordinary
+  "nothing forbids this" answer never touches the permission store.
+  Two things fell out of that. Region **names are now restricted** to letters, digits, `_` and `-` (≤32),
+  because the name is half of the node and a dot in it would silently invent a wildcard level while a space
+  would make the node untypeable. And the permission system gained **per-player nodes** — it only had
+  groups, so "let *this* player build in *their* plot" would have meant a throwaway group per person.
+  `/perm user <name> addnode|removenode <node>`, shown by `user info`, persisted in the existing `user`
+  block of `permissions.txt` (a `permission` line inside it, back-compatible), resolved alongside groups
+  with the same wildcards and the same deny-wins. Useful well beyond regions: one player, one command.
+  `/region info` prints each denied flag's node, and denying one tells you the node right then — the moment
+  you forbid something is the moment you want to know who can still do it.
+
+  Authored either way: **`/region`** (`pos1` / `pos2` / `create <name>`, or `here <name> <radius>`; then
+  `list`, `info`, `flag <name> <flag> allow|deny`, `remove`, with tab-completion for names and flags) —
+  corner selection lives on the player, so two operators can select at once and a disconnect throws a
+  half-made selection away — or the **`regions` script global** (`create` / `get` / `all` / `at` /
+  `of(player)` / `remove` / `allows`, flags addressed by name). Try `/zone` in `plugins/example.js`.
+  Tested (33 new): corner normalization and inclusive, floored containment; a name taken only once;
+  a bypass node exempting one player and a group carrying it to everyone in it; an exemption being per
+  region *and* per flag (building in your plot is not walking through a wall around it); a whole-region
+  wildcard covering both; an op exempt unnamed; the world-level query deliberately ignoring exemptions; a
+  name that would make an ambiguous node refused; and, on the permission side, a per-player node granted,
+  wildcarded, denied over a group grant, persisted, taken back, and written out for a player who has no
+  group at all. Plus:
+  deny-wins across overlaps; each flag cancelling exactly its own event and only inside the box; damage
+  judged where the *victim* stands; enforcement appearing with the first region and going away with the
+  last; crossings firing once per crossing and not while walking around inside; a denied `entry` and a
+  cancelled enter both refusing the step; a cancelled leave keeping membership; a refused crossing leaving
+  membership untouched; the file round-tripping with its flags; an untouched set not being rewritten; and a
+  boot-loaded region enforcing itself immediately.
+
+- **Storage menus reach Bedrock — the transfer moves into the list.** The last gap in the illusion toolkit,
+  and the one the `menus` global had been carrying since it landed: a button menu degrades to a `/pick`
+  list on Bedrock, but a list can only ever *signal*, and storage is the one menu shape that has to move
+  items. So it was refused on 1.1.5 and, on 0.14, sent a window that a real client never brings up. Both
+  dead ends are client-verified and neither is going to change: 1.1.5 crashes on a block-bound chest window
+  (it builds a chest block-entity only from chunk data, which a blockless menu has none of) and raises no
+  GUI for an entity-bound one, and 0.14 simply ignores the menu window.
+  Rather than keep waiting for a window, the **transfer moved into the list**: a storage menu now lists its
+  *contents*, one option per occupied slot, plus two verbs. `/pick <n>` takes the stack in slot `n`
+  (1-based), **`/pick put`** puts the held one in, **`/pick close`** is done — and the list **redraws after
+  every transfer**, so it stays up and pickable the way an open window does instead of being consumed by
+  one choice. That is the same trade world chests already make on 1.1.5 (click-transfer instead of a
+  window), with commands standing in for the right-click a virtual menu has no block to receive. Net
+  effect: **both menu shapes now work on all four editions.** 0.14 gives up its unreliable window for the
+  list as well — one behaviour on both eras beats a path that only sometimes appears.
+  The two transfer primitives (`takeStack` / `putStack`) are now **shared with the world-chest
+  click-transfer**, deliberately: the rule that keeps them honest is subtle enough to be worth having in
+  exactly one place — a creative player's inventory is infinite and client-managed, so creative *takes* by
+  destroying the stack and *puts* without consuming, or a put→take cycle mints items (a duplication this
+  cost us once already). Survival moves real items both ways. Each caller words its own message and decides
+  whether the world is marked dirty, since a menu's contents are transient and a chest's are not.
+  Known rough edge, called out rather than hidden: a stack is addressed by **slot number** and shown as its
+  raw state, because the core has no item-name table (a block is an id by design). Honest, not friendly —
+  names are the natural follow-up. Tested: taking a slot moves the stack and leaves the list up showing
+  what is actually left, `put` deposits the hand, `close` ends it for good, a full inventory loses nothing,
+  creative neither gains items on take nor loses them on put, a button list is still one-and-done, and the
+  world-chest click-transfer still persists through the shared primitives.
+
 ### Fixed
 
 - **A survival player couldn't rearrange their own inventory on Bedrock.** Moving the held stack into

@@ -158,11 +158,31 @@ public interface PlayerConnection {
     default void setInventory(int[] states, int[] counts) {}
 
     /**
+     * As {@link #setInventory(int[], int[])}, but each slot may carry an
+     * {@link com.jedrock.api.item.ItemDisplay} — the name and lore of a custom item ({@code null} for an
+     * ordinary one, and a {@code null} array for none at all).
+     *
+     * <p>This is the method the core calls. The default drops the display and falls back to the plain
+     * form, so a connection whose protocol can't carry an item name — or simply hasn't learned to yet —
+     * keeps working and just shows the vanilla one. That is the honest degradation: the item is still the
+     * right item, it is only nameless.
+     */
+    default void setInventory(int[] states, int[] counts, com.jedrock.api.item.ItemDisplay[] display) {
+        setInventory(states, counts);
+    }
+
+    /**
      * Update a single inventory slot (0-8 hotbar, 9-35 main) to a canonical {@code (id << 4) | meta}
      * state and count (0 = empty). Used for a live survival pickup / consume so the hotbar refreshes
      * immediately, where a full {@link #setInventory} resend does not.
      */
     default void setInventorySlot(int slot, int state, int count) {}
+
+    /** As {@link #setInventorySlot(int, int, int)} with a custom item's name and lore ({@code null} = plain). */
+    default void setInventorySlot(int slot, int state, int count,
+                                  com.jedrock.api.item.ItemDisplay display) {
+        setInventorySlot(slot, state, count);
+    }
 
     /**
      * Set the player's health bar (0..20, in half-heart points). The server is authoritative for health
@@ -196,6 +216,12 @@ public interface PlayerConnection {
      * 27 main + 9 hotbar slots). Each entry is a canonical {@code (id << 4) | meta} state (0 = empty).
      */
     default void setWindowItems(int windowId, int[] states, int[] counts) {}
+
+    /** As {@link #setWindowItems(int, int[], int[])} with a per-slot name and lore ({@code null} = plain). */
+    default void setWindowItems(int windowId, int[] states, int[] counts,
+                                com.jedrock.api.item.ItemDisplay[] display) {
+        setWindowItems(windowId, states, counts);
+    }
 
     /**
      * Play the "hurt" animation on another player's avatar (the red damage flash + hurt sound) so a hit

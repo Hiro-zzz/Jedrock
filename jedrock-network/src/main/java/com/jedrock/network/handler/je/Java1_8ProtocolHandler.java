@@ -786,7 +786,13 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
 
     @Override
     public void setInventory(JedrockConnection c, int[] states, int[] counts) {
-        send(c, CB_WINDOW_ITEMS, b -> JeInventoryCodec.writeWindowItems(b, states, counts, JeInventoryCodec.WINDOW_SLOTS_1_8));
+        setInventory(c, states, counts, null);
+    }
+
+    @Override
+    public void setInventory(JedrockConnection c, int[] states, int[] counts, com.jedrock.api.item.ItemDisplay[] display) {
+        send(c, CB_WINDOW_ITEMS, b -> JeInventoryCodec.writeWindowItems(
+                b, states, counts, display, JeInventoryCodec.WINDOW_SLOTS_1_8));
     }
 
     @Override
@@ -797,11 +803,16 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
 
     @Override
     public void setInventorySlot(JedrockConnection c, int slot, int state, int count) {
+        setInventorySlot(c, slot, state, count, null);
+    }
+
+    @Override
+    public void setInventorySlot(JedrockConnection c, int slot, int state, int count, com.jedrock.api.item.ItemDisplay display) {
         // Set Slot (0x2F): byte windowId=0, short slot, Slot data (same Slot format as 1.12.2).
         send(c, CB_SET_SLOT, b -> {
             b.writeByte(0);
             b.writeShort(JeInventoryCodec.windowSlot(slot));
-            JeInventoryCodec.writeSlot(b, state, count);
+            JeInventoryCodec.writeSlot(b, state, count, display);
         });
     }
 
@@ -830,8 +841,15 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
 
     @Override
     public void setWindowItems(JedrockConnection c, int windowId, int[] states, int[] counts) {
+        setWindowItems(c, windowId, states, counts, null);
+    }
+
+    @Override
+    public void setWindowItems(JedrockConnection c, int windowId, int[] states, int[] counts,
+                                com.jedrock.api.item.ItemDisplay[] display) {
         // Window Items (0x30) — the core assembled the slots in wire order, so write the raw body.
-        send(c, CB_WINDOW_ITEMS, b -> b.writeBytes(JeInventoryCodec.encodeRaw(windowId, states, counts)));
+        send(c, CB_WINDOW_ITEMS,
+                b -> b.writeBytes(JeInventoryCodec.encodeRaw(windowId, states, counts, display)));
     }
 
     /** 1.8 Player Abilities flags for a mode: creative → invuln|allowFly|creative; else no flight. */

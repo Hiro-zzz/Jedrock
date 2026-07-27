@@ -57,7 +57,12 @@ public final class PickCommand implements Command {
         }
         String label = String.join(" ", args);
         if (menu.pick(player, label)) {
-            player.setPendingMenu(null); // one pick per list
+            // One pick per list — unless the handler put another one up in its place. A storage list
+            // redraws itself after every transfer (and clears itself on `close`), so it stays pickable
+            // the way an open window would; clearing unconditionally here would close it after one item.
+            if (player.getPendingMenu() == menu) {
+                player.setPendingMenu(null);
+            }
         } else {
             sender.sendMessage("{red}No such option: {white}" + ChatText.escape(label));
             list(sender, menu);

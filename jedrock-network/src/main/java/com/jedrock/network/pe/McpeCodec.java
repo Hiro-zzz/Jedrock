@@ -27,6 +27,11 @@ final class McpeCodec {
      * high byte and round-trips with {@link #readItemState}. No NBT / can-place / can-destroy.
      */
     static void writeSlot(ByteBuf b, int state, int count) {
+        writeSlot(b, state, count, null);
+    }
+
+    /** As above, with a custom item's name and lore in the NBT field ({@code null} = an ordinary item). */
+    static void writeSlot(ByteBuf b, int state, int count, com.jedrock.api.item.ItemDisplay display) {
         int id = Blocks.idOf(state);
         ByteBufUtils.writeSignedVarInt(b, id);
         if (id == Blocks.AIR) {
@@ -34,7 +39,7 @@ final class McpeCodec {
         }
         int aux = (Blocks.metaOf(state) << 8) | (count & 0xFF);
         ByteBufUtils.writeSignedVarInt(b, aux);          // meta << 8 | count
-        b.writeShortLE(0);                               // NBT length
+        McpeItemNbt.writeSlotNbt(b, display);            // length-prefixed; 0 for a plain item
         ByteBufUtils.writeVarInt(b, 0);                  // can place on: none
         ByteBufUtils.writeVarInt(b, 0);                  // can destroy: none
     }

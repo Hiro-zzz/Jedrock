@@ -583,9 +583,23 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     }
 
     @Override
+    public void setInventory(int[] states, int[] counts, com.jedrock.api.item.ItemDisplay[] display) {
+        int[] safe = new int[states.length];
+        for (int i = 0; i < states.length; i++) {
+            safe[i] = safeState(states[i]);
+        }
+        sendWrapped(b -> Mcpe014Packets.playerInventory(b, safe, counts, display));
+    }
+
+    @Override
     public void setInventorySlot(int slot, int state, int count) {
+        setInventorySlot(slot, state, count, null);
+    }
+
+    @Override
+    public void setInventorySlot(int slot, int state, int count, com.jedrock.api.item.ItemDisplay display) {
         sendWrapped(b -> Mcpe014Packets.containerSetSlot(
-                b, Mcpe014Packets.WINDOW_ID_PLAYER, slot, safeState(state), count));
+                b, Mcpe014Packets.WINDOW_ID_PLAYER, slot, safeState(state), count, display));
     }
 
     /**

@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -120,6 +121,25 @@ class LevelIOTest {
         assertEquals(Blocks.state(Blocks.WOOL, 14), out.stateAt(5));
         assertEquals(3, out.countAt(5));
         assertTrue(out.isEmpty(1), "untouched slot stays empty");
+    }
+
+    @Test
+    void aCustomItemInAChestKeepsItsKeyAcrossARestart(@TempDir Path dir) throws Exception {
+        Map<Long, Container> src = chests();
+        Container chest = new Container(27);
+        chest.set(0, Blocks.state(276, 0), 1, "frostblade");
+        chest.set(1, Blocks.state(276, 0), 1); // the same sword, ordinary
+        src.put(42L, chest);
+
+        Path file = dir.resolve("level.jdw");
+        LevelIO.save(file, meta(1L, true), new BlockStorage(), new BiomeStorage(), src);
+        Map<Long, Container> dst = chests();
+        LevelIO.load(file, new BlockStorage(), new BiomeStorage(), dst);
+
+        Container out = dst.get(42L);
+        assertEquals("frostblade", out.customKeyAt(0),
+                "the KEY is what persists — the file is read long before any plugin defines it");
+        assertNull(out.customKeyAt(1), "and an ordinary stack stays ordinary");
     }
 
     @Test
