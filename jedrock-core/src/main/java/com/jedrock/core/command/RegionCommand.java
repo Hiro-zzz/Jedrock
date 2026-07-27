@@ -144,6 +144,13 @@ public final class RegionCommand implements Command {
 
     private void finish(JedrockServer server, CommandSender sender, String name,
                         int x1, int y1, int z1, int x2, int y2, int z2) {
+        if (!com.jedrock.core.region.RegionManager.isValidName(name)) {
+            sender.sendMessage("{red}'" + ChatText.escape(name) + "' won't do as a name — letters, digits, "
+                    + "{white}_{red} and {white}-{red} only, up to 32. "
+                    + "{gray}(The name is half of the region's permission node, so a dot or a space in it "
+                    + "would make that node ambiguous.)");
+            return;
+        }
         CoreRegion region = server.getRegions().create(name, x1, y1, z1, x2, y2, z2);
         if (region == null) {
             sender.sendMessage("{red}There is already a region called {white}" + ChatText.escape(name)
@@ -186,10 +193,21 @@ public final class RegionCommand implements Command {
         sender.sendMessage("{gold}" + ChatText.escape(region.getName()));
         sender.sendMessage(" {gray}bounds {white}" + describeBounds(region)
                 + " {dark_gray}(" + region.getVolume() + " blocks)");
+        boolean anyDenied = false;
         for (RegionFlag flag : RegionFlag.values()) {
             boolean allowed = region.allows(flag);
+            anyDenied |= !allowed;
+            // A denied flag is the only one whose exemption node is worth reading out — an allowed flag
+            // has nothing to be excused from.
             sender.sendMessage(" {gray}" + flag.key() + " "
-                    + (allowed ? "{green}allow" : "{red}deny"));
+                    + (allowed ? "{green}allow" : "{red}deny {dark_gray}— bypass: "
+                        + region.bypassPermission(flag)));
+        }
+        if (anyDenied) {
+            sender.sendMessage("{gray}Exempt one player with {white}/perm user <name> addnode <node>{gray}, "
+                    + "or a whole group with {white}/perm group <name> add <node>{gray}. "
+                    + "{dark_gray}(" + region.bypassPermission(RegionFlag.BUILD).replace(".build", ".*")
+                    + " covers every flag here; ops are exempt everywhere.)");
         }
     }
 
@@ -222,6 +240,13 @@ public final class RegionCommand implements Command {
         server.getRegions().markDirty();
         sender.sendMessage("{green}" + ChatText.escape(region.getName()) + " now "
                 + (verb.equals("deny") ? "{red}denies " : "{green}allows ") + "{white}" + flag.key());
+        if (verb.equals("deny")) {
+            // Said here rather than only in /region info, because the moment you deny something is the
+            // moment you want to know who can still do it.
+            sender.sendMessage("{gray}Exempt one player with {white}/perm user <name> addnode "
+                    + region.bypassPermission(flag) + "{gray}, or a whole group with "
+                    + "{white}/perm group <name> add " + region.bypassPermission(flag));
+        }
     }
 
     private void remove(JedrockServer server, CommandSender sender, String[] args) {

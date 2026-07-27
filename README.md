@@ -281,7 +281,13 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   through**, so there is no second rulebook and a script can overrule one by listening at a higher
   priority. Crossing a border fires **`PlayerRegionEnter` / `PlayerRegionLeave`** — once per crossing, not
   per movement packet — and cancelling those refuses the step, which is how an arena holds someone in
-  until a round ends. Regions are **server-owned** like saved scenes: created by `/region` or a script,
+  until a round ends. **Exceptions are per player and per group**, and they're permissions rather than a
+  roster on the region — "may *this* player do *this*" already has a whole subsystem here. A denial is
+  waived for anyone holding **`jedrock.region.<name>.<flag>`**: one player, or a group and everyone in it;
+  `jedrock.region.plot7.*` covers a whole region, `-jedrock.region.plot7.build` takes it back, and an op is
+  exempt everywhere. (The permission system gained **per-player nodes** for this — `/perm user <name>
+  addnode <node>` — so "let this one player build in their own plot" doesn't need a throwaway group.)
+  Regions are **server-owned** like saved scenes: created by `/region` or a script,
   persisted to `world/regions.jdb`, and **in force from boot before the first login**. A server with no
   regions pays one array-length read per movement packet and nothing else — the enforcement listeners
   aren't even registered until the first region exists. `/region pos1` / `pos2` / `create <name>`, or
@@ -647,10 +653,10 @@ simulation stays out (see non-goals).
   **Regions landed** as the platform's next primitive (see [What works today](#what-works-today)): named
   boxes with flags, enforced by cancelling the events the core already routes decisions through rather
   than by a second rulebook, with `PlayerRegionEnter` / `PlayerRegionLeave` for the crossings and a
-  `world/regions.jdb` that puts them in force before the first login. What would grow them: **per-player
-  or per-group** flag overrides (an owner who may build in their own plot), a **greeting / farewell**
-  message per region, and a **priority** escape hatch for the case deny-wins can't express — an allow
-  island inside a deny.
+  `world/regions.jdb` that puts them in force before the first login, and **per-player / per-group
+  exceptions** carried by permission nodes rather than a roster on the region (which is what taught the
+  permission system per-player nodes). What would grow them: a **greeting / farewell** message per region,
+  and a **priority** escape hatch for the case deny-wins can't express — an allow island inside a deny.
 - **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
   **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
   cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry

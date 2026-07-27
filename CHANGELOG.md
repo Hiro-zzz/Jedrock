@@ -38,12 +38,38 @@ unstable — anything may change between entries.
   move + dirty flag as the level and the scene store), loaded **before the first login**, so a protected
   spawn protects itself with no script running. `create` refuses a name already taken rather than replacing
   it, so a script that creates its regions on every load can't wipe flags an operator set by hand.
+  **Exceptions are per player and per group**, and they are permissions rather than a roster kept on the
+  region — because "may *this* player do *this*" is the one question this server already has a whole
+  subsystem for, and a region growing its own membership list would be exactly the second rulebook the
+  flags themselves avoid. A denial is waived for anyone holding **`jedrock.region.<name>.<flag>`**: grant it
+  to one player, or to a group and everyone in it (and in anything inheriting it); `jedrock.region.plot7.*`
+  covers every flag of one region, `jedrock.region.*` every region, and `-jedrock.region.plot7.build` takes
+  it back, since deny wins there as it does here. An **op holds every node**, so operators are exempt
+  everywhere — the same rule that governs commands, and the reason a region can't lock its own staff out.
+  The permission lookup only happens on a region that has *already* denied something, so the ordinary
+  "nothing forbids this" answer never touches the permission store.
+  Two things fell out of that. Region **names are now restricted** to letters, digits, `_` and `-` (≤32),
+  because the name is half of the node and a dot in it would silently invent a wildcard level while a space
+  would make the node untypeable. And the permission system gained **per-player nodes** — it only had
+  groups, so "let *this* player build in *their* plot" would have meant a throwaway group per person.
+  `/perm user <name> addnode|removenode <node>`, shown by `user info`, persisted in the existing `user`
+  block of `permissions.txt` (a `permission` line inside it, back-compatible), resolved alongside groups
+  with the same wildcards and the same deny-wins. Useful well beyond regions: one player, one command.
+  `/region info` prints each denied flag's node, and denying one tells you the node right then — the moment
+  you forbid something is the moment you want to know who can still do it.
+
   Authored either way: **`/region`** (`pos1` / `pos2` / `create <name>`, or `here <name> <radius>`; then
   `list`, `info`, `flag <name> <flag> allow|deny`, `remove`, with tab-completion for names and flags) —
   corner selection lives on the player, so two operators can select at once and a disconnect throws a
   half-made selection away — or the **`regions` script global** (`create` / `get` / `all` / `at` /
   `of(player)` / `remove` / `allows`, flags addressed by name). Try `/zone` in `plugins/example.js`.
-  Tested (21 new): corner normalization and inclusive, floored containment; a name taken only once;
+  Tested (33 new): corner normalization and inclusive, floored containment; a name taken only once;
+  a bypass node exempting one player and a group carrying it to everyone in it; an exemption being per
+  region *and* per flag (building in your plot is not walking through a wall around it); a whole-region
+  wildcard covering both; an op exempt unnamed; the world-level query deliberately ignoring exemptions; a
+  name that would make an ambiguous node refused; and, on the permission side, a per-player node granted,
+  wildcarded, denied over a group grant, persisted, taken back, and written out for a player who has no
+  group at all. Plus:
   deny-wins across overlaps; each flag cancelling exactly its own event and only inside the box; damage
   judged where the *victim* stands; enforcement appearing with the first region and going away with the
   last; crossings firing once per crossing and not while walking around inside; a denied `entry` and a

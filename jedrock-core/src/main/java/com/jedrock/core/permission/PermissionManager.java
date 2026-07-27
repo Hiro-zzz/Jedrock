@@ -17,12 +17,15 @@ import java.util.Set;
 
 /**
  * A native group-based permission system: named {@link PermissionGroup}s (with inheritance, a chat prefix,
- * and a default group), player→group assignments, and node resolution with wildcards and explicit deny.
- * Ops (see {@code OpList}) are a separate super-user escape hatch resolved by the caller — this class only
- * knows groups.
+ * and a default group), player→group assignments, per-player nodes, and node resolution with wildcards and
+ * explicit deny. Ops (see {@code OpList}) are a separate super-user escape hatch resolved by the caller.
  *
- * <p><b>Resolution</b> of {@link #has}: gather the player's groups (their assignments, or the default group
- * if none), expand inheritance, union the nodes, then — a <b>deny wins</b> — if any node denies the query
+ * <p>Groups answer "what may this <em>kind</em> of player do", which is the right shape for a role. Some
+ * exceptions are genuinely about one person, though — the owner of one plot, one player trusted with one
+ * command — so a player can also carry nodes of their own, rather than needing a throwaway group each.
+ *
+ * <p><b>Resolution</b> of {@link #has}: take the player's own nodes, gather their groups (their
+ * assignments, or the default group if none), expand inheritance, union it all, then — a <b>deny wins</b> — if any node denies the query
  * ({@code -node}, {@code -a.b.*}, {@code -*}) it's refused; else if any grants it ({@code node}, {@code
  * a.b.*}, {@code *}) it's allowed; else refused. Persisted to a plain, human-editable {@code permissions.txt}.
  *
@@ -38,6 +41,13 @@ public final class PermissionManager {
     private final Map<String, PermissionGroup> groups = new LinkedHashMap<>();
     /** Player name (lower-case) → the groups assigned to them. */
     private final Map<String, Set<String>> userGroups = new LinkedHashMap<>();
+    /**
+     * Player name (lower-case) → nodes granted to that player alone, on top of whatever their groups give.
+     * Groups answer "what may this <em>kind</em> of player do"; this answers the cases that are genuinely
+     * about one person — the owner of one plot, one player trusted with one command — without inventing a
+     * throwaway group per player. Same syntax as a group's nodes, deny (-node) and wildcards included.
+     */
+    private final Map<String, Set<String>> userNodes = new LinkedHashMap<>();
 
     public PermissionManager(Path file) {
         this.file = file;
@@ -53,8 +63,10 @@ public final class PermissionManager {
     // ===== resolution =====
 
     /**
-     * Whether {@code playerName} is granted {@code node} by their groups. Does <b>not</b> consider op — the
-     * caller ORs that in. Deny ({@code -node}) beats grant; {@code *} and {@code a.b.*} are wildcards.
+     * Whether {@code playerName} is granted {@code node} by their own nodes or their groups. Does
+     * <b>not</b> consider op — the caller ORs that in. Deny ({@code -node}) beats grant wherever it comes
+     * from, so a player-level {@code -node} overrides a group grant and vice versa; {@code *} and
+     * {@code a.b.*} are wildcards.
      */
     public synchronized boolean has(String playerName, String node) {
         if (node == null || node.isBlank()) {
@@ -98,9 +110,13 @@ public final class PermissionManager {
         return pattern.equals(node);
     }
 
-    /** Union of all nodes across the player's groups and everything they inherit. */
+    /** Union of the player's own nodes and every node their groups (and those groups' parents) carry. */
     private Set<String> effectivePermissions(String playerName) {
         Set<String> out = new LinkedHashSet<>();
+        Set<String> own = userNodes.get(playerName.toLowerCase(Locale.ROOT));
+        if (own != null) {
+            out.addAll(own);
+        }
         for (PermissionGroup g : effectiveGroups(playerName)) {
             out.addAll(g.permissions());
         }
@@ -269,6 +285,40 @@ public final class PermissionManager {
     }
 
     /** The groups explicitly assigned to a player (empty = they fall to the default group). */
+    /**
+     * Grant {@code node} to this player alone. @return {@code false} if they already had it
+     *
+     * <p>For the exception that is about one person rather than one role — the owner of a plot, someone
+     * trusted with a single command. A role still belongs on a group.
+     */
+    public synchronized boolean addUserPermission(String playerName, String node) {
+        if (node == null || node.isBlank()) {
+            return false;
+        }
+        boolean added = userNodes.computeIfAbsent(playerName.toLowerCase(Locale.ROOT),
+                k -> new LinkedHashSet<>()).add(node.trim());
+        if (added) {
+            save();
+        }
+        return added;
+    }
+
+    /** Take back a node granted to this player alone. @return {@code false} if they didn't have it */
+    public synchronized boolean removeUserPermission(String playerName, String node) {
+        Set<String> own = userNodes.get(playerName.toLowerCase(Locale.ROOT));
+        boolean removed = own != null && own.remove(node == null ? "" : node.trim());
+        if (removed) {
+            save();
+        }
+        return removed;
+    }
+
+    /** The nodes granted to this player alone (not counting anything their groups give them). */
+    public synchronized Set<String> userPermissions(String playerName) {
+        Set<String> own = userNodes.get(playerName.toLowerCase(Locale.ROOT));
+        return own == null ? Set.of() : new LinkedHashSet<>(own);
+    }
+
     public synchronized Set<String> userGroups(String playerName) {
         Set<String> assigned = userGroups.get(playerName.toLowerCase(Locale.ROOT));
         return assigned == null ? Set.of() : new LinkedHashSet<>(assigned);
@@ -323,6 +373,8 @@ public final class PermissionManager {
                     case "permission" -> {
                         if (group != null && !value.isBlank()) {
                             group.addPermission(value);
+                        } else if (user != null && !value.isBlank()) {
+                            userNodes.computeIfAbsent(user, k -> new LinkedHashSet<>()).add(value);
                         }
                     }
                     case "member" -> { // a 'group' line inside a user block; 'member' avoids clashing with the block keyword
@@ -343,7 +395,8 @@ public final class PermissionManager {
         StringBuilder sb = new StringBuilder();
         sb.append("# Jedrock permissions — groups and player assignments.\n");
         sb.append("# group <name> { default | prefix <text> | inherit <group> | permission <node> }\n");
-        sb.append("#   node: literal, * / a.b.* wildcard, or -node to deny. user <name> { member <group> }\n\n");
+        sb.append("#   node: literal, * / a.b.* wildcard, or -node to deny.\n");
+        sb.append("# user <name> { member <group> | permission <node> } — a node here is that player's alone.\n\n");
         for (PermissionGroup g : groups.values()) {
             sb.append("group ").append(g.name()).append('\n');
             if (g.isDefault()) {
@@ -360,13 +413,21 @@ public final class PermissionManager {
             }
             sb.append('\n');
         }
-        for (Map.Entry<String, Set<String>> e : userGroups.entrySet()) {
-            if (e.getValue().isEmpty()) {
+        // One block per player who has anything at all — a group membership, nodes of their own, or both.
+        Set<String> named = new LinkedHashSet<>(userGroups.keySet());
+        named.addAll(userNodes.keySet());
+        for (String name : named) {
+            Set<String> memberOf = userGroups.getOrDefault(name, Set.of());
+            Set<String> own = userNodes.getOrDefault(name, Set.of());
+            if (memberOf.isEmpty() && own.isEmpty()) {
                 continue;
             }
-            sb.append("user ").append(e.getKey()).append('\n');
-            for (String group : e.getValue()) {
+            sb.append("user ").append(name).append('\n');
+            for (String group : memberOf) {
                 sb.append("  member ").append(group).append('\n');
+            }
+            for (String node : own) {
+                sb.append("  permission ").append(node).append('\n');
             }
             sb.append('\n');
         }
@@ -381,6 +442,7 @@ public final class PermissionManager {
     public synchronized void reload() {
         groups.clear();
         userGroups.clear();
+        userNodes.clear();
         load();
         if (defaultGroup() == null) {
             getOrCreate("default").setDefault(true);

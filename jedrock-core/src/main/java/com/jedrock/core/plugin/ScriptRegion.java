@@ -94,6 +94,24 @@ public final class ScriptRegion {
         return this;
     }
 
+    /**
+     * The permission node that exempts a player from this region's denial of {@code flag} —
+     * {@code jedrock.region.<name>.<flag>}.
+     *
+     * <pre>{@code
+     *   var plot = regions.get('plot7');
+     *   server.dispatchCommand(null, 'perm player ' + owner.getName()
+     *       + ' add ' + plot.getBypassPermission('build'));   // the owner may build in their own plot
+     * }</pre>
+     *
+     * <p>Grant it to a group instead and everyone in it is exempt; {@code jedrock.region.plot7.*} covers
+     * every flag of one region, {@code jedrock.region.*} every region. An op holds every node, so operators
+     * are exempt everywhere.
+     */
+    public String getBypassPermission(String flag) {
+        return region.bypassPermission(flagOf(flag));
+    }
+
     /** Every flag currently denied here, by name — what {@code /region info} would print. */
     public String[] getDenied() {
         java.util.List<String> denied = new java.util.ArrayList<>();

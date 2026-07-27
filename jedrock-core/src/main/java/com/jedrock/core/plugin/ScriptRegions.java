@@ -90,16 +90,37 @@ public final class ScriptRegions {
     }
 
     /**
-     * Whether {@code flag} is allowed at this point, applying every region that covers it — the same
-     * question the core asks before it lets a block be broken. {@code true} where nothing has an opinion.
+     * Whether {@code flag} is allowed at this point <em>for anyone</em>, applying every region that covers
+     * it — the rule as the world states it, before anybody's exemptions. {@code true} where nothing has an
+     * opinion.
      */
     public boolean allows(double x, double y, double z, String flag) {
+        return regions.allows(x, y, z, flagOf(flag));
+    }
+
+    /**
+     * Whether <em>this player</em> may do {@code flag} at this point — the same question the core asks
+     * before it lets a block be broken, exemptions and all.
+     *
+     * <p>A player holding a region's {@linkplain ScriptRegion#getBypassPermission bypass node} passes that
+     * region's denial as if it weren't there, so this and {@link #allows} disagree exactly where somebody
+     * has been excused.
+     */
+    public boolean allowsFor(Object player, double x, double y, double z, String flag) {
+        Player target = ScriptWrapFactory.unwrapPlayer(player);
+        if (target == null) {
+            throw new IllegalArgumentException("regions.allowsFor expects a player");
+        }
+        return regions.allows(target, x, y, z, flagOf(flag));
+    }
+
+    private static com.jedrock.api.region.RegionFlag flagOf(String flag) {
         com.jedrock.api.region.RegionFlag resolved = com.jedrock.api.region.RegionFlag.byName(flag);
         if (resolved == null) {
             throw new IllegalArgumentException("no such region flag: '" + flag
                     + "' (build, interact, pvp, damage, entry)");
         }
-        return regions.allows(x, y, z, resolved);
+        return resolved;
     }
 
     private ScriptRegion[] wrap(java.util.List<Region> found) {

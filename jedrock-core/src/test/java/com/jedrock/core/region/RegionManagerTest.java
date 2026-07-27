@@ -15,6 +15,8 @@ import com.jedrock.api.region.Region;
 import com.jedrock.api.region.RegionFlag;
 import com.jedrock.api.world.Dimension;
 import com.jedrock.api.world.Location;
+import com.jedrock.core.permission.OpList;
+import com.jedrock.core.permission.PermissionManager;
 import com.jedrock.core.player.CorePlayer;
 import com.jedrock.core.world.CoreWorld;
 import org.junit.jupiter.api.Test;
@@ -48,6 +50,14 @@ class RegionManagerTest {
 
     private static void standAt(CorePlayer player, double x, double y, double z) {
         player.setLocation(new Location(player.getWorld(), x, y, z, 0f, 0f));
+    }
+
+    /** A player whose permissions actually resolve — needed for anything about exemptions. */
+    private CorePlayer permissioned(String name, Path dir, PermissionManager perms) {
+        CorePlayer player = new CorePlayer(UUID.randomUUID(), name, new Conn(), world,
+                world.getSpawnLocation(), GameMode.SURVIVAL);
+        player.setPermissions(new OpList(dir.resolve("ops.txt")), perms);
+        return player;
     }
 
     // ===== The box =====
@@ -178,6 +188,100 @@ class RegionManagerTest {
 
         regions.remove("b");
         assertFalse(events.hasListeners(BlockBreakEvent.class), "and gone again with the last region");
+    }
+
+    // ===== Exceptions =====
+    //
+    // Per-player and per-group, carried by the permission system rather than a roster on the region: the
+    // question "may this player do this" already has a whole subsystem, with groups, wildcards and deny.
+
+    @Test
+    void aPlayerHoldingTheBypassNodeIsExemptFromThatDenial(@TempDir Path dir) {
+        regions.create("plot7", 0, 60, 0, 10, 70, 10).deny(RegionFlag.BUILD);
+        PermissionManager perms = new PermissionManager(dir.resolve("permissions.txt"));
+        CorePlayer owner = permissioned("Owner", dir, perms);
+        CorePlayer stranger = permissioned("Stranger", dir, perms);
+        perms.addUserPermission("Owner", "jedrock.region.plot7.build");
+
+        assertFalse(events.post(new BlockBreakEvent(owner, 5, 65, 5, 1)).isCancelled(),
+                "the owner may build in their own plot");
+        assertTrue(events.post(new BlockBreakEvent(stranger, 5, 65, 5, 1)).isCancelled(),
+                "everybody else still can't");
+    }
+
+    @Test
+    void aGroupCarriesTheExemptionToEveryoneInIt(@TempDir Path dir) {
+        regions.create("plot7", 0, 60, 0, 10, 70, 10).deny(RegionFlag.BUILD);
+        PermissionManager perms = new PermissionManager(dir.resolve("permissions.txt"));
+        perms.createGroup("builders");
+        perms.addGroupPermission("builders", "jedrock.region.plot7.build");
+        perms.addUserGroup("Alex", "builders");
+        CorePlayer alex = permissioned("Alex", dir, perms);
+
+        assertFalse(events.post(new BlockBreakEvent(alex, 5, 65, 5, 1)).isCancelled());
+    }
+
+    @Test
+    void anExemptionIsPerRegionAndPerFlag(@TempDir Path dir) {
+        CoreRegion plot = regions.create("plot7", 0, 60, 0, 10, 70, 10);
+        plot.deny(RegionFlag.BUILD);
+        plot.deny(RegionFlag.ENTRY);
+        regions.create("spawn", 100, 60, 100, 110, 70, 110).deny(RegionFlag.BUILD);
+        PermissionManager perms = new PermissionManager(dir.resolve("permissions.txt"));
+        CorePlayer steve = permissioned("Steve", dir, perms);
+        perms.addUserPermission("Steve", "jedrock.region.plot7.build");
+
+        assertFalse(events.post(new BlockBreakEvent(steve, 5, 65, 5, 1)).isCancelled(), "the flag they hold");
+        assertTrue(events.post(new BlockBreakEvent(steve, 105, 65, 105, 1)).isCancelled(),
+                "a different region is a different node");
+        assertFalse(regions.updateMembership(steve, 5, 65, 5),
+                "and being allowed to build is not being allowed through the wall");
+    }
+
+    @Test
+    void aWholeRegionWildcardCoversEveryFlagIncludingTheWall(@TempDir Path dir) {
+        CoreRegion staff = regions.create("staffroom", 0, 60, 0, 10, 70, 10);
+        staff.deny(RegionFlag.ENTRY);
+        staff.deny(RegionFlag.BUILD);
+        PermissionManager perms = new PermissionManager(dir.resolve("permissions.txt"));
+        CorePlayer keeper = permissioned("Keeper", dir, perms);
+        perms.addUserPermission("Keeper", "jedrock.region.staffroom.*");
+
+        assertTrue(regions.updateMembership(keeper, 5, 65, 5), "the door opens for them");
+        assertFalse(events.post(new BlockBreakEvent(keeper, 5, 65, 5, 1)).isCancelled());
+    }
+
+    @Test
+    void anOpIsExemptEverywhereWithoutBeingNamed(@TempDir Path dir) throws Exception {
+        regions.create("spawn", 0, 60, 0, 10, 70, 10).deny(RegionFlag.BUILD);
+        Path opsFile = dir.resolve("ops.txt");
+        java.nio.file.Files.writeString(opsFile, "Admin\n");
+        OpList ops = new OpList(opsFile);
+        CorePlayer admin = new CorePlayer(UUID.randomUUID(), "Admin", new Conn(), world,
+                world.getSpawnLocation(), GameMode.SURVIVAL);
+        admin.setPermissions(ops, new PermissionManager(dir.resolve("permissions.txt")));
+
+        assertFalse(events.post(new BlockBreakEvent(admin, 5, 65, 5, 1)).isCancelled(),
+                "an op holds every node — the same rule that governs commands");
+    }
+
+    @Test
+    void theWorldLevelQueryIgnoresExemptionsEntirely(@TempDir Path dir) {
+        regions.create("plot7", 0, 60, 0, 10, 70, 10).deny(RegionFlag.BUILD);
+        PermissionManager perms = new PermissionManager(dir.resolve("permissions.txt"));
+        CorePlayer owner = permissioned("Owner", dir, perms);
+        perms.addUserPermission("Owner", "jedrock.region.plot7.build");
+
+        assertFalse(regions.allows(5, 65, 5, RegionFlag.BUILD), "the rule as the world states it");
+        assertTrue(regions.allows(owner, 5, 65, 5, RegionFlag.BUILD), "and as it applies to this player");
+    }
+
+    @Test
+    void aNameThatWouldMakeAnAmbiguousNodeIsRefused() {
+        assertNull(regions.create("my.plot", 0, 0, 0, 1, 1, 1), "a dot would invent a wildcard level");
+        assertNull(regions.create("my plot", 0, 0, 0, 1, 1, 1), "a space would make the node untypeable");
+        assertNull(regions.create("", 0, 0, 0, 1, 1, 1));
+        assertNotNull(regions.create("my_plot-7", 0, 0, 0, 1, 1, 1), "letters, digits, _ and - are fine");
     }
 
     // ===== Crossings =====

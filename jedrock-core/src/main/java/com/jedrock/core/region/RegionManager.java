@@ -9,6 +9,7 @@ import com.jedrock.api.event.player.DamageCause;
 import com.jedrock.api.event.player.PlayerDamageEvent;
 import com.jedrock.api.event.player.PlayerRegionEnterEvent;
 import com.jedrock.api.event.player.PlayerRegionLeaveEvent;
+import com.jedrock.api.player.Player;
 import com.jedrock.api.region.Region;
 import com.jedrock.api.region.RegionFlag;
 import com.jedrock.core.player.CorePlayer;
@@ -65,6 +66,14 @@ import java.util.zip.InflaterInputStream;
  * allows something only if every one of them allows it. No priorities, no ordering, and a small no-build
  * region dropped inside a big free-build one does what it looks like it does.
  *
+ * <h2>Exceptions</h2>
+ *
+ * <p>A denial can be waived for a player holding that region's
+ * {@linkplain Region#bypassPermission bypass node}, which is how per-player and per-group exceptions work
+ * without regions growing a roster of their own — the permission system already answers "may this player do
+ * this", with groups, inheritance, wildcards and an explicit deny. The lookup only happens on a region that
+ * has actually denied something, so the ordinary answer never touches the permission store.
+ *
  * <p>The registry is a {@link CopyOnWriteArrayList} snapshot: reads are the overwhelming majority (several
  * per player per second) and writes are a human typing {@code /region create}, so readers get a stable
  * array to scan with no locking and no allocation.
@@ -112,14 +121,27 @@ public final class RegionManager {
         return name == null ? null : byName.get(name.toLowerCase(Locale.ROOT));
     }
 
+    /** Letters, digits, {@code _} and {@code -}; see {@link #create} for why the alphabet is closed. */
+    private static final java.util.regex.Pattern VALID_NAME =
+            java.util.regex.Pattern.compile("[A-Za-z0-9_-]{1,32}");
+
+    /** Whether {@code name} may be a region name — the same test {@link #create} applies. */
+    public static boolean isValidName(String name) {
+        return name != null && VALID_NAME.matcher(name.trim()).matches();
+    }
+
     /**
      * Create a region from two opposite corners in any order.
      *
-     * @return the new region, or {@code null} if the name is blank or already taken — a caller that
+     * <p>The name has to be letters, digits, {@code _} or {@code -}, at most 32 of them. Not fussiness: the
+     * name is half of the {@linkplain Region#bypassPermission bypass permission node}, and a dot in it
+     * would silently invent a wildcard level while a space would make the node untypeable.
+     *
+     * @return the new region, or {@code null} if the name is unusable or already taken — a caller that
      *         silently replaced a region would lose whatever rules were on it
      */
     public CoreRegion create(String name, int x1, int y1, int z1, int x2, int y2, int z2) {
-        if (name == null || name.isBlank()) {
+        if (!isValidName(name)) {
             return null;
         }
         String key = name.trim().toLowerCase(Locale.ROOT);
@@ -158,20 +180,40 @@ public final class RegionManager {
     // ===== The rule lookups =====
 
     /**
-     * Whether {@code flag} is allowed at this point — {@code true} where no region has an opinion.
-     *
-     * <p>Allocation-free and short-circuiting: it stops at the first region that denies, and on a server
-     * with no regions it is a single length check.
+     * Whether {@code flag} is allowed at this point <em>for anyone</em> — the rule as the world states it,
+     * before any player's exemptions. {@code true} where no region has an opinion.
      */
     public boolean allows(double x, double y, double z, RegionFlag flag) {
+        return allows(null, x, y, z, flag);
+    }
+
+    /**
+     * Whether {@code player} may do {@code flag} at this point — the question the core actually asks.
+     *
+     * <p>Deny wins across overlapping regions, but a player {@linkplain Region#bypassPermission exempted}
+     * from a given region's denial passes it as if it weren't there. The exemption is per region <em>and</em>
+     * per flag, so being allowed to build in a plot doesn't also let you through a wall around it.
+     *
+     * <p>Allocation-free and short-circuiting: it stops at the first region that denies and can't be
+     * excused, and on a server with no regions it is a single length check. The permission lookup only
+     * happens on a region that <em>has</em> denied — the ordinary "nothing forbids this" answer never
+     * touches the permission store.
+     */
+    public boolean allows(Player player, double x, double y, double z, RegionFlag flag) {
         List<CoreRegion> snapshot = regions;
         for (int i = 0, n = snapshot.size(); i < n; i++) {
             CoreRegion region = snapshot.get(i);
-            if (region.contains(x, y, z) && !region.allows(flag)) {
-                return false; // deny wins
+            if (region.contains(x, y, z) && !region.allows(flag)
+                    && !isExempt(player, region, flag)) {
+                return false; // deny wins, and nothing excused this player from it
             }
         }
         return true;
+    }
+
+    /** Whether this player carries the node that excuses them from {@code region}'s denial of {@code flag}. */
+    private static boolean isExempt(Player player, Region region, RegionFlag flag) {
+        return player != null && player.hasPermission(region.bypassPermission(flag));
     }
 
     /** The regions containing this point, or an empty list. Allocates — not for the movement path. */
@@ -253,8 +295,8 @@ public final class RegionManager {
             if (membership.holds(region)) {
                 continue;
             }
-            if (!region.allows(RegionFlag.ENTRY)) {
-                return false;
+            if (!region.allows(RegionFlag.ENTRY) && !isExempt(player, region, RegionFlag.ENTRY)) {
+                return false; // a wall, and this player is not one of the people it opens for
             }
             if (events.hasListeners(PlayerRegionEnterEvent.class)
                     && events.post(new PlayerRegionEnterEvent(player, region)).isCancelled()) {
@@ -301,28 +343,30 @@ public final class RegionManager {
             // wants the last word can take HIGHEST or MONITOR. A region is a rule, not an opinion, but it
             // should still be overridable by the code that owns the server.
             enforcement.add(events.register(BlockBreakEvent.class, EventPriority.HIGH, event -> {
-                if (!allows(event.getX(), event.getY(), event.getZ(), RegionFlag.BUILD)) {
+                if (!allows(event.getPlayer(), event.getX(), event.getY(), event.getZ(), RegionFlag.BUILD)) {
                     event.setCancelled(true);
                 }
             }));
             enforcement.add(events.register(BlockPlaceEvent.class, EventPriority.HIGH, event -> {
-                if (!allows(event.getX(), event.getY(), event.getZ(), RegionFlag.BUILD)) {
+                if (!allows(event.getPlayer(), event.getX(), event.getY(), event.getZ(), RegionFlag.BUILD)) {
                     event.setCancelled(true);
                 }
             }));
             enforcement.add(events.register(PlayerInteractBlockEvent.class, EventPriority.HIGH, event -> {
-                if (!allows(event.getX(), event.getY(), event.getZ(), RegionFlag.INTERACT)) {
+                if (!allows(event.getPlayer(), event.getX(), event.getY(), event.getZ(), RegionFlag.INTERACT)) {
                     event.setCancelled(true);
                 }
             }));
             enforcement.add(events.register(PlayerDamageEvent.class, EventPriority.HIGH, event -> {
                 // DAMAGE is the whole safe zone; PVP narrows it to being hit by somebody. The victim's own
                 // position is what counts — an arena is safe because of where you stand, not where the
-                // hitter does.
-                var at = event.getPlayer().getLocation();
-                boolean denied = !allows(at.x(), at.y(), at.z(), RegionFlag.DAMAGE)
+                // hitter does — and so does the victim's own exemption: bypassing `damage` means this
+                // player isn't the one the safe zone protects.
+                Player hurt = event.getPlayer();
+                var at = hurt.getLocation();
+                boolean denied = !allows(hurt, at.x(), at.y(), at.z(), RegionFlag.DAMAGE)
                         || (event.getCause() == DamageCause.ATTACK
-                            && !allows(at.x(), at.y(), at.z(), RegionFlag.PVP));
+                            && !allows(hurt, at.x(), at.y(), at.z(), RegionFlag.PVP));
                 if (denied) {
                     event.setCancelled(true);
                 }

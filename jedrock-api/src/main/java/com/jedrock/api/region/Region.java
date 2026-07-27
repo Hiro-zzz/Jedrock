@@ -49,6 +49,34 @@ public interface Region {
     /** Deny {@code flag} inside this region. */
     void deny(RegionFlag flag);
 
+    /**
+     * The permission node that <b>exempts</b> a player from this region's denial of {@code flag}:
+     * {@code jedrock.region.<name>.<flag>}.
+     *
+     * <p>Exceptions are permissions rather than a member list kept on the region, and deliberately so. The
+     * question "may <em>this</em> player do <em>this</em> here" is the one thing this server already has a
+     * whole system for — with groups, inheritance, wildcards and an explicit deny — so a region that grew
+     * its own roster would be a second rulebook of exactly the kind the flags themselves avoid. Instead:
+     *
+     * <ul>
+     *   <li>per player — grant them {@code jedrock.region.plot7.build};</li>
+     *   <li>per group — grant the same node to a group, and everyone in it (and in anything inheriting it)
+     *       is exempt;</li>
+     *   <li>whole region — {@code jedrock.region.plot7.*}; every region — {@code jedrock.region.*};</li>
+     *   <li>a targeted revocation — {@code -jedrock.region.plot7.build} beats any grant, since deny wins
+     *       there as it does here.</li>
+     * </ul>
+     *
+     * <p>An <b>op holds every node</b>, so an operator is exempt everywhere — the same rule that governs
+     * commands, and the reason a region never locks its own staff out.
+     *
+     * <p>Region names are restricted to letters, digits, {@code _} and {@code -} precisely so this node is
+     * unambiguous: a name with a dot in it would silently invent a wildcard level.
+     */
+    default String bypassPermission(RegionFlag flag) {
+        return "jedrock.region." + getName().toLowerCase(java.util.Locale.ROOT) + "." + flag.key();
+    }
+
     /** The number of blocks this region covers — useful for a sanity check before denying half a world. */
     default long getVolume() {
         return (long) (getMaxX() - getMinX() + 1)

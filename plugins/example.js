@@ -13,9 +13,10 @@
 //                where a storage menu is picked by slot number and /pick put / close — see /menu, /bag).
 //   entities   — …and scenes: group.save(name) freezes an arrangement, and the SERVER stands it back up
 //                at every boot (entities.loadScene / scenes / removeScene). See /scene.
-//   regions    — named boxes with rules: create / get / all / at / of(player) / remove / allows. A region
-//                denies build / interact / pvp / damage / entry; deny wins where they overlap. Also
-//                server-owned and restored at boot, and it fires PlayerRegionEnter / Leave. See /zone.
+//   regions    — named boxes with rules: create / get / all / at / of(player) / remove / allows /
+//                allowsFor(player,…). A region denies build / interact / pvp / damage / entry; deny wins
+//                where they overlap, and getBypassPermission(flag) names the node that exempts a player
+//                or group. Server-owned and restored at boot; fires PlayerRegionEnter / Leave. See /zone.
 //
 // `server` and every `player` you get (a global, an event, a command argument, a roster query) are the
 // script contract — the methods below and nothing else. The server's internals are not reachable, and
@@ -446,7 +447,14 @@ commands.register('zone', function (player, args) {
     player.sendMessage('{green}demo: {white}' + zone.getMinX() + ',' + zone.getMinY() + ',' + zone.getMinZ()
         + ' .. ' + zone.getMaxX() + ',' + zone.getMaxY() + ',' + zone.getMaxZ()
         + ' {gray}denies ' + zone.getDenied().join(', '));
-    player.sendMessage('{gray}Try breaking a block inside it. {white}/region list{gray} shows them all.');
+
+    // Exceptions are permission nodes, not a list kept on the region — so per player AND per group come
+    // free, with the wildcards and the explicit deny the permission system already has. Here: let whoever
+    // ran /zone keep building in their own demo region.
+    server.dispatchCommand(null, 'perm user ' + player.getName()
+        + ' addnode ' + zone.getBypassPermission('build'));
+    player.sendMessage('{gray}You are exempt from its build rule; others are not.');
+    player.sendMessage('{gray}Try breaking a block inside it. {white}/region info demo{gray} lists the nodes.');
 });
 
 // The crossings. Fired once per region actually entered or left, not per movement packet — so this is the
