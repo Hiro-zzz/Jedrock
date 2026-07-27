@@ -241,6 +241,11 @@ public final class PluginManager {
                     if (server instanceof JedrockServer js) {
                         ScriptableObject.putProperty(scope, "regions",
                                 Context.javaToJS(new ScriptRegions(js.getRegions()), scope));
+                        // Also server-owned, and the door that ScriptWrapFactory closed by accident
+                        // (server.getOpList()) reopened deliberately, with a written shape.
+                        ScriptableObject.putProperty(scope, "permissions",
+                                Context.javaToJS(new ScriptPermissions(js.getPermissions(), js.getOpList()),
+                                        scope));
                     }
                 }
                 // menus needs no server to be built (only open() does, which guards for one), so it is

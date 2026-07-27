@@ -22,6 +22,9 @@
 // script contract — the methods below and nothing else. The server's internals are not reachable, and
 // neither is a player's connection; player.getVersion() gives the edition string that used to need it.
 //                onClick + button(slot,item,label) makes a button menu; setItem alone is a storage chest.
+//   permissions— groups and rights: createGroup(n) → .add(node) / .inherit(g) / .setPrefix(s);
+//                forPlayer(p or 'Name') → .addGroup / .add(node) / .has / .isOp / .setOp. Server state,
+//                written straight to permissions.txt — a script no longer builds /perm command strings.
 //   storage    — the only thing that survives a restart: get / set / has / remove / keys / size / clear,
 //                plus forPlayer(p) for per-player state. Strings, numbers, booleans, objects and arrays.
 //   events     — events.on(name, fn): subscribe to a built-in event (28 below) OR a custom, script-defined
@@ -451,8 +454,7 @@ commands.register('zone', function (player, args) {
     // Exceptions are permission nodes, not a list kept on the region — so per player AND per group come
     // free, with the wildcards and the explicit deny the permission system already has. Here: let whoever
     // ran /zone keep building in their own demo region.
-    server.dispatchCommand(null, 'perm user ' + player.getName()
-        + ' addnode ' + zone.getBypassPermission('build'));
+    permissions.forPlayer(player).add(zone.getBypassPermission('build'));
     player.sendMessage('{gray}You are exempt from its build rule; others are not.');
     player.sendMessage('{gray}Try breaking a block inside it. {white}/region info demo{gray} lists the nodes.');
 });

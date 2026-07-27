@@ -8,6 +8,36 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Permissions become scriptable — the `permissions` global.** A script could always *read* rights
+  (`player.hasPermission`, `isOp`, `getPrefix`) and never change them. The only way to grant anything was to
+  build a `/perm …` command line as a string and hand it to `dispatchCommand`: no return value, no failure
+  you could branch on, and a typo surfacing in the server log. The region demo written one commit earlier
+  had to do exactly that, which is as good a signal as any that the API was missing.
+  It is also the door that closed by accident. When the script surface became a written contract,
+  `server.getOpList()` was named as one of the holes and shut — correctly, since it was reachable only
+  because Rhino reflects an implementation's runtime class. Nothing was opened in its place. This is that
+  door opened **on purpose**, with a shape the `api` describes.
+  **Groups**: `permissions.createGroup(n)` → `.add(node)` / `.remove(node)` / `.inherit(g)` / `.uninherit(g)`
+  / `.setPrefix(s)` / `.makeDefault()`, plus `groups()`, `group(n)`, `deleteGroup(n)`, `defaultGroup()`,
+  `setDefaultGroup(n)`, `reload()`. **One player**: `permissions.forPlayer(p)` → `.addGroup` / `.removeGroup`
+  / `.add(node)` / `.remove(node)` / `.has(node)` / `.getNodes()` / `.getGroups()` / `.getPrefix()` /
+  `.isOp()` / `.setOp(b)`. The player may be a `Player` **or a bare name**, because the permission file is
+  keyed by name — so a script can prepare somebody's rights before they have ever logged in, which no
+  amount of `Player` objects would let it do.
+  `createGroup` is deliberately **idempotent**, unlike `regions.create` which refuses a taken name: a group
+  is a role a script wants to *declare* on every load, and handing back the existing one (nodes intact) is
+  what makes that safe. Everything here is **server state** — written to `permissions.txt` / `ops.txt` the
+  moment it changes, and not torn down with the plugin.
+  `setOp` is included rather than hidden: it is the heaviest switch on the list, but a script could already
+  throw it by sending `/op` through `dispatchCommand`, so withholding it bought nothing except a worse
+  spelling. Documented as what it is.
+  Tested (14 new): a group built and read back; `createGroup` twice keeping the nodes and not making a
+  third group; inheritance granting and then not; the default group moving and a group being deleted; a
+  player getting a role and something that is just theirs; deny winning between their own node and their
+  group; rights prepared for an offline name; removals reporting whether they did anything; op holding
+  every node and the list folding case; everything surviving a restart; `reload` discarding memory; a
+  non-player refused loudly; and a group handle whose group was deleted answering rather than throwing.
+
 - **Regions — named boxes with rules, the platform's next primitive.** The thing every game mode ends up
   needing and nothing here could express: a lobby, an arena, a shop floor, a spawn nobody can dig up. Until
   now a script wanting any of that had to keep its own coordinates and re-check them by hand in

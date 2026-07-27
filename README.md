@@ -294,9 +294,19 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   `/region here <name> <radius>`; then `list`, `info`, `flag <name> <flag> allow|deny`, `remove`. Scripts
   get the `regions` global. Try `/zone` in `plugins/example.js`.
 
+- ✅ **Permissions from a script.** A script could always *read* rights (`player.hasPermission`); now it can
+  set them. The **`permissions`** global builds groups (`createGroup(n).inherit('default').add(node)
+  .setPrefix('{aqua}[Builder] ')`) and edits one player's rights (`permissions.forPlayer(p).addGroup('builders')`,
+  `.add(node)`, `.remove(node)`, `.isOp()` / `.setOp(true)`) — by `Player` **or by name**, so somebody's
+  rights can be prepared before they ever log in. Server state, written to `permissions.txt` / `ops.txt`
+  immediately and not torn down with the plugin, and `createGroup` returns the group that already exists,
+  so a script declaring its roles on every load is idempotent. Before this the only way to *change* a right
+  from a script was to build a `/perm …` string and hand it to `dispatchCommand` — which is exactly what
+  the region demo had to do until this landed.
+
 - ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
-  backend, not the compiled core: a script gets eleven globals — `server` / `events` / `scheduler` /
-  `commands` / `packets` / `world` / `entities` / `regions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
+  backend, not the compiled core: a script gets twelve globals — `server` / `events` / `scheduler` /
+  `commands` / `packets` / `world` / `entities` / `regions` / `permissions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
   name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
   work (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too
@@ -633,7 +643,7 @@ simulation stays out (see non-goals).
   incl. ICU4J) to keep the tree lean; it lives only in `core`, so the `api` stays runtime-neutral. That
   gate is what the rest of the roadmap waited on, and the surface behind it has kept growing — nine
   globals now (`server` / `events` / `scheduler` / `commands` / `packets` / `world` / `entities` /
-  `regions` / `storage` / `console`), covering custom events, `/slash` commands, scheduling, raw packet taps, block editing,
+  `regions` / `permissions` / `storage` / `console`), covering custom events, `/slash` commands, scheduling, raw packet taps, block editing,
   weather, sounds and particles, and **programmable entities** (see [What works today](#what-works-today)).
   The event model has since caught up with the newer features: **weather** (`WeatherChange`, cancellable and
   redirectable, posted by the world itself so `/weather`, a script and the api all pass through it) and
