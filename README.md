@@ -16,11 +16,13 @@ Target versions:
 | Bedrock / Pocket Edition | **1.1.5** ⚠️ | 113 | RakNet over UDP |
 | Bedrock / Pocket Edition | **0.14** | 45 | RakNet over UDP |
 
-> ⚠️ **1.1.5 is experimental / known-buggy.** Join, movement, chat, block edits and cross-play work, but
-> the retail 1.1.5 client (confirmed on **both PC and mobile**) double-fires place/break (mitigated
-> server-side, not eliminated) and chests can't be opened on it (see [Known limits](#roadmap)). **0.14**
-> and **Java** are the clean Bedrock/PC targets. The problems are specific to the protocol-113 client
-> across platforms — not the input method, and not the core.
+> ⚠️ **1.1.5 is experimental / known-buggy.** Join, movement, chat, block edits, the survival inventory,
+> named custom items and cross-play all work, but the retail 1.1.5 client (confirmed on **both PC and
+> mobile**) double-fires place/break (mitigated server-side, not eliminated) and **will not raise a chest
+> window at all** — every route was tried and the client either crashes or shows nothing, so chests and
+> storage menus trade through click-transfer and `/pick` lists instead (see [Known limits](#roadmap)).
+> **0.14** and **Java** are the clean Bedrock/PC targets. The problems are specific to the protocol-113
+> client across platforms — not the input method, and not the core.
 
 Java Edition is **multi-version on one port**: the client's handshake protocol selects the encoder,
 so 1.8 and 1.12.2 share the listener (see [Multiversion](#multiversion)). Bedrock spans two eras that
@@ -86,8 +88,9 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   saplings, carpets, torch, ladder, spawner… plus the item half — all five tool/weapon tiers, four
   armor sets, bow, food and materials) — every id/meta battle-tested against this exact client
   generation, because the old client crashes on an id it can't render; anything item-shaped sent to
-  0.14 passes one crash gate that turns an unknown id into an empty slot. Items are inert (held /
-  stored — no durability, crafting or eating; a door doesn't place). The **player-inventory sync**
+  0.14 passes one crash gate that turns an unknown id into an empty slot. A *vanilla* item is inert (held /
+  stored — no durability, crafting or eating; a door doesn't place); behaviour is what
+  [custom items](#what-works-today) add on top of one. The **player-inventory sync**
   (window 0 + the hotbar-link table) landed with it, so the inventory API (`giveItem`, `/inv`, survival
   pickup) now works on 0.14 too. The player can fly (fixed `AdventureSettings`), and a movement-speed
   attribute kills the runaway acceleration.
@@ -148,7 +151,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   ever changes). **In-game commands** work cross-edition — Java sends `/…` straight through as chat, and
   Bedrock is handed an `AvailableCommands` manifest so its client parses the line and sends it back. The
   built-in set: `/help [cmd]`, `/list`, `/tps`, `/say`, `/me`, `/msg`, `/gamemode`, `/tp`, `/tphere`,
-  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/op`, `/deop`, `/perm`. A deliberately minimal **survival inventory** (36 slots)
+  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/op`, `/deop`, `/perm`, `/region`, `/pick`, `/puppet`,
+  `/hologram`. A deliberately minimal **survival inventory** (36 slots)
   tracks only what a survival player mines and places: mining a block drops it into the hotbar, placing
   consumes it, and the changed slot is pushed live so the HUD refreshes. On PE 1.1.5 the player window is
   serialized PMMP-exact (45 slots + a 9-entry hotbar-link array), without which mined items filled storage
@@ -160,9 +164,13 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   `ops.txt` (an op holds every permission; the console is always an op, so the first `/op` is granted from
   the console). On top sits a **native group permission system** (`permissions.txt`): named groups with
   inheritance, a default group new players fall into, and permission nodes supporting `*` / `a.b.*`
-  wildcards and `-node` explicit deny (deny wins). Each group can carry a chat **prefix** (`{red}[Admin] `)
+  wildcards and `-node` explicit deny (deny wins). A player can also carry **nodes of their own**, on top of
+  whatever their groups give them — because a group answers "what may this *kind* of player do" and some
+  exceptions are genuinely about one person (the owner of one plot), which shouldn't need a throwaway group
+  each. Deny wins between the two either way round. Each group can carry a chat **prefix** (`{red}[Admin] `)
   shown via the `%prefix%` slot in the chat format. Manage it live with `/perm` (create/delete groups, grant
-  or deny nodes, set inheritance, prefix and the default group, assign players) — every change persists.
+  or deny nodes, set inheritance, prefix and the default group, assign players, `user <name> addnode`) —
+  every change persists. Scripts get the same surface through the `permissions` global.
   Guarded commands are gated on their node, and `/help` hides what the sender can't run.
 - ✅ **Typed command arguments and tab-completion.** A command can declare its arguments as typed
   `CommandArg`s instead of parsing a raw `String[]`: a name, an `ArgType` (`WORD`, `GREEDY`, `INTEGER`,
@@ -231,7 +239,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   armor and off-hand slots. **Chests** are a placeable block (right-click to open) backed by a 27-slot
   container: move items in and out, shift to quick-transfer, in survival <em>and</em> creative (the
   creative inventory is mirrored server-side so the chest's player half is tracked). Chest contents
-  **persist** in the level file (format v3, back-compatible with v2 worlds). Wired for JE 1.12.2 and 1.8.
+  **persist** in the level file (format v4, which loads a v2 or v3 world in place and rewrites it on the
+  next save; v3 added chests, v4 the custom-item key each stack carries). Wired for JE 1.12.2 and 1.8.
   True to the model, the server only <em>stores and moves</em> items — no crafting or smelting simulation,
   no item entities (a dropped / overflow item simply vanishes).
 - ✅ **Chests on Bedrock 1.1.5 — click-transfer.** The retail 1.1.5 client crashes on a real chest window,
@@ -469,7 +478,8 @@ jedrock
 │   └── pe/              # Bedrock 1.1.5: PeRakNetServer (RakNet transport) + PeSession (MCPE game
 │                        #   layer) delegating to McpeProtocol, McpeCodec, McpeChunkSerializer,
 │                        #   McpeLoginIdentity, McpeSkin, PeBlockEditDecoder, McpeCompression
-│       │                #   (McpePackets holds every clientbound body, as Mcpe014Packets does for 0.14)
+│       │                #   (McpePackets holds every clientbound body, as Mcpe014Packets does for 0.14;
+│       │                #    McpeItemNbt writes item names for BOTH eras — see its note on dialects)
 │       └── v014/         # Bedrock 0.14 (protocol 45): Pe014RakNetServer + PeSession014 + the
 │                         #   pre-VarInt codec (Mcpe014Codec/Login/Packets/ChunkSerializer/Batch)
 ├── jedrock-gameloop     # Dedicated 20 TPS drift-correcting loop + Scheduler (Tickable)
@@ -478,7 +488,10 @@ jedrock
     ├── plugin/          #   the Rhino script host (the only non-api dep besides network) + its globals
     ├── entity/          #   CorePuppet / PuppetRegistry: the entity behind mobs, holograms and props
     ├── command/         #   CommandManager + the built-ins, on one CommandSender surface
-    ├── permission/      #   OpList + PermissionManager (groups, wildcards, prefixes)
+    ├── permission/      #   OpList + PermissionManager (groups, per-player nodes, wildcards, prefixes)
+    ├── region/          #   RegionManager: named boxes with rules, enforced through the event bus
+    ├── item/            #   ItemRegistry: custom items — a name, lore and behaviour on a vanilla state
+    ├── inventory/       #   Container + ContainerService: everything that moves an item between slots
     └── world/           #   the bake (terrain, biomes, decoration), storage and level persistence
 ```
 
@@ -555,6 +568,9 @@ scratch buffers, so encoding a chunk allocates nothing per section.
 | `PluginManager` / `ScriptPlugin` | core/plugin | The Rhino host: loads `plugins/*.js`, injects the globals, and owns each script's listeners, tasks, commands, taps and entities so a hot-reload tears them all down |
 | `PuppetEntity` / `CorePuppet` | api / core | The server-driven entity: a mob, an NPC, a hologram line or a decoration prop — moved and dressed, never simulated |
 | `Region` / `RegionManager` | api / core | Named boxes with rules; flags enforced by cancelling the events the core already routes decisions through, and registered only while a region exists |
+| `CustomItem` / `ItemRegistry` | api / core | A name, lore and behaviour on a vanilla item state; a stack carries the **key**, the registry gives that key meaning |
+| `ItemDisplay` | api | The only part of a custom item the client learns — name + lore, legacy-rendered, `null` for an ordinary stack |
+| `SlotEchoGuard` | core/inventory | Tells a Bedrock client's own inventory move from its echo of one the server made — by timing, since the two are identical in content |
 | `ScriptEntity` / `ScriptEntities` | core/plugin | That primitive as scripts see it: movement, state, spatial queries and an `onTick` brain, owned per plugin |
 | `EntityTypeIds` / `EntityFlagIds` | network | The entity counterpart of the block palette: canonical type / flag → each edition's wire ids |
 | `CommandManager` / `CommandSender` | core | One command surface for players and the console, gated by `PermissionManager` (groups, wildcards, deny-wins) |
@@ -594,8 +610,11 @@ The first run writes a `jedrock.properties` next to the process with the bind ho
 name, MOTD, max players, world seed, tick rate, view distance, the blind-judge limits
 (`judge.enabled`, `judge.max-reach`, `judge.max-move-delta`) and the Bedrock sidebar placement
 (`pe.sidebar.raise`, `pe.sidebar.shift`); edit and restart to apply, or override
-a single key with `-Dkey=value`. The RakNet protocol version defaults to `8` (MCPE 1.1.5)
-and can be overridden with `-Djedrock.pe.raknetProtocolVersion=N` for other client builds. The Bedrock
+a single key with `-Dkey=value`. A few knobs are `-D`-only, since they exist to be turned down rather
+than tuned: `-Djedrock.pe.raknetProtocolVersion=N` (default `8` = MCPE 1.1.5, for other client builds),
+`-Djedrock.pe.slotEchoGuardMs=<ms>` (default `750`, `0` = off — how long after the server pushes an
+inventory slot a Bedrock client's report of it is read as a stale echo), and the 1.1.5 block-edit
+debounce windows (`-Djedrock.pe.placeBurstMs`, `placeSameCellMs`, `breakSameCellMs`). The Bedrock
 listeners bind best-effort — a busy UDP port (the Minecraft Bedrock client itself holds 19132 for LAN
 discovery) disables just that edition, never the whole server.
 
@@ -628,12 +647,17 @@ logged with `-Djedrock.status.seconds=30`.
 > default. Add a loopback exemption once:
 > `CheckNetIsolation LoopbackExempt -a -n=Microsoft.MinecraftUWP_yourid`
 
-Tests are plain JUnit 5 (`mvn test`) — ~340 of them, no client required. Beyond the block matrix,
+Tests are plain JUnit 5 (`mvn test`) — ~530 of them, no client required. Beyond the block matrix,
 player registry, chunk encoding and MCPE compression, they pin the things that are expensive to get
 wrong: the **byte layout** of packets that were ground-truthed against PocketMine or minecraft-data
-(titles, sounds, particles, equipment, inventories, props), the per-edition **id tables**, the
+(titles, sounds, particles, equipment, inventories, item NBT, props), the per-edition **id tables**, the
 scripting layer end-to-end (a real script loads, cancels events, registers commands, hot-reloads and
 tears down), and world persistence round-trips.
+
+A byte-level test is only worth what its assertions are, which the item-NBT work made concrete: the
+first encoder passed its own tests and still failed on a real client, because the tests agreed with it
+about the wrong NBT dialect. The replacements assert the exact bytes rather than "it round-trips through
+my own reader" — the rule these tests try to follow wherever a real client is the only other judge.
 
 ---
 
@@ -664,9 +688,10 @@ simulation stays out (see non-goals).
   hot-reloadable **JavaScript** plugins (`plugins/*.js`) on a **Rhino** backend, not the compiled core.
   Rhino (`rhino-runtime`, ~1.5 MB, pure Java, zero transitive deps) was chosen over GraalJS (tens of MB
   incl. ICU4J) to keep the tree lean; it lives only in `core`, so the `api` stays runtime-neutral. That
-  gate is what the rest of the roadmap waited on, and the surface behind it has kept growing — nine
+  gate is what the rest of the roadmap waited on, and the surface behind it has kept growing — thirteen
   globals now (`server` / `events` / `scheduler` / `commands` / `packets` / `world` / `entities` /
-  `regions` / `items` / `permissions` / `storage` / `console`), covering custom events, `/slash` commands, scheduling, raw packet taps, block editing,
+  `regions` / `items` / `permissions` / `menus` / `storage` / `console`) and 30 built-in events, covering
+  custom events, `/slash` commands, scheduling, raw packet taps, block editing,
   weather, sounds and particles, and **programmable entities** (see [What works today](#what-works-today)).
   The event model has since caught up with the newer features: **weather** (`WeatherChange`, cancellable and
   redirectable, posted by the world itself so `/weather`, a script and the api all pass through it) and
@@ -680,9 +705,17 @@ simulation stays out (see non-goals).
   on Java, a `/pick` list on Bedrock). **Storage menus reached Bedrock too** — the last gap in that
   toolkit: a list could only ever *signal*, so the transfer moved into it (`/pick <n>` takes, `/pick put`
   puts, and it redraws after each one), rather than waiting for a window neither legacy client will raise.
-  What it still wants: a real-client pass on the unverified PE wire, and item **names** — a storage list
-  addresses stacks by slot number because a block is an id by design, which is honest but not friendly.
+  What it still wants: a real-client pass on the rest of the unverified PE wire, and for the **storage list
+  to use the names custom items now have** — it still addresses stacks by slot number and prints a raw
+  state, which was the only honest option before items had names and is simply not wired up yet.
   **Forms** stay out, since the legacy PE clients predate them.
+  **Custom items and scriptable permissions landed** after that (both in [What works
+  today](#what-works-today)): items are a name, lore and behaviour hung on a vanilla state, identified by a
+  key the *stack* carries so a hot reload re-points every existing one; permissions gained the writing half
+  a script never had, which is also the door `ScriptWrapFactory` had shut by accident being reopened on
+  purpose. What items still want: a **cooldown** primitive (every `onUse` script writes its own), and
+  per-*stack* state — there is nowhere to put "this particular sword's remaining charges", since a
+  definition is shared by every stack that names it.
   **Regions landed** as the platform's next primitive (see [What works today](#what-works-today)): named
   boxes with flags, enforced by cancelling the events the core already routes decisions through rather
   than by a second rulebook, with `PlayerRegionEnter` / `PlayerRegionLeave` for the crossings and a
