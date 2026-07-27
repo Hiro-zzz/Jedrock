@@ -360,6 +360,20 @@ public final class ContainerService {
      * server-authoritative (also resyncs the cursor); <b>Bedrock</b>'s chest window is just the 27 chest
      * slots — the player inventory is the separate window 0 the client already owns.
      */
+    /**
+     * Re-send {@code container} to every player who has it open. Called when something other than a click
+     * changed it — a script writing into a world chest reaches the same container object a player's open
+     * window is bound to, so their screen has to be told, or they keep looking at a stale copy and their
+     * next click is judged against contents that no longer exist.
+     */
+    public void refreshViewers(Container container) {
+        for (CorePlayer player : players.online()) {
+            if (player.getOpenContainer() == container) {
+                sendChestContents(player, player.getConnection());
+            }
+        }
+    }
+
     private void sendChestContents(CorePlayer player, PlayerConnection connection) {
         Container chest = player.getOpenContainer();
         int windowId = player.getOpenWindowId();
@@ -414,16 +428,32 @@ public final class ContainerService {
                     world.markDirty(); // a world-chest edit persists; a menu's is transient
                 }
             }
-        } else if (windowId == 0 && player.getGameMode() == GameMode.CREATIVE) {
-            // The player's own inventory (PE window 0: 0-8 hotbar, 9-35 main). Only trust the client's
-            // report in CREATIVE, where the inventory is client-authoritative and we merely mirror it so a
-            // chest deposit knows the held item. In SURVIVAL the server owns the inventory (mining, placing
-            // and chest transfers all flow through it), so a client echo must be IGNORED — otherwise the
-            // 1.1.5 client's ContainerSetSlot echo right after a chest deposit re-adds the just-moved stack,
-            // duplicating it (the item ends up in the chest AND back in the inventory).
+        } else if (windowId == 0 && slot < CorePlayer.STORAGE_SLOTS) {
+            // The player's own inventory (PE window 0: 0-8 hotbar, 9-35 main). Bedrock is
+            // client-authoritative here in BOTH modes: the client moves the item in its own GUI and this
+            // report is the only notice the server gets. In CREATIVE it is a pure mirror (kept so a chest
+            // deposit knows the held item). In SURVIVAL it has to be applied too — ignoring it wholesale
+            // (which is what closed the chest-deposit dupe) meant the next full resync, i.e. closing the
+            // inventory, put every moved item back where the server still had it, so a survival player
+            // could not rearrange their inventory at all.
+            //
+            // What must still be refused is the *echo*: the same client reports a slot the server has just
+            // changed, carrying the value it held before. Content can't tell an echo from a real move, so
+            // timing does — a freshly pushed slot is guarded and the server's value is re-asserted instead
+            // (the client drew the stale one, so it needs correcting either way). See CorePlayer.
             Container inv = player.getInventory();
-            if (slot < 36) {
-                inv.set(slot, state, count);
+            if (player.getGameMode() != GameMode.SURVIVAL) {
+                inv.set(slot, state, count); // creative: mirror it, the client is the owner
+                return;
+            }
+            if (player.isSlotEchoGuarded(slot)) {
+                player.syncSlot(slot);
+                return;
+            }
+            int before = inv.stateAt(slot);
+            inv.set(slot, state, count);
+            if (slot == player.getHeldItemSlot() && inv.stateAt(slot) != before) {
+                broadcast.heldItem(player); // the hand itself changed — redraw it on every other client
             }
         }
     }

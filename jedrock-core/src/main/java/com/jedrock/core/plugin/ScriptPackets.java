@@ -61,11 +61,13 @@ public final class ScriptPackets {
      * id), framed for the player's edition. {@code payload} is a JS array of byte values (e.g.
      * {@code [0x00, 0x1f]}) or a Java {@code byte[]} (such as another packet's {@code getBytes()}).
      */
-    public void send(Player player, int id, Object payload) {
-        if (player == null) {
+    public void send(Object player, int id, Object payload) {
+        // A script holds the script contract, not the core player — see ScriptWrapFactory.
+        Player target = ScriptWrapFactory.unwrapPlayer(player);
+        if (target == null) {
             throw new IllegalArgumentException("packets.send needs a player");
         }
-        PlayerConnection connection = player.getConnection();
+        PlayerConnection connection = target.getConnection();
         if (connection != null) {
             connection.sendRawPacket(id, toBytes(payload));
         }

@@ -29,6 +29,27 @@ public interface Player extends Entity, CommandSender {
     String getPrefix();
 
     /**
+     * Whether this player is a server operator. An op holds every permission, which is why this is asked
+     * separately from {@link #hasPermission} — "is an admin" and "may do this one thing" are different
+     * questions even when the answer coincides.
+     *
+     * <p>Default {@code false}: a Player implementation with no permission system behind it grants nothing.
+     */
+    default boolean isOp() {
+        return false;
+    }
+
+    /**
+     * Whether this player holds {@code node} — through an op flag, a group grant, or a wildcard like
+     * {@code a.b.*}. An explicit deny (a {@code -node} grant) wins over any wildcard that would allow it.
+     *
+     * <p>Default: whatever {@link #isOp()} says, since an op holds everything and nothing else is known.
+     */
+    default boolean hasPermission(String node) {
+        return isOp();
+    }
+
+    /**
      * The world the player is currently in.
      */
     World getWorld();

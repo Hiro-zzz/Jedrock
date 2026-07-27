@@ -11,6 +11,7 @@ import com.jedrock.api.world.World;
 import com.jedrock.core.entity.EntityIds;
 import com.jedrock.core.inventory.Container;
 import com.jedrock.core.inventory.Cursor;
+import com.jedrock.core.inventory.SlotEchoGuard;
 import com.jedrock.core.permission.OpList;
 import com.jedrock.core.permission.PermissionManager;
 import com.jedrock.core.world.CoreWorld;
@@ -154,6 +155,23 @@ public final class CorePlayer implements Player {
     private volatile String sidebarTitle;
     private volatile String[] sidebarLines;
 
+    /**
+     * This player as scripts see them — the one view, kept here so it lives and dies with the player.
+     * Scripts compare players with {@code ==}, which Rhino answers by reference, so every crossing into
+     * JavaScript has to hand back the same object. Typed as {@code Object} because the core knows nothing
+     * about the scripting layer; the plugin host owns what this is (see {@code ScriptWrapFactory}).
+     */
+    private volatile Object scriptView;
+
+    @SuppressWarnings("unchecked")
+    public <T> T scriptView() {
+        return (T) scriptView;
+    }
+
+    public void scriptView(Object view) {
+        this.scriptView = view;
+    }
+
     /** A button menu shown as a text list (the Bedrock fallback), pickable with {@code /pick}; null if none. */
     private volatile com.jedrock.core.inventory.ListMenu pendingMenu;
 
@@ -236,6 +254,7 @@ public final class CorePlayer implements Player {
 
     /** Push one inventory slot to the client (a live pickup / consume — refreshes the hotbar HUD). */
     public void syncSlot(int slot) {
+        slotEchoGuard.arm(slot, System.nanoTime());
         connection.setInventorySlot(slot, inventory.stateAt(slot), inventory.countAt(slot));
         if (slot == heldSlot) {
             heldItemMayHaveChanged(); // the hand itself changed — other clients must redraw it
@@ -248,9 +267,22 @@ public final class CorePlayer implements Player {
      * armor slots aren't part of this packet, so they need their own push.
      */
     public void syncInventory() {
+        slotEchoGuard.armAll(System.nanoTime());
         connection.setInventory(inventory.states(), inventory.counts());
         heldItemMayHaveChanged();
         armorMayHaveChanged();
+    }
+
+    /**
+     * Separates a Bedrock client's own inventory move from its echo of a move the <em>server</em> made —
+     * armed by every push below, consulted by {@link com.jedrock.core.inventory.ContainerService} before
+     * it trusts a client report. See {@link SlotEchoGuard}.
+     */
+    private final SlotEchoGuard slotEchoGuard = new SlotEchoGuard(INV_SLOTS);
+
+    /** True while {@code slot} is still inside the echo window of a server-authored push. */
+    public boolean isSlotEchoGuarded(int slot) {
+        return slotEchoGuard.isGuarded(slot, System.nanoTime());
     }
 
     // ===== Inventory API (scripting-facing; operates on the 36 storage slots 0-35) =====

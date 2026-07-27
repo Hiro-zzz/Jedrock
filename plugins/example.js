@@ -10,6 +10,12 @@
 //                playSound / spawnParticle. Edits render live on every client, cross-edition.
 //   entities   — spawn and drive puppets, props and labels; group() builds a scene. See /guard and /decor.
 //   menus      — menus.create(title, rows): a virtual chest (a window on Java; a /pick list on Bedrock).
+//   entities   — …and scenes: group.save(name) freezes an arrangement, and the SERVER stands it back up
+//                at every boot (entities.loadScene / scenes / removeScene). See /scene.
+//
+// `server` and every `player` you get (a global, an event, a command argument, a roster query) are the
+// script contract — the methods below and nothing else. The server's internals are not reachable, and
+// neither is a player's connection; player.getVersion() gives the edition string that used to need it.
 //                onClick + button(slot,item,label) makes a button menu; setItem alone is a storage chest.
 //   storage    — the only thing that survives a restart: get / set / has / remove / keys / size / clear,
 //                plus forPlayer(p) for per-player state. Strings, numbers, booleans, objects and arrays.
@@ -486,6 +492,82 @@ commands.register('deck', function (player, args) {
         + world.getBiome(x, z) + ').');
 });
 
+// /scene save|load|list|drop [name] — decoration that outlives this script AND the process.
+// group.save(name) freezes how the props look right now; the server owns the scene from then on and
+// stands it back up at every boot with no script involved. That's the difference between decoration and
+// a demo: a guard with an onTick brain belongs to this plugin, a lamp post does not.
+// Note what is NOT saved: behaviour. A saved prop has no brain, because a saved scene has no plugin.
+commands.register('scene', function (player, args) {
+    var name = args[1] || 'demo';
+    switch (args[0]) {
+        case 'save':
+            // Build a small arrangement, then freeze it.
+            var loc = player.getLocation();
+            var x = loc.getBlockX(), y = loc.getBlockY(), z = loc.getBlockZ();
+            var scene = entities.circle(6, x, y + 1, z, 2.5, function (px, py, pz) {
+                return entities.spawnItem(Blocks.state(89, 0), px, py, pz);   // glowstone ring
+            });
+            scene.add(entities.spawnText('{yellow}' + name, x, y + 2.5, z));
+            scene.save(name);
+            player.sendMessage('{green}Scene {white}' + name + '{green} saved — it will be here after a restart.');
+            break;
+        case 'load':
+            var loaded = entities.loadScene(name);
+            player.sendMessage(loaded.size() > 0
+                ? '{green}Scene {white}' + name + '{green} is up ({white}' + loaded.size() + '{green} props).'
+                : '{red}No scene called ' + name + '.');
+            break;
+        case 'drop':
+            player.sendMessage(entities.removeScene(name)
+                ? '{green}Scene {white}' + name + '{green} removed.'
+                : '{red}No scene called ' + name + '.');
+            break;
+        default:
+            var all = entities.scenes();
+            player.sendMessage('{gold}Scenes: {white}' + (all.length ? all.join('{gray}, {white}') : '{gray}none')
+                + ' {gray}(/scene save|load|drop [name])');
+    }
+});
+
+// /stash — read and fill the chest you're standing next to (world.getChest demo).
+// This is a REAL chest — the one a player placed. Its contents persist in the level file, and if someone
+// has it open they see the change the moment it happens. (The `menus` global makes throwaway chests
+// instead; those belong to the script and vanish with it.) getChest returns null unless a chest block is
+// really there, so a script can't conjure storage in mid-air.
+commands.register('stash', function (player, args) {
+    var loc = player.getLocation();
+    var x = loc.getBlockX(), y = loc.getBlockY(), z = loc.getBlockZ();
+
+    // Look around the player's feet for a chest block.
+    var chest = null;
+    for (var dx = -1; dx <= 1 && !chest; dx++) {
+        for (var dz = -1; dz <= 1 && !chest; dz++) {
+            for (var dy = -1; dy <= 1 && !chest; dy++) {
+                chest = world.getChest(x + dx, y + dy, z + dz);
+            }
+        }
+    }
+    if (!chest) {
+        player.sendMessage('{red}Stand next to a chest first.');
+        return;
+    }
+
+    if (args[0] === 'fill') {
+        var added = chest.add(Blocks.state(264, 0), 5);   // five diamonds
+        player.sendMessage('{green}Put {white}' + added + '{green} diamond(s) in.');
+        return;
+    }
+    var lines = [];
+    for (var slot = 0; slot < chest.size(); slot++) {
+        if (chest.getItem(slot) !== 0) {
+            lines.push(slot + ': ' + chest.getItem(slot) + ' x' + chest.getCount(slot));
+        }
+    }
+    player.sendMessage('{gold}Chest at {white}' + chest.getX() + ',' + chest.getY() + ',' + chest.getZ()
+        + '{gold}: ' + (lines.length ? lines.join('{gray}, {white}') : '{gray}empty')
+        + ' {gray}(/stash fill to add diamonds)');
+});
+
 // /pillar [meta] — a coloured wool pillar in front of spawn (per-block setBlock demo).
 commands.register('pillar', function (player, args) {
     var s = world.getSpawn();
@@ -653,7 +735,7 @@ commands.register('teststats', function (player, args) {
         player.sendMessage(' {white}' + names[i] + '{gray}: ' + stats.events[names[i]]);
     }
     player.sendMessage('{gold}== Packets =={gray} in={white}' + stats.packetsIn
-        + '{gray} out={white}' + stats.packetsOut + '{gray} (' + player.getConnection().getProtocolVersion() + ')');
+        + '{gray} out={white}' + stats.packetsOut + '{gray} (' + player.getVersion() + ')');
 });
 
 // Optional: called when the plugin is unloaded or reloaded. Everything a script registered — listeners,

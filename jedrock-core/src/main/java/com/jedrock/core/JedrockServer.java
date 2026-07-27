@@ -122,6 +122,8 @@ public class JedrockServer implements Server {
     private final PlayerBroadcast broadcast = new PlayerBroadcast(playerRegistry);
     /** Puppets and holograms: everything shown that is neither a player nor a block. */
     private final EntityDirector entities;
+    /** Named arrangements of props that outlive the script that built them, and the process. */
+    private final com.jedrock.core.entity.SceneManager scenes;
     /** Windows, chests and the creative mirror — every item that moves between slots. */
     private final ContainerService containers;
     /** Fall, void and melee — the one path from a source of damage to a health bar. */
@@ -143,6 +145,7 @@ public class JedrockServer implements Server {
         this.judge = new BlindJudge(config.judgeEnabled(), config.maxReach(), config.maxMoveDelta());
         this.defaultWorld.setEventBus(eventBus); // so a weather change can be vetoed wherever it came from
         this.entities = new EntityDirector(playerRegistry, defaultWorld);
+        this.scenes = new com.jedrock.core.entity.SceneManager(entities, defaultWorld);
         this.containers = new ContainerService(playerRegistry, defaultWorld, eventBus, broadcast);
         this.combat = new CombatService(playerRegistry, defaultWorld, eventBus, broadcast, entities, judge);
         this.levels = new LevelManager(defaultWorld, eventBus);
@@ -317,6 +320,18 @@ public class JedrockServer implements Server {
         // player sees the baked terrain and persisted edits rather than a half-built world.
         levels.prepare();
 
+        // Saved scenes are world decoration, so they come back with the world and before anyone can see
+        // it — no script involved, which is the whole point of having saved them.
+        try {
+            scenes.load(sceneFile());
+            int props = scenes.spawnAll();
+            if (props > 0) {
+                LOGGER.info("Restored " + scenes.names().size() + " scene(s), " + props + " prop(s)");
+            }
+        } catch (java.io.IOException e) {
+            LOGGER.error("Failed to load scenes from " + sceneFile().toAbsolutePath(), e);
+        }
+
         // From here on, every world write — a player's edit or a script/API call — is pushed to each
         // online client in its own protocol, so World.setBlockId is all an edit needs to be visible.
         // Registered after the bake so the one-time generation doesn't fire millions of callbacks.
@@ -359,6 +374,7 @@ public class JedrockServer implements Server {
             // Script state rides the same cadence — it is small, and a dirty flag skips an idle store.
             scheduler.runTaskTimer(() -> plugins.storage().saveIfDirty(PLUGIN_STORAGE_FILE),
                     periodTicks, periodTicks);
+            scheduler.runTaskTimer(() -> scenes.saveIfDirty(sceneFile()), periodTicks, periodTicks);
             LOGGER.info("World autosave enabled (every " + saveSeconds + "s)");
         }
 
@@ -431,6 +447,7 @@ public class JedrockServer implements Server {
         plugins.unloadAll();
         // After onDisable, so a script's last-moment write is included.
         plugins.storage().saveIfDirty(PLUGIN_STORAGE_FILE);
+        scenes.saveIfDirty(sceneFile());
 
         gameLoop.stop();
         networkServer.shutdown();
@@ -508,6 +525,16 @@ public class JedrockServer implements Server {
         return entities.spawnHologram(at, lines);
     }
 
+    /** Saved scenes: authored by scripts, owned by the server, restored at boot. */
+    public com.jedrock.core.entity.SceneManager getScenes() {
+        return scenes;
+    }
+
+    /** Where scenes live — next to the level file, since they decorate that world. */
+    private Path sceneFile() {
+        return Path.of(defaultWorld.getName(), "scenes.jdb");
+    }
+
     /** The puppeteer — puppets, holograms, and every relay that shows them cross-edition. */
     public EntityDirector getEntities() {
         return entities;
@@ -541,6 +568,11 @@ public class JedrockServer implements Server {
             return false;
         }
         return containers.openMenu(cp, title, container, labels, onClick);
+    }
+
+    /** Re-send {@code container} to every player who currently has it open (a script edited it). */
+    public void refreshContainer(com.jedrock.core.inventory.Container container) {
+        containers.refreshViewers(container);
     }
 
 

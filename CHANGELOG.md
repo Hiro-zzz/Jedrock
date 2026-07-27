@@ -6,7 +6,63 @@ unstable — anything may change between entries.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A survival player couldn't rearrange their own inventory on Bedrock.** Moving the held stack into
+  storage (or back out of it) held only until the inventory was closed, at which point the item jumped
+  back to where it started. Creative was unaffected. This was the known trade-off of the chest-deposit
+  dupe fix coming due: Bedrock owns window 0 — the client moves the item in its own GUI and the inbound
+  `ContainerSetSlot` is the **only** notice the server ever gets — and that report was being dropped
+  outright in survival, so the server's copy never changed and the resync that closing the window
+  triggers put the item back. Nothing was lost; the server simply never agreed the move had happened.
+  Applying the report again on its own would re-open the dupe, because the same client also **echoes** a
+  slot the *server* just changed, carrying the value it held **before** — right after a chest deposit that
+  echo re-added the stack the deposit had consumed, so the item ended up in the chest and in the hand at
+  once. The two reports are identical in content: an echo is a stale move, not a malformed one. What
+  separates them is **time** — an echo answers a push that has only just gone out. So every
+  server-authored push (`CorePlayer.syncSlot` / `syncInventory`) now arms a short per-slot guard
+  (`SlotEchoGuard`, 750 ms, `-Djedrock.pe.slotEchoGuardMs=<ms>`, `0` = off), and a report landing inside
+  it is answered with a correction rather than trusted; past the window the client is believed and its
+  move sticks. Same shape, and the same reason, as the `PeEditDebounce` on the block path: this client
+  reports one action more than once. Creative is untouched — it owns its inventory outright, so its
+  report stays a plain mirror and is never second-guessed. The fix is core-side, so **0.14 gets it too**.
+  Tested: a move out of the hand and back into it both survive the close, a stale echo is refused and
+  corrected, a survival chest deposit is not undone by the echo that follows it, creative is still a
+  mirror, armor (its own PE window) is not reachable through window 0, and the timing rule itself —
+  expiry, per-slot independence, a full resync, and the off switch — against an explicit clock.
+
 ### Added
+
+- **Scenes survive the restart — decoration stops being a demo.** Everything a script spawned died with
+  it: a hot reload, or a restart, took the lanterns away, so an arrangement only existed for as long as the
+  code describing it kept running. That is right for a guard with an `onTick` brain and wrong for a lamp
+  post. **`group.save(name)`** freezes an arrangement as it stands — type, position, facing, name tag, held
+  item, armor and flags — and the **server** owns it from then on: it is stood back up at boot, before
+  anyone can log in, with no script involved at all. `entities.loadScene(name)` hands a script the props
+  (spawning them if they aren't up, returning what is standing if they are — asking on every reload can't
+  breed copies), `entities.scenes()` lists them, `entities.removeScene(name)` takes one out of the world
+  and forgets it.
+  What is deliberately not saved is *behaviour*: a saved prop has no brain, because a saved scene has no
+  plugin. Stored like the world and the script store already are — one compact DEFLATE file
+  (`world/scenes.jdb`, next to the level file since scenes decorate that world), written atomically, with a
+  dirty flag so an untouched set is never rewritten, flushed by the same autosave and once more at
+  shutdown. Try `/scene save`, then restart the server and look. Tested: a scene round-trips through the
+  file with its look intact, standing one up twice yields the same props rather than two copies, removing
+  one takes it out of the world as well as the store, an unknown name is empty rather than an error, and an
+  untouched store is not rewritten.
+
+- **Scripts can reach the chests players actually placed.** The `menus` global has been able to conjure a
+  chest out of nothing for a while; the one kind of storage a script could <em>not</em> touch was the kind
+  that matters — a real chest block, with contents that persist in the level file and that anyone standing
+  at it can open. `world.getChest(x, y, z)` returns one now (`null` where there is no chest block, so a
+  script can't conjure storage in mid-air), with `hasChest` for the cheap check: `getItem` / `getCount` /
+  `setItem`, `add` / `remove` (returning how many actually fit or were found, so a full chest is
+  distinguishable from a successful drop), `count` / `contains`, `clear` and `size`.
+  It is the same container everything else uses, not a copy: an edit marks the world dirty for autosave
+  and is pushed to anyone who has that chest open at that moment — otherwise they would keep looking at a
+  stale window and their next click would be judged against contents that no longer exist. Try `/stash`.
+  Fixed a stale comment on the way: `CoreWorld` still claimed chest contents were in-memory only and did
+  not survive a restart, which stopped being true when the level file learned to carry them (format v3).
 
 - **The sidebar reaches Bedrock — on the item-name line.** Neither legacy Bedrock era has a scoreboard, so
   `player.setSidebar(title, [lines])` borrows the one persistent text field those clients do have: the
@@ -325,6 +381,38 @@ unstable — anything may change between entries.
   string *literals* — which really are `java.lang.String` — so the regression test now concatenates.
 
 ### Changed
+
+- **The script API is a contract now, not an accident.** Rhino reflects an object's <em>runtime</em> class.
+  Declaring a field as an api interface changes nothing, and neither does Rhino's own `staticType`, which
+  only narrows the surface when reflection outright fails — confirmed by experiment before any of this was
+  written. So for as long as the core handed scripts its own objects, a plugin could call every public
+  method those objects happened to have: `player.getConnection()` was a door into the network layer (raw
+  packet writes to anyone), `server.getOpList()` / `getNetworkServer()` / `getPlugins()` were doors into
+  the permission store, the socket and the plugin host. Meanwhile the `api` module — whose entire job is to
+  be the contract — described none of it, so a plugin's real surface was whatever the implementation
+  happened to expose, and renaming an internal broke scripts with nothing failing to compile.
+  New **`ScriptPlayer`** and **`ScriptServer`** are that surface, written down: every method a plugin may
+  call, delegating to the api. **`ScriptWrapFactory`** substitutes them wherever a core object crosses into
+  JavaScript — and because Rhino routes *every* path through a wrap factory, that is all of them at once:
+  the globals, `e.getPlayer()`, a command argument, `server.getPlayers()`, an entity's nearest-player
+  query. There is no way left to obtain a core object in a script.
+  Kept working on purpose: **`==` between two players**. Rhino compares Java objects by unwrapping and
+  comparing references, so a fresh view per crossing would have quietly made `e.getPlayer() == watched`
+  false — a script that works today silently ignoring the player it watches. Each player's view is kept on
+  the player itself, so it is the same object every time and dies with them rather than in a map of
+  everyone who ever logged in. Names match the api exactly, so existing plugins are unaffected, with one
+  deliberate exception: `player.getConnection()` is gone, replaced by **`player.getVersion()`** for the
+  one thing scripts used it for. `isOp()` and `hasPermission()` moved onto the api `Player` as part of
+  this — they were documented, used by the example plugin, and existed only on the implementation.
+  **`ScriptPuppet`** and **`ScriptHologram`** close the same hole for what `server.spawnPuppet(...)` and
+  `server.spawnHologram(...)` hand back (the `entities` global was already wrapped). The puppet is the
+  interesting one: its interaction callback is a function living in a plugin's scope, and a raw
+  `onInteract` stored it as a bare lambda on the puppet — so after a hot reload it kept firing into a
+  scope that had been thrown away, off the script lock, for as long as the server ran. It now dispatches
+  through the plugin that registered it, under the same lock, context and swallow-and-log as every other
+  script callback. Which plugin that is comes from the scope Rhino hands the wrap factory.
+  Nothing in the api is left unwrapped now: player, server, world, puppet and hologram all arrive as
+  contract objects, and `entities.spawn(...)` keeps returning the plugin-owned `ScriptEntity` it always did.
 
 - **`PeSession` split: the 1.1.5 encoders move out (1749 → 1218 lines).** The 0.14 layer has always been
   two classes — `PeSession014` for the session, `Mcpe014Packets` for the bytes — and 1.1.5 never got the

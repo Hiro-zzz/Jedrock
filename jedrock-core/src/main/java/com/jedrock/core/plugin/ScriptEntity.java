@@ -256,7 +256,9 @@ public final class ScriptEntity {
         if (target instanceof Location location) {
             return location;
         }
-        if (target instanceof Player player) {
+        // A script's player is the script contract, not the core object — see ScriptWrapFactory.
+        Player player = ScriptWrapFactory.unwrapPlayer(target);
+        if (player != null) {
             return player.getLocation();
         }
         if (target instanceof ScriptEntity entity) {

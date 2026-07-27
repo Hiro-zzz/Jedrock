@@ -233,9 +233,12 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
 - ✅ **Chests on Bedrock 1.1.5 — click-transfer.** The retail 1.1.5 client crashes on a real chest window,
   so chests there use a **click-transfer** instead: a right-click withdraws the first stack, a sneaking
   right-click deposits the held hotbar slot. Works in survival and creative (creative deposits its held
-  item without consuming and never mints items on withdrawal). The server stays authoritative for the
-  survival inventory — the client's own inventory echo is ignored — so a deposit→withdraw cycle can't
-  duplicate items.
+  item without consuming and never mints items on withdrawal). Bedrock owns its own inventory window, so a
+  survival player's moves there are applied as the client reports them — except for the **echo** that
+  client sends of a slot the *server* just changed, which is what would duplicate a deposit. The two are
+  told apart by timing: a freshly pushed slot is guarded for a moment and the server's value re-asserted
+  (`SlotEchoGuard`), so a deposit→withdraw cycle can't duplicate items and a rearranged inventory still
+  sticks.
 - ✅ **Puppets and holograms — visuals the server drives, cross-edition.** A **puppet** is a mob / NPC the
   server puppeteers and never simulates: spawn it, move it, turn it to face a player (`lookAt`), give it a
   floating **name tag**, set it alight / invisible / crouching, make it swing or flinch — and hitting one
@@ -271,7 +274,11 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
   name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
   work (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too
-  — `player.isOp()`, `player.hasPermission('node')`, `player.getPrefix()`. A saved edit reloads within a
+  — `player.isOp()`, `player.hasPermission('node')`, `player.getPrefix()`. What a script may touch is a
+  **written contract**: `player` and `server` arrive as `ScriptPlayer` / `ScriptServer` wherever they cross
+  into JavaScript, so the core's internals (a player's connection, the op list, the network server) are not
+  reachable from a plugin — Rhino reflects an object's runtime class, so the api interfaces alone could
+  never have enforced that. A saved edit reloads within a
   second. Rhino (~1.5 MB, pure Java, zero transitive deps) was chosen over GraalJS for weight; it lives only
   in `core`. See `plugins/example.js`.
 
@@ -296,7 +303,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   connections, so a `setBlockId` from a script or command renders live on every client, cross-edition, and
   persists through autosave. Scripts get the `world` global — `getBlock` / `getMeta` /
   `setBlock(x, y, z, id[, meta])` / `fill(corner, corner, id[, meta])` (skips unchanged cells) /
-  `getHighestY` / `getBiome` / `getSpawn` / `setSpawn` / `isInside` — and the Java API gained
+  `getHighestY` / `getBiome` / `getSpawn` / `setSpawn` / `isInside` / **`getChest(x, y, z)`** (a real,
+  persisted chest a player placed — read it, fill it, empty it; anyone with it open sees the change) — and the Java API gained
   `Server.getDefaultWorld()`, `World.setBlock` / `fill` / `isInsideBounds`. Writes outside the finite bounds
   (or the 0–255 Y range) are dropped at the storage boundary, so no API path can grow the world past its
   edge. Try `/deck` and `/pillar` in `plugins/example.js`.
@@ -632,8 +640,10 @@ simulation stays out (see non-goals).
   this server does **scenery**. Three ways to pose a block or item where no block can go are in (a small
   item model, a full-size block, or a block worn on an invisible head), on all four protocols and with no
   resource pack, plus **labels** and **groups** so an arrangement is authored and moved as one, and a
-  cast of **23 mob types** to pose. What would grow it further: **splitting head yaw from body yaw** (the
-  packets already exist), **saving a scene** so it survives a restart without a script rebuilding it, and
+  cast of **23 mob types** to pose. **Saving a scene landed:** `group.save(name)` freezes an arrangement
+  and the *server* stands it back up at boot — no script involved, so decoration finally outlives the code
+  that authored it (`world/scenes.jdb`; behaviour is deliberately not saved, since a saved prop has no
+  plugin). What would grow it further: **splitting head yaw from body yaw** (the packets already exist) and
   a `/pose` in-game editor that exports one as a committable file. Known limits: no armor stands in
   either PE era, no per-entity scale, no limb posing, and 0.14 renders only the mobs it is old enough to
   know. And the one number to watch as scenes grow — a static prop costs no ticks but one spawn packet
