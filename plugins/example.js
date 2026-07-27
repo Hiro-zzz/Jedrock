@@ -3,7 +3,7 @@
 // ============================================================================
 //
 // Drop a .js file in this folder and it loads on start; save an edit and it hot-reloads within a second,
-// no restart. Nine globals are in scope:
+// no restart. Twelve globals are in scope:
 //
 //   server     — the server: players, worlds, broadcast, puppets, holograms, status.
 //   world      — the shared world: getBlock / setBlock / fill / getHighestY / getBiome / spawn / weather /
@@ -22,6 +22,9 @@
 // script contract — the methods below and nothing else. The server's internals are not reachable, and
 // neither is a player's connection; player.getVersion() gives the edition string that used to need it.
 //                onClick + button(slot,item,label) makes a button menu; setItem alone is a storage chest.
+//   items      — custom items: define(key, state) → setName / setLore / onUse / onHit / onBreak / onHold;
+//                give(player, key, n) / set / heldKey / count. A stack carries the KEY, so a hot reload
+//                re-points every existing stack at the new definition. See /forge.
 //   permissions— groups and rights: createGroup(n) → .add(node) / .inherit(g) / .setPrefix(s);
 //                forPlayer(p or 'Name') → .addGroup / .add(node) / .has / .isOp / .setOp. Server state,
 //                written straight to permissions.txt — a script no longer builds /perm command strings.
@@ -468,6 +471,40 @@ events.on('PlayerRegionEnter', function (e) {
 events.on('PlayerRegionLeave', function (e) {
     e.getPlayer().sendMessage('{dark_aqua}« leaving {white}' + e.getRegion().getName());
     // Cancelling THIS keeps them in — how an arena holds somebody until a round is over.
+});
+
+// /forge — custom items: a name, lore and programmable behaviour hung on an ordinary item state.
+//
+// There is NO resource pack (it would break the promise that any unmodified client can join), so a custom
+// item is drawn as whatever vanilla item it is built on — this one is a diamond sword and looks like one.
+// What is custom is its name, its lore and what it does.
+//
+// Identity is the KEY. A stack carries 'frostblade', not a copy of this definition, so editing the code
+// below and saving re-points every frostblade already in the world — including ones sitting in a chest
+// across a restart. An item whose key nothing defines is simply the vanilla item it is drawn as.
+items.define('frostblade', Blocks.state(276, 0))
+    .setName('{aqua}Frostblade')
+    .setLore(['{gray}Cold to the touch.', '{dark_gray}Right-click to chill'])
+    .onUse(function (player, ctx) {
+        var at = player.getLocation();
+        player.sendMessage('{aqua}A chill runs down the blade.');
+        world.playSound('click', at.x(), at.y(), at.z());
+        return true;      // consumed — the core does not go on to use the item
+    })
+    .onHit(function (player, ctx) {
+        ctx.getTarget().sendMessage('{aqua}Frozen by ' + player.getName() + '!');
+        return false;     // false — let the ordinary hit land as well
+    })
+    .onBreak(function (player, ctx) {
+        player.sendMessage('{aqua}The blade is not a pickaxe. ({gray}' + ctx.getX() + ',' + ctx.getY()
+            + ',' + ctx.getZ() + '{aqua})');
+        return true;      // consumed — the block stays
+    });
+
+commands.register('forge', function (player, args) {
+    var given = items.give(player, 'frostblade');
+    player.sendMessage(given ? '{green}Forged. {gray}Hold it and right-click.'
+                             : '{red}No room in your inventory.');
 });
 
 // /bag — the OTHER menu shape: a storage chest with no onClick, backed by no world block. The player

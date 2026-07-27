@@ -294,6 +294,23 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   `/region here <name> <radius>`; then `list`, `info`, `flag <name> <flag> allow|deny`, `remove`. Scripts
   get the `regions` global. Try `/zone` in `plugins/example.js`.
 
+- ✅ **Custom items — a name, lore and programmable behaviour on a vanilla item.** There is **no resource
+  pack** by design (it would break the promise that any unmodified client can join, and 0.14 barely
+  supports one), so a custom item is *drawn* as whatever vanilla item it is built on — a diamond sword
+  still looks like a diamond sword. What is custom is everything else: `items.define('frostblade',
+  Blocks.state(276, 0)).setName('{aqua}Frostblade').setLore([…])` plus behaviours — **`onUse`**,
+  **`onHit`**, **`onBreak`**, **`onHold`**, each returning `true` to *consume* the action, which it does by
+  cancelling the event the core already routes that decision through.
+  Identity is the **key**, and a stack carries the key rather than a copy of the definition. That is what
+  makes a custom item survive what a reference could not: a hot reload re-points every existing stack at
+  the new definition, the level file (v4) restores a chest full of them long before any plugin exists, and
+  an item whose plugin was removed simply behaves as the vanilla one it is drawn as until its script comes
+  back. A custom stack never merges with an ordinary one of the same state. Dispatch listeners are
+  registered only while some item actually has a behaviour, so a purely cosmetic item — or none at all —
+  costs nothing. Try `/forge` in `plugins/example.js`.
+  ⚠️ **The name and lore are not on the wire yet**: they are server-side, so the *client* still shows the
+  vanilla name. Sending them needs item NBT on all four protocols (three dialects) and is the next step.
+
 - ✅ **Permissions from a script.** A script could always *read* rights (`player.hasPermission`); now it can
   set them. The **`permissions`** global builds groups (`createGroup(n).inherit('default').add(node)
   .setPrefix('{aqua}[Builder] ')`) and edits one player's rights (`permissions.forPlayer(p).addGroup('builders')`,
@@ -305,8 +322,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   the region demo had to do until this landed.
 
 - ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
-  backend, not the compiled core: a script gets twelve globals — `server` / `events` / `scheduler` /
-  `commands` / `packets` / `world` / `entities` / `regions` / `permissions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
+  backend, not the compiled core: a script gets thirteen globals — `server` / `events` / `scheduler` /
+  `commands` / `packets` / `world` / `entities` / `regions` / `items` / `permissions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
   name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
   work (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too
@@ -643,7 +660,7 @@ simulation stays out (see non-goals).
   incl. ICU4J) to keep the tree lean; it lives only in `core`, so the `api` stays runtime-neutral. That
   gate is what the rest of the roadmap waited on, and the surface behind it has kept growing — nine
   globals now (`server` / `events` / `scheduler` / `commands` / `packets` / `world` / `entities` /
-  `regions` / `permissions` / `storage` / `console`), covering custom events, `/slash` commands, scheduling, raw packet taps, block editing,
+  `regions` / `items` / `permissions` / `storage` / `console`), covering custom events, `/slash` commands, scheduling, raw packet taps, block editing,
   weather, sounds and particles, and **programmable entities** (see [What works today](#what-works-today)).
   The event model has since caught up with the newer features: **weather** (`WeatherChange`, cancellable and
   redirectable, posted by the world itself so `/weather`, a script and the api all pass through it) and

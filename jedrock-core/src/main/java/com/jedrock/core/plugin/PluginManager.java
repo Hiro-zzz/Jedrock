@@ -114,6 +114,23 @@ public final class PluginManager {
         return eventBus;
     }
 
+    /**
+     * The item registry the {@code items} global writes to: the server's, or a standalone one when there
+     * is no server (headless tests). Same shape as {@code menus}, which is buildable without a server too.
+     */
+    com.jedrock.core.item.ItemRegistry items() {
+        if (server instanceof JedrockServer js) {
+            return js.getItems();
+        }
+        com.jedrock.core.item.ItemRegistry local = headlessItems;
+        if (local == null) {
+            local = headlessItems = new com.jedrock.core.item.ItemRegistry(eventBus);
+        }
+        return local;
+    }
+
+    private volatile com.jedrock.core.item.ItemRegistry headlessItems;
+
     /** The persistent store behind the {@code storage} global — loaded and saved by the server. */
     public PluginStorage storage() {
         return storage;
@@ -252,6 +269,10 @@ public final class PluginManager {
                 // always available — a script can lay a menu out even where opening it would no-op.
                 ScriptableObject.putProperty(scope, "menus",
                         Context.javaToJS(new ScriptMenus(this, plugin), scope));
+                // items likewise: a registry needs only the event bus, and a script declares its items at
+                // load time — so this must exist even headless, or a plugin that defines one can't load.
+                ScriptableObject.putProperty(scope, "items",
+                        Context.javaToJS(new ScriptItems(this, plugin, items()), scope));
                 ScriptableObject.putProperty(scope, "storage",
                         Context.javaToJS(new ScriptStorage(storage, name, scope), scope));
                 ScriptableObject.putProperty(scope, "console",
@@ -570,6 +591,59 @@ public final class PluginManager {
         } finally {
             scriptLock.unlock();
         }
+    }
+
+    /**
+     * Run a custom item's behaviour. Unlike a menu click, the return value <em>matters</em> — {@code true}
+     * consumes the action the item was used for — so a hook that throws must answer {@code false} rather
+     * than silently swallowing a player's swing.
+     */
+    boolean callItemHook(ScriptPlugin plugin, Function handler, com.jedrock.api.player.Player player,
+                         com.jedrock.core.item.ItemHook.ItemContext context) {
+        scriptLock.lock();
+        try {
+            Context cx = contextFactory.enterContext();
+            try {
+                Scriptable scope = plugin.scope();
+                Object result = handler.call(cx, scope, scope, new Object[]{
+                        Context.javaToJS(player, scope),
+                        Context.javaToJS(new ItemHookContext(context), scope)});
+                return Context.toBoolean(result);
+            } catch (RuntimeException e) {
+                LOGGER.warn("Plugin " + plugin.name() + " item hook threw: " + e);
+                return false;
+            } finally {
+                Context.exit();
+            }
+        } finally {
+            scriptLock.unlock();
+        }
+    }
+
+    /**
+     * The {@code ctx} a hook is handed. A bean rather than the record itself, so a script reads
+     * {@code ctx.getX()} in the same shape as every other object the API gives it — and so the record can
+     * grow a field without a script's positional destructuring quietly shifting.
+     */
+    public static final class ItemHookContext {
+        private final com.jedrock.core.item.ItemHook.ItemContext context;
+
+        ItemHookContext(com.jedrock.core.item.ItemHook.ItemContext context) {
+            this.context = context;
+        }
+
+        /** The block this was about ({@code break}), else 0. */
+        public int getX() { return context.x(); }
+
+        public int getY() { return context.y(); }
+
+        public int getZ() { return context.z(); }
+
+        /** The state of that block, else 0. */
+        public int getBlock() { return context.blockState(); }
+
+        /** The other player this was about ({@code hit}), else {@code null}. */
+        public Object getTarget() { return context.target(); }
     }
 
     /** Open a virtual menu to a player through the server (a no-op returning false without a live server). */

@@ -126,6 +126,7 @@ public class JedrockServer implements Server {
     /** Named arrangements of props that outlive the script that built them, and the process. */
     private final com.jedrock.core.entity.SceneManager scenes;
     private final com.jedrock.core.region.RegionManager regions;
+    private final com.jedrock.core.item.ItemRegistry items;
     /** Windows, chests and the creative mirror — every item that moves between slots. */
     private final ContainerService containers;
     /** Fall, void and melee — the one path from a source of damage to a health bar. */
@@ -149,8 +150,10 @@ public class JedrockServer implements Server {
         this.entities = new EntityDirector(playerRegistry, defaultWorld);
         this.scenes = new com.jedrock.core.entity.SceneManager(entities, defaultWorld);
         this.regions = new com.jedrock.core.region.RegionManager(eventBus);
+        this.items = new com.jedrock.core.item.ItemRegistry(eventBus);
         this.containers = new ContainerService(playerRegistry, defaultWorld, eventBus, broadcast);
         this.combat = new CombatService(playerRegistry, defaultWorld, eventBus, broadcast, entities, judge);
+        this.combat.setItems(items);
         this.levels = new LevelManager(defaultWorld, eventBus);
         // Everything the protocol layer reports lands here, not on the server itself.
         this.bridge = new ConnectionBridge(this, eventBus, playerRegistry, broadcast, defaultWorld, judge,
@@ -551,6 +554,11 @@ public class JedrockServer implements Server {
     /** Where scenes live — next to the level file, since they decorate that world. */
     private Path sceneFile() {
         return Path.of(defaultWorld.getName(), "scenes.jdb");
+    }
+
+    /** Custom items: a name, lore and behaviour hung on a vanilla item state, declared by scripts. */
+    public com.jedrock.core.item.ItemRegistry getItems() {
+        return items;
     }
 
     /** Regions: named boxes with rules, in force from boot and owned by the server like scenes are. */

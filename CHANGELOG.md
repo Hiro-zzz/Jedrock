@@ -8,6 +8,42 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Custom items — a name, lore and programmable behaviour on a vanilla item.** The honest version of the
+  feature, and the only one this server can offer: there is **no resource pack** (it would break the promise
+  that any unmodified client can join, and 0.14 barely supports one), so a custom item is *drawn* as
+  whatever vanilla item it is built on. A frostblade is a diamond sword to the eye. What is custom is its
+  name, its lore, and what it does.
+  **`items.define(key, state)`** → `setName` / `setLore`, plus the behaviours: **`onUse`** (right-click),
+  **`onHit`** (the victim is in `ctx.getTarget()`), **`onBreak`** (`ctx.getX/Y/Z/getBlock`) and
+  **`onHold`**. Each returns `true` to **consume** the action — which it does by cancelling the event the
+  core already routes that decision through, so an item's behaviour is exactly the cancellation a script
+  could have written by hand, and a listener at a higher priority can overrule it. `HIT` is the one
+  dispatched directly rather than through a listener, because no event carries both sides: `PlayerDamageEvent`
+  knows who was hurt, not who did it.
+  **Identity is the key, and a stack carries the key — not a copy of the definition.** That one decision is
+  what makes the rest work. A hot reload replaces the definition and every frostblade already in the world
+  reads as the new one; the level file (**format v4**, carrying the key per slot) restores a chest full of
+  them long before any plugin exists to define one; and an item whose plugin was uninstalled simply behaves
+  as the vanilla item it is drawn as, coming back the moment its script does. Nothing is migrated,
+  reconciled or garbage-collected. A custom stack never merges with an ordinary one of the same state —
+  same state *and* same key is what makes two stacks the same item.
+  Dispatch listeners are registered **only while some defined item actually has a behaviour**, so a purely
+  cosmetic item costs nothing and a server with none costs nothing at all — the same rule the region rules
+  follow, for the same reason. A hook that throws is logged and answers "not consumed", so a script's
+  mistake can't silently swallow a player's swing.
+  ⚠️ **Half of this is on the wire, half is not yet.** The name and lore are server-side only — no item NBT
+  is written on any protocol today (every serializer explicitly sends "no NBT"), so the *client* still shows
+  the vanilla name. Sending them needs item NBT on all four protocols in three dialects (Java big-endian,
+  1.1.5 network NBT, 0.14 little-endian) and real-client verification on two legacy Bedrock clients; that is
+  the next step, and this commit is the foundation it hangs on rather than a partial version of it.
+  Try `/forge` in `plugins/example.js`. Tested (16 new): a definition read back by key; a key that wouldn't
+  survive a file refused; re-defining replacing it with every stack following; a stack whose key nothing
+  defines staying perfectly usable; a custom stack refusing to merge with an ordinary one and merging with
+  its own kind; take and clear respecting and forgetting the key; use / break / hit / hold hooks firing,
+  seeing their context and consuming the action; a hook firing only for the item that carries it; a throwing
+  hook not consuming; dispatch appearing with the first behaviour and going with the last; and a custom item
+  in a chest keeping its key across a save and load.
+
 - **Permissions become scriptable — the `permissions` global.** A script could always *read* rights
   (`player.hasPermission`, `isOp`, `getPrefix`) and never change them. The only way to grant anything was to
   build a `/perm …` command line as a string and hand it to `dispatchCommand`: no return value, no failure

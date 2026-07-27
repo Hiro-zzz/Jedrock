@@ -33,6 +33,8 @@ public final class CombatService {
     private final PlayerBroadcast broadcast;
     private final EntityDirector entities;
     private final BlindJudge judge;
+    /** Lets a custom item in the attacker's hand answer for a hit; null in tests that don't wire one. */
+    private com.jedrock.core.item.ItemRegistry items;
 
     public CombatService(PlayerRegistry players, CoreWorld world, EventBus events,
                          PlayerBroadcast broadcast, EntityDirector entities, BlindJudge judge) {
@@ -42,6 +44,11 @@ public final class CombatService {
         this.broadcast = broadcast;
         this.entities = entities;
         this.judge = judge;
+    }
+
+    /** Wired after construction, since the item registry and combat are built at the same moment. */
+    public void setItems(com.jedrock.core.item.ItemRegistry items) {
+        this.items = items;
     }
 
     /** Interval (ticks) between environmental-damage sweeps — vanilla applies void damage every 10 ticks. */
@@ -168,6 +175,12 @@ public final class CombatService {
         // Invulnerability frames: drop a hit landing inside the victim's half-second window, so a
         // click-spamming attacker can't deal damage faster than vanilla.
         if (victim.isOnHurtCooldown()) {
+            return;
+        }
+        // A custom item in the attacker's hand gets to answer for the hit. Called straight rather than
+        // through a listener because no event carries both sides — PlayerDamageEvent knows who was hurt,
+        // not who did it. Returning true means the item handled it, so no ordinary damage follows.
+        if (items != null && items.onHit(attacker, victim)) {
             return;
         }
         hurt(victim, ATTACK_DAMAGE, DamageCause.ATTACK, "{gray}" + ChatText.escape(victim.getName())

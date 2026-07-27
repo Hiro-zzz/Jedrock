@@ -531,6 +531,14 @@ public final class CorePlayer implements Player {
         return heldSlot;
     }
 
+    /**
+     * The {@linkplain com.jedrock.api.item.CustomItem custom item} key of whatever is in hand, or
+     * {@code null} for an ordinary item. A key, not a definition — see {@code ItemRegistry}.
+     */
+    public String getHeldItemKey() {
+        return inventory.customKeyAt(heldSlot);
+    }
+
     /** Record a hotbar switch reported by the client. Out-of-range slots are ignored. */
     public void setHeldItemSlot(int slot) {
         if (slot >= 0 && slot < 9) {
