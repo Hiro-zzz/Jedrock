@@ -13,6 +13,9 @@
 //                where a storage menu is picked by slot number and /pick put / close — see /menu, /bag).
 //   entities   — …and scenes: group.save(name) freezes an arrangement, and the SERVER stands it back up
 //                at every boot (entities.loadScene / scenes / removeScene). See /scene.
+//   regions    — named boxes with rules: create / get / all / at / of(player) / remove / allows. A region
+//                denies build / interact / pvp / damage / entry; deny wins where they overlap. Also
+//                server-owned and restored at boot, and it fires PlayerRegionEnter / Leave. See /zone.
 //
 // `server` and every `player` you get (a global, an event, a command argument, a roster query) are the
 // script contract — the methods below and nothing else. The server's internals are not reachable, and
@@ -421,6 +424,40 @@ commands.register('menu', function (player, args) {
     // Java opens a chest window; both Bedrock eras get a text list they pick from with /pick <label>.
     // open() returns true in both cases, so there's nothing to fall back on here.
     m.open(player);
+});
+
+// /zone — regions: a named box with rules, built around wherever you are standing.
+//
+// A region isn't simulated — it's six numbers and a set of allowances, checked exactly where the core was
+// already asking permission (a block edit, a hit, a step). So it costs nothing until it says no.
+//
+// It is SERVER-owned, like a saved scene: it outlives this script, a hot reload and a restart. That's why
+// create() returns null instead of replacing an existing region — reloading this file must not wipe flags
+// somebody set by hand with /region flag.
+commands.register('zone', function (player, args) {
+    var at = player.getLocation();
+    var x = Math.floor(at.x()), y = Math.floor(at.y()), z = Math.floor(at.z());
+    var zone = regions.create('demo', x - 8, y - 4, z - 8, x + 8, y + 12, z + 8);
+    if (!zone) {
+        zone = regions.get('demo');                  // already there — take it as it stands
+        player.sendMessage('{gray}Reusing the existing {white}demo{gray} region.');
+    }
+    zone.deny('build').deny('pvp');                  // no digging, no fighting; calls chain
+    player.sendMessage('{green}demo: {white}' + zone.getMinX() + ',' + zone.getMinY() + ',' + zone.getMinZ()
+        + ' .. ' + zone.getMaxX() + ',' + zone.getMaxY() + ',' + zone.getMaxZ()
+        + ' {gray}denies ' + zone.getDenied().join(', '));
+    player.sendMessage('{gray}Try breaking a block inside it. {white}/region list{gray} shows them all.');
+});
+
+// The crossings. Fired once per region actually entered or left, not per movement packet — so this is the
+// hook to hang scripted content on, rather than polling positions on a timer.
+events.on('PlayerRegionEnter', function (e) {
+    e.getPlayer().sendMessage('{dark_aqua}» entering {white}' + e.getRegion().getName());
+    // e.setCancelled(true) here refuses the step and snaps them back — what the `entry` flag does.
+});
+events.on('PlayerRegionLeave', function (e) {
+    e.getPlayer().sendMessage('{dark_aqua}« leaving {white}' + e.getRegion().getName());
+    // Cancelling THIS keeps them in — how an arena holds somebody until a round is over.
 });
 
 // /bag — the OTHER menu shape: a storage chest with no onClick, backed by no world block. The player

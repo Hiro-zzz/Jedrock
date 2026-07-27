@@ -8,6 +8,49 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Regions — named boxes with rules, the platform's next primitive.** The thing every game mode ends up
+  needing and nothing here could express: a lobby, an arena, a shop floor, a spawn nobody can dig up. Until
+  now a script wanting any of that had to keep its own coordinates and re-check them by hand in
+  `PlayerMove`, reinventing the same box maths — the core's own comment on that path already named "a
+  region border" as the hypothetical reason to cancel a move.
+  A region is six numbers and a set of allowances — **`build`, `interact`, `pvp`, `damage`, `entry`** —
+  every one **on** until denied, so a fresh region changes nothing until it's told to. Bounds are inclusive
+  and normalized, so two corners in any order select what they look like they select. Where regions
+  overlap, **deny wins** — the rule this server already uses for permissions — which needs no priority
+  number and makes a small no-build box inside a big free-build one behave the obvious way.
+  Nothing about it is simulated. There is no trigger volume, nothing ticks, and there is no second
+  rulebook: **each flag is enforced by cancelling the event the core already routes that decision
+  through**, so a region's refusal is the same cancellation a script could have written, and a script
+  listening at a higher priority can overrule one. Crossings fire **`PlayerRegionEnter` /
+  `PlayerRegionLeave`**, once per region actually crossed rather than per movement packet, and both are
+  cancellable — refusing an enter is what the `entry` flag does, and refusing a *leave* is how an arena
+  holds somebody until a round is over. A refused crossing is undone whole: everything is decided before
+  anything is committed, so a player never half-enters.
+  **A server with no regions pays nothing**, which is the whole reason this could go on the movement path
+  at all. Every query starts with one array-length read, and the enforcement listeners are **registered
+  only while at least one region exists** — registering them unconditionally would make every block edit on
+  every server build an event for rules nobody wrote. Movement deliberately isn't one of those listeners,
+  since a permanent `PlayerMoveEvent` listener would defeat the `hasListeners` fast path that keeps
+  movement allocation-free; the core asks the manager directly instead, behind the same emptiness check.
+  Membership lives on the player and reuses its buffers, so walking around inside a region allocates
+  nothing — only an actual crossing does.
+  Regions are **server-owned**, like saved scenes: `world/regions.jdb` (the same compact DEFLATE + atomic
+  move + dirty flag as the level and the scene store), loaded **before the first login**, so a protected
+  spawn protects itself with no script running. `create` refuses a name already taken rather than replacing
+  it, so a script that creates its regions on every load can't wipe flags an operator set by hand.
+  Authored either way: **`/region`** (`pos1` / `pos2` / `create <name>`, or `here <name> <radius>`; then
+  `list`, `info`, `flag <name> <flag> allow|deny`, `remove`, with tab-completion for names and flags) —
+  corner selection lives on the player, so two operators can select at once and a disconnect throws a
+  half-made selection away — or the **`regions` script global** (`create` / `get` / `all` / `at` /
+  `of(player)` / `remove` / `allows`, flags addressed by name). Try `/zone` in `plugins/example.js`.
+  Tested (21 new): corner normalization and inclusive, floored containment; a name taken only once;
+  deny-wins across overlaps; each flag cancelling exactly its own event and only inside the box; damage
+  judged where the *victim* stands; enforcement appearing with the first region and going away with the
+  last; crossings firing once per crossing and not while walking around inside; a denied `entry` and a
+  cancelled enter both refusing the step; a cancelled leave keeping membership; a refused crossing leaving
+  membership untouched; the file round-tripping with its flags; an untouched set not being rewritten; and a
+  boot-loaded region enforcing itself immediately.
+
 - **Storage menus reach Bedrock — the transfer moves into the list.** The last gap in the illusion toolkit,
   and the one the `menus` global had been carrying since it landed: a button menu degrades to a `/pick`
   list on Bedrock, but a list can only ever *signal*, and storage is the one menu shape that has to move

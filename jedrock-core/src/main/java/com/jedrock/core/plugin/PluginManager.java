@@ -236,6 +236,12 @@ public final class PluginManager {
                             Context.javaToJS(new ScriptWorld(this, server.getDefaultWorld()), scope));
                     ScriptableObject.putProperty(scope, "entities",
                             Context.javaToJS(new ScriptEntities(this, plugin), scope));
+                    // Regions are server-owned (like scenes), so this global isn't torn down with the
+                    // plugin — it is a view onto the server's set, not a set of the plugin's own.
+                    if (server instanceof JedrockServer js) {
+                        ScriptableObject.putProperty(scope, "regions",
+                                Context.javaToJS(new ScriptRegions(js.getRegions()), scope));
+                    }
                 }
                 // menus needs no server to be built (only open() does, which guards for one), so it is
                 // always available — a script can lay a menu out even where opening it would no-op.

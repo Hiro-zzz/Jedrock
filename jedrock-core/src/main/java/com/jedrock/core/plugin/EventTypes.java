@@ -19,6 +19,8 @@ import com.jedrock.api.event.player.PlayerLoginEvent;
 import com.jedrock.api.event.player.PlayerMoveEvent;
 import com.jedrock.api.event.player.PlayerPickupItemEvent;
 import com.jedrock.api.event.player.PlayerQuitEvent;
+import com.jedrock.api.event.player.PlayerRegionEnterEvent;
+import com.jedrock.api.event.player.PlayerRegionLeaveEvent;
 import com.jedrock.api.event.player.PlayerRespawnEvent;
 import com.jedrock.api.event.player.PlayerTeleportEvent;
 import com.jedrock.api.event.player.PlayerToggleSneakEvent;
@@ -56,6 +58,8 @@ public final class EventTypes {
         register("PlayerChat", PlayerChatEvent.class);
         register("PlayerCommand", PlayerCommandEvent.class);
         register("PlayerMove", PlayerMoveEvent.class);
+        register("PlayerRegionEnter", PlayerRegionEnterEvent.class);
+        register("PlayerRegionLeave", PlayerRegionLeaveEvent.class);
         register("PlayerTeleport", PlayerTeleportEvent.class);
         register("PlayerRespawn", PlayerRespawnEvent.class);
         register("PlayerDamage", PlayerDamageEvent.class);

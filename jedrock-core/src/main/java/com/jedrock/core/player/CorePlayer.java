@@ -89,6 +89,41 @@ public final class CorePlayer implements Player {
         return inventory;
     }
 
+    /**
+     * Which regions this player is standing in, remembered between movement reports so the core can tell a
+     * crossing from a step. Owned by the movement path; see {@code RegionManager.updateMembership}. Costs
+     * one field on a server that has no regions at all.
+     */
+    private final com.jedrock.core.region.RegionMembership regionMembership =
+            new com.jedrock.core.region.RegionMembership();
+
+    public com.jedrock.core.region.RegionMembership getRegionMembership() {
+        return regionMembership;
+    }
+
+    /**
+     * The two corners this player has marked with {@code /region pos1} / {@code pos2}, {@code null} until
+     * they mark one. Kept on the player rather than in the command so two operators can select at the same
+     * time, and so a disconnect throws a half-made selection away instead of leaving it lying around.
+     */
+    private volatile int[] regionCorner1;
+    private volatile int[] regionCorner2;
+
+    public void setRegionCorner(boolean first, int x, int y, int z) {
+        int[] corner = {x, y, z};
+        if (first) {
+            regionCorner1 = corner;
+        } else {
+            regionCorner2 = corner;
+        }
+    }
+
+    /** The marked corner as {@code {x, y, z}}, or {@code null} if it hasn't been marked. */
+    public int[] getRegionCorner(boolean first) {
+        int[] corner = first ? regionCorner1 : regionCorner2;
+        return corner == null ? null : corner.clone();
+    }
+
     /** The item this player is carrying on the cursor while a window is open (empty when none). */
     private final Cursor cursor = new Cursor();
 

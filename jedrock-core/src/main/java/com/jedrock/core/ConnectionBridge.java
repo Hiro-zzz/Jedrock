@@ -75,12 +75,14 @@ final class ConnectionBridge implements ConnectionListener {
     private final PacketTapRegistry packetTaps;
     private final OpList opList;
     private final PermissionManager permissions;
+    private final com.jedrock.core.region.RegionManager regions;
 
     ConnectionBridge(JedrockServer server, EventBus eventBus, PlayerRegistry playerRegistry,
                      PlayerBroadcast broadcast, CoreWorld defaultWorld, BlindJudge judge,
                      CombatService combat, ContainerService containers, EntityDirector entities,
                      CommandManager commandManager, PacketTapRegistry packetTaps,
-                     OpList opList, PermissionManager permissions) {
+                     OpList opList, PermissionManager permissions,
+                     com.jedrock.core.region.RegionManager regions) {
         this.server = server;
         this.eventBus = eventBus;
         this.playerRegistry = playerRegistry;
@@ -94,6 +96,7 @@ final class ConnectionBridge implements ConnectionListener {
         this.packetTaps = packetTaps;
         this.opList = opList;
         this.permissions = permissions;
+        this.regions = regions;
     }
 
     // ===== Server-owned facts the network layer asks for =====
@@ -185,6 +188,14 @@ final class ConnectionBridge implements ConnectionListener {
             playerRegistry.removeByConnection(connection);
             player.kick("Connection refused");
             return;
+        }
+
+        // Seed region membership from where they actually spawned, so a player who logs in standing inside
+        // one is already a member and gets its enter event — rather than being told they entered it the
+        // first time they take a step. Refusal has nowhere to snap them back to, so it only means the
+        // membership isn't recorded (see PlayerRegionEnterEvent).
+        if (!regions.isEmpty()) {
+            regions.updateMembership(player, spawn.x(), spawn.y(), spawn.z());
         }
 
         player.sendMessage("{green}Welcome to **Jedrock**!");
@@ -305,6 +316,16 @@ final class ConnectionBridge implements ConnectionListener {
                 connection.teleport(from.x(), from.y(), from.z(), from.yaw(), from.pitch());
                 return;
             }
+        }
+
+        // Regions: the one rule not enforced through a listener, because a permanent PlayerMoveEvent
+        // listener would defeat the fast path above for every server that has no regions. Gated on the
+        // same kind of check instead — with none registered this is one array-length read. A refusal (a
+        // denied ENTRY flag, or a cancelled enter/leave) snaps the client back exactly as a cancelled
+        // move does.
+        if (!regions.isEmpty() && !regions.updateMembership(player, x, y, z)) {
+            connection.teleport(from.x(), from.y(), from.z(), from.yaw(), from.pitch());
+            return;
         }
         player.setLocation(new Location(player.getWorld(), x, y, z, yaw, pitch));
 

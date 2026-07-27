@@ -33,6 +33,7 @@ import com.jedrock.core.command.OpCommand;
 import com.jedrock.core.command.DeopCommand;
 import com.jedrock.core.command.PermCommand;
 import com.jedrock.core.command.PickCommand;
+import com.jedrock.core.command.RegionCommand;
 import com.jedrock.core.command.SayCommand;
 import com.jedrock.core.command.SpawnCommand;
 import com.jedrock.core.command.TeleportCommand;
@@ -124,6 +125,7 @@ public class JedrockServer implements Server {
     private final EntityDirector entities;
     /** Named arrangements of props that outlive the script that built them, and the process. */
     private final com.jedrock.core.entity.SceneManager scenes;
+    private final com.jedrock.core.region.RegionManager regions;
     /** Windows, chests and the creative mirror — every item that moves between slots. */
     private final ContainerService containers;
     /** Fall, void and melee — the one path from a source of damage to a health bar. */
@@ -146,12 +148,14 @@ public class JedrockServer implements Server {
         this.defaultWorld.setEventBus(eventBus); // so a weather change can be vetoed wherever it came from
         this.entities = new EntityDirector(playerRegistry, defaultWorld);
         this.scenes = new com.jedrock.core.entity.SceneManager(entities, defaultWorld);
+        this.regions = new com.jedrock.core.region.RegionManager(eventBus);
         this.containers = new ContainerService(playerRegistry, defaultWorld, eventBus, broadcast);
         this.combat = new CombatService(playerRegistry, defaultWorld, eventBus, broadcast, entities, judge);
         this.levels = new LevelManager(defaultWorld, eventBus);
         // Everything the protocol layer reports lands here, not on the server itself.
         this.bridge = new ConnectionBridge(this, eventBus, playerRegistry, broadcast, defaultWorld, judge,
-                combat, containers, entities, commandManager, packetTaps, opList, permissions);
+                combat, containers, entities, commandManager, packetTaps, opList, permissions,
+                regions);
 
         // Attach scheduler + core tick to game loop
         gameLoop.addTickable(scheduler);
@@ -190,6 +194,7 @@ public class JedrockServer implements Server {
         commandManager.register(new DeopCommand());
         commandManager.register(new PermCommand());
         commandManager.register(new PickCommand());
+        commandManager.register(new RegionCommand());
     }
 
     /** The in-game command registry — used by commands (e.g. {@code /help}) to introspect. */
@@ -332,6 +337,17 @@ public class JedrockServer implements Server {
             LOGGER.error("Failed to load scenes from " + sceneFile().toAbsolutePath(), e);
         }
 
+        // Regions are rules about that same world, and they have to be in force before the first login —
+        // a spawn nobody can dig up is no use if it only starts protecting itself once a script says so.
+        try {
+            regions.load(regionFile());
+            if (regions.size() > 0) {
+                LOGGER.info("Loaded " + regions.size() + " region(s)");
+            }
+        } catch (java.io.IOException e) {
+            LOGGER.error("Failed to load regions from " + regionFile().toAbsolutePath(), e);
+        }
+
         // From here on, every world write — a player's edit or a script/API call — is pushed to each
         // online client in its own protocol, so World.setBlockId is all an edit needs to be visible.
         // Registered after the bake so the one-time generation doesn't fire millions of callbacks.
@@ -375,6 +391,7 @@ public class JedrockServer implements Server {
             scheduler.runTaskTimer(() -> plugins.storage().saveIfDirty(PLUGIN_STORAGE_FILE),
                     periodTicks, periodTicks);
             scheduler.runTaskTimer(() -> scenes.saveIfDirty(sceneFile()), periodTicks, periodTicks);
+            scheduler.runTaskTimer(() -> regions.saveIfDirty(regionFile()), periodTicks, periodTicks);
             LOGGER.info("World autosave enabled (every " + saveSeconds + "s)");
         }
 
@@ -448,6 +465,7 @@ public class JedrockServer implements Server {
         // After onDisable, so a script's last-moment write is included.
         plugins.storage().saveIfDirty(PLUGIN_STORAGE_FILE);
         scenes.saveIfDirty(sceneFile());
+        regions.saveIfDirty(regionFile());
 
         gameLoop.stop();
         networkServer.shutdown();
@@ -533,6 +551,16 @@ public class JedrockServer implements Server {
     /** Where scenes live — next to the level file, since they decorate that world. */
     private Path sceneFile() {
         return Path.of(defaultWorld.getName(), "scenes.jdb");
+    }
+
+    /** Regions: named boxes with rules, in force from boot and owned by the server like scenes are. */
+    public com.jedrock.core.region.RegionManager getRegions() {
+        return regions;
+    }
+
+    /** Where regions live — next to the level file, since they are rules about that world. */
+    private Path regionFile() {
+        return Path.of(defaultWorld.getName(), "regions.jdb");
     }
 
     /** The puppeteer — puppets, holograms, and every relay that shows them cross-edition. */

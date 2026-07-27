@@ -272,9 +272,25 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   its post. Entities belong to the plugin that spawned them and despawn on hot-reload, and a whole
   plugin's ticking costs one scheduled task. Try `/guard`.
 
+- ✅ **Regions — named boxes with rules.** The primitive every game mode needs: a lobby, an arena, a shop
+  floor, a spawn nobody can dig up. A region is six numbers and a set of allowances — `build`, `interact`,
+  `pvp`, `damage`, `entry` — every one **on** until it's denied, so a new region changes nothing until you
+  say so. Where regions overlap, **deny wins** (the rule permissions already use), which means dropping a
+  small no-build box inside a big free-build one does what it looks like it does. Nothing is simulated and
+  nothing ticks: each flag is enforced by **cancelling the event the core already routes that decision
+  through**, so there is no second rulebook and a script can overrule one by listening at a higher
+  priority. Crossing a border fires **`PlayerRegionEnter` / `PlayerRegionLeave`** — once per crossing, not
+  per movement packet — and cancelling those refuses the step, which is how an arena holds someone in
+  until a round ends. Regions are **server-owned** like saved scenes: created by `/region` or a script,
+  persisted to `world/regions.jdb`, and **in force from boot before the first login**. A server with no
+  regions pays one array-length read per movement packet and nothing else — the enforcement listeners
+  aren't even registered until the first region exists. `/region pos1` / `pos2` / `create <name>`, or
+  `/region here <name> <radius>`; then `list`, `info`, `flag <name> <flag> allow|deny`, `remove`. Scripts
+  get the `regions` global. Try `/zone` in `plugins/example.js`.
+
 - ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
-  backend, not the compiled core: a script gets ten globals — `server` / `events` / `scheduler` /
-  `commands` / `packets` / `world` / `entities` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
+  backend, not the compiled core: a script gets eleven globals — `server` / `events` / `scheduler` /
+  `commands` / `packets` / `world` / `entities` / `regions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
   name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
   work (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too
@@ -499,6 +515,7 @@ scratch buffers, so encoding a chunk allocates nothing per section.
 | `EventBus` / `EventPriority` | api | Cancellable, priority-ordered events the core routes decisions through; reflection-free, with a `hasListeners` hot-path gate |
 | `PluginManager` / `ScriptPlugin` | core/plugin | The Rhino host: loads `plugins/*.js`, injects the globals, and owns each script's listeners, tasks, commands, taps and entities so a hot-reload tears them all down |
 | `PuppetEntity` / `CorePuppet` | api / core | The server-driven entity: a mob, an NPC, a hologram line or a decoration prop — moved and dressed, never simulated |
+| `Region` / `RegionManager` | api / core | Named boxes with rules; flags enforced by cancelling the events the core already routes decisions through, and registered only while a region exists |
 | `ScriptEntity` / `ScriptEntities` | core/plugin | That primitive as scripts see it: movement, state, spatial queries and an `onTick` brain, owned per plugin |
 | `EntityTypeIds` / `EntityFlagIds` | network | The entity counterpart of the block palette: canonical type / flag → each edition's wire ids |
 | `CommandManager` / `CommandSender` | core | One command surface for players and the console, gated by `PermissionManager` (groups, wildcards, deny-wins) |
@@ -610,7 +627,7 @@ simulation stays out (see non-goals).
   incl. ICU4J) to keep the tree lean; it lives only in `core`, so the `api` stays runtime-neutral. That
   gate is what the rest of the roadmap waited on, and the surface behind it has kept growing — nine
   globals now (`server` / `events` / `scheduler` / `commands` / `packets` / `world` / `entities` /
-  `storage` / `console`), covering custom events, `/slash` commands, scheduling, raw packet taps, block editing,
+  `regions` / `storage` / `console`), covering custom events, `/slash` commands, scheduling, raw packet taps, block editing,
   weather, sounds and particles, and **programmable entities** (see [What works today](#what-works-today)).
   The event model has since caught up with the newer features: **weather** (`WeatherChange`, cancellable and
   redirectable, posted by the world itself so `/weather`, a script and the api all pass through it) and
@@ -627,6 +644,13 @@ simulation stays out (see non-goals).
   What it still wants: a real-client pass on the unverified PE wire, and item **names** — a storage list
   addresses stacks by slot number because a block is an id by design, which is honest but not friendly.
   **Forms** stay out, since the legacy PE clients predate them.
+  **Regions landed** as the platform's next primitive (see [What works today](#what-works-today)): named
+  boxes with flags, enforced by cancelling the events the core already routes decisions through rather
+  than by a second rulebook, with `PlayerRegionEnter` / `PlayerRegionLeave` for the crossings and a
+  `world/regions.jdb` that puts them in force before the first login. What would grow them: **per-player
+  or per-group** flag overrides (an owner who may build in their own plot), a **greeting / farewell**
+  message per region, and a **priority** escape hatch for the case deny-wins can't express — an allow
+  island inside a deny.
 - **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
   **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
   cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry
