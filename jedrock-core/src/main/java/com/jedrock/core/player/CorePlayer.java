@@ -287,10 +287,62 @@ public final class CorePlayer implements Player {
         }
     }
 
+    /**
+     * The item registry, for turning a stack's custom-item key into the name and lore the client is shown.
+     * Null until the server wires it (and in tests), which simply means every item looks vanilla.
+     */
+    private volatile com.jedrock.core.item.ItemRegistry items;
+
+    public void setItems(com.jedrock.core.item.ItemRegistry items) {
+        this.items = items;
+    }
+
+    /** The display for one slot: the custom item's name and lore, or {@code null} for an ordinary stack. */
+    private com.jedrock.api.item.ItemDisplay displayAt(int slot) {
+        String key = inventory.customKeyAt(slot);
+        if (key == null) {
+            return null; // the overwhelmingly common case — no lookup, no allocation
+        }
+        com.jedrock.core.item.ItemRegistry registry = items;
+        com.jedrock.core.item.CoreCustomItem item = registry == null ? null : registry.get(key);
+        if (item == null) {
+            return null; // a key nothing defines: the vanilla name is the honest answer
+        }
+        return new com.jedrock.api.item.ItemDisplay(
+                ChatText.toLegacy(item.getDisplayName()), legacyLore(item.getLore()));
+    }
+
+    private static String[] legacyLore(String[] lore) {
+        if (lore.length == 0) {
+            return lore;
+        }
+        String[] out = new String[lore.length];
+        for (int i = 0; i < lore.length; i++) {
+            out[i] = ChatText.toLegacy(lore[i] == null ? "" : lore[i]);
+        }
+        return out;
+    }
+
+    /** Every slot's display, or {@code null} when nothing in the inventory is a custom item. */
+    private com.jedrock.api.item.ItemDisplay[] inventoryDisplay() {
+        com.jedrock.api.item.ItemDisplay[] display = null;
+        for (int slot = 0; slot < INV_SLOTS; slot++) {
+            com.jedrock.api.item.ItemDisplay one = displayAt(slot);
+            if (one == null) {
+                continue;
+            }
+            if (display == null) {
+                display = new com.jedrock.api.item.ItemDisplay[INV_SLOTS];
+            }
+            display[slot] = one;
+        }
+        return display; // null = an ordinary inventory, and the wire is byte-identical to before
+    }
+
     /** Push one inventory slot to the client (a live pickup / consume — refreshes the hotbar HUD). */
     public void syncSlot(int slot) {
         slotEchoGuard.arm(slot, System.nanoTime());
-        connection.setInventorySlot(slot, inventory.stateAt(slot), inventory.countAt(slot));
+        connection.setInventorySlot(slot, inventory.stateAt(slot), inventory.countAt(slot), displayAt(slot));
         if (slot == heldSlot) {
             heldItemMayHaveChanged(); // the hand itself changed — other clients must redraw it
         }
@@ -303,7 +355,7 @@ public final class CorePlayer implements Player {
      */
     public void syncInventory() {
         slotEchoGuard.armAll(System.nanoTime());
-        connection.setInventory(inventory.states(), inventory.counts());
+        connection.setInventory(inventory.states(), inventory.counts(), inventoryDisplay());
         heldItemMayHaveChanged();
         armorMayHaveChanged();
     }

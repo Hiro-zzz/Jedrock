@@ -131,11 +131,21 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Replace the client's inventory (36-slot model, 0-8 hotbar / 9-35 main) — the survival inventory. */
     void setInventory(JedrockConnection c, int[] states, int[] counts);
 
+    /** As above, with each core slot's custom-item name and lore; defaults to the nameless form. */
+    default void setInventory(JedrockConnection c, int[] states, int[] counts, com.jedrock.api.item.ItemDisplay[] display) {
+        setInventory(c, states, counts);
+    }
+
     /** Set the player's health bar (0..20) — used for server-tracked fall damage. */
     void setHealth(JedrockConnection c, int health);
 
     /** Update one inventory slot (core index 0-8 hotbar / 9-35 main) for a live survival pickup / consume. */
     void setInventorySlot(JedrockConnection c, int slot, int state, int count);
+
+    /** As above, with the slot's custom-item name and lore. */
+    default void setInventorySlot(JedrockConnection c, int slot, int state, int count, com.jedrock.api.item.ItemDisplay display) {
+        setInventorySlot(c, slot, state, count);
+    }
 
     /** Set the item shown on this client's own cursor while a window is open ({@code state} 0 = clear). */
     void setCursorItem(JedrockConnection c, int state, int count);
@@ -145,6 +155,12 @@ public interface JavaProtocol extends ProtocolHandler {
 
     /** Replace an open window's contents (already in that window's slot order). */
     void setWindowItems(JedrockConnection c, int windowId, int[] states, int[] counts);
+
+    /** As above, with a per-slot name and lore in the window's own slot order. */
+    default void setWindowItems(JedrockConnection c, int windowId, int[] states, int[] counts,
+                                com.jedrock.api.item.ItemDisplay[] display) {
+        setWindowItems(c, windowId, states, counts);
+    }
 
     /** Play another player's arm-swing animation. */
     void swingArm(JedrockConnection c, long entityId);

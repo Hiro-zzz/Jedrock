@@ -485,11 +485,16 @@ public final class Mcpe014Packets {
      * fills storage but leaves its hotbar HUD empty.
      */
     public static void playerInventory(ByteBuf b, int[] states, int[] counts) {
+        playerInventory(b, states, counts, null);
+    }
+
+    /** As above, with a per-slot custom-item display ({@code null} entries = ordinary items). */
+    public static void playerInventory(ByteBuf b, int[] states, int[] counts, com.jedrock.api.item.ItemDisplay[] display) {
         b.writeByte(ID_CONTAINER_SET_CONTENT);
         b.writeByte(WINDOW_ID_PLAYER);
         b.writeShort(states.length);
         for (int i = 0; i < states.length; i++) {
-            writeSlot(b, states[i], counts[i]);
+            writeSlot(b, states[i], counts[i], display == null || i >= display.length ? null : display[i]);
         }
         b.writeShort(9);
         for (int i = 0; i < 9; i++) {
@@ -546,11 +551,17 @@ public final class Mcpe014Packets {
      * PMMP-shaped: window id (byte), slot (short), hotbarSlot (short, 0 — PMMP's default), item.
      */
     public static void containerSetSlot(ByteBuf b, int windowId, int slot, int state, int count) {
+        containerSetSlot(b, windowId, slot, state, count, null);
+    }
+
+    /** As above, carrying a custom item's name and lore. */
+    public static void containerSetSlot(ByteBuf b, int windowId, int slot, int state, int count,
+                                        com.jedrock.api.item.ItemDisplay display) {
         b.writeByte(ID_CONTAINER_SET_SLOT);
         b.writeByte(windowId);
         b.writeShort(slot);
         b.writeShort(0);
-        writeSlot(b, state, count);
+        writeSlot(b, state, count, display);
     }
 
     /**
@@ -558,6 +569,12 @@ public final class Mcpe014Packets {
      * {@code short id} (0 = air, nothing more), else {@code byte count, short meta, short nbtLen(0)}.
      */
     public static void writeSlot(ByteBuf b, int state, int count) {
+        writeSlot(b, state, count, null);
+    }
+
+    /** As above, with a custom item's name and lore in the NBT field ({@code null} = an ordinary item). */
+    public static void writeSlot(ByteBuf b, int state, int count,
+                                 com.jedrock.api.item.ItemDisplay display) {
         int id = state >> 4;
         if (id <= 0) {
             b.writeShort(0); // air
@@ -565,8 +582,8 @@ public final class Mcpe014Packets {
         }
         b.writeShort(id);
         b.writeByte(count);
-        b.writeShort(state & 0x0F); // meta / damage
-        b.writeShort(0);            // NBT length (none)
+        b.writeShort(state & 0x0F);                  // meta / damage
+        Mcpe014ItemNbt.writeSlotNbt(b, display);     // length-prefixed; 0 for a plain item
     }
 
     /** Single-block change. {@code id}/{@code meta} are the split canonical state. */

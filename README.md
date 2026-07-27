@@ -308,8 +308,13 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   back. A custom stack never merges with an ordinary one of the same state. Dispatch listeners are
   registered only while some item actually has a behaviour, so a purely cosmetic item — or none at all —
   costs nothing. Try `/forge` in `plugins/example.js`.
-  ⚠️ **The name and lore are not on the wire yet**: they are server-side, so the *client* still shows the
-  vanilla name. Sending them needs item NBT on all four protocols (three dialects) and is the next step.
+  **The name and lore reach the client on all four protocols**, as item NBT in the Slot's own NBT field —
+  three dialects, because these eras genuinely disagree: Java is big-endian named NBT written inline (plain
+  §-coded strings, since text components in `Name` arrived in 1.13), **1.1.5** is length-prefixed *network*
+  NBT (varint string lengths, zigzag ints — the same dialect the chest tile uses), and **0.14** is
+  length-prefixed *little-endian* NBT. An ordinary item still writes the exact bytes it always did, so
+  nothing changed for a server that defines no items. ⚠️ Pinned by byte-level tests but **not yet seen on a
+  real client** — the two legacy Bedrock clients are the ones to try it on.
 
 - ✅ **Permissions from a script.** A script could always *read* rights (`player.hasPermission`); now it can
   set them. The **`permissions`** global builds groups (`createGroup(n).inherit('default').add(node)

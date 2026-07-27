@@ -8,6 +8,33 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Custom item names and lore reach the client — item NBT on all four protocols.** The other half of
+  custom items. Until now no item NBT was written anywhere: every serializer explicitly sent "no NBT" (a
+  bare `TAG_End` on Java, a zero length on both Bedrock eras), so a custom item was correct server-side and
+  nameless on screen.
+  It is **three encoders, not one with a flag**, because these eras genuinely disagree about NBT:
+  **Java 1.8 / 1.12.2** — big-endian named NBT written *inline* in the Slot's trailing field, with
+  unsigned-short string lengths and a big-endian int list length. `Name` is a plain §-coded string, since
+  text components there arrived in 1.13 — so one encoder serves both target versions and nothing has to
+  know which it is writing for.
+  **1.1.5** — *network* NBT (unsigned-varint string lengths, zigzag ints), the same dialect the chest tile
+  already used, carried behind the Slot's little-endian-short NBT length.
+  **0.14** — *little-endian* NBT (LE-short string lengths, LE int list lengths), also length-prefixed. This
+  era predates the varint network NBT entirely.
+  Both Bedrock forms are length-prefixed, so the compound is built into a scratch buffer and measured
+  before it is announced — a cost paid only by a stack that actually has a name.
+  Threaded through as a new `ItemDisplay` (name + legacy-rendered lore, `null` = ordinary) on
+  `PlayerConnection.setInventory` / `setInventorySlot` / `setWindowItems`, each **defaulting to the existing
+  nameless form**, so a connection that hasn't learned to carry a name keeps working and just shows the
+  vanilla one — the honest degradation, since the item is still the right item. `CorePlayer` resolves a
+  slot's key through the registry only when there *is* a key, and hands down a `null` array when nothing in
+  the inventory is custom: **an ordinary inventory's bytes are unchanged**.
+  ⚠️ Pinned by byte-level tests on all three dialects (13 new) but **not yet seen on a real client** —
+  the two legacy Bedrock clients are the ones to try it on, and the ones most likely to object. Tested: the
+  plain case writing exactly the bytes it always did on each protocol, the display compound's full byte
+  sequence, lore as a string list with each era's own length encoding, an empty display treated as
+  ordinary, lore without a name, and air ignoring a display entirely.
+
 - **Custom items — a name, lore and programmable behaviour on a vanilla item.** The honest version of the
   feature, and the only one this server can offer: there is **no resource pack** (it would break the promise
   that any unmodified client can join, and 0.14 barely supports one), so a custom item is *drawn* as
@@ -31,11 +58,7 @@ unstable — anything may change between entries.
   cosmetic item costs nothing and a server with none costs nothing at all — the same rule the region rules
   follow, for the same reason. A hook that throws is logged and answers "not consumed", so a script's
   mistake can't silently swallow a player's swing.
-  ⚠️ **Half of this is on the wire, half is not yet.** The name and lore are server-side only — no item NBT
-  is written on any protocol today (every serializer explicitly sends "no NBT"), so the *client* still shows
-  the vanilla name. Sending them needs item NBT on all four protocols in three dialects (Java big-endian,
-  1.1.5 network NBT, 0.14 little-endian) and real-client verification on two legacy Bedrock clients; that is
-  the next step, and this commit is the foundation it hangs on rather than a partial version of it.
+  The name and lore now **reach the client on all four protocols** — see the item-NBT entry below.
   Try `/forge` in `plugins/example.js`. Tested (16 new): a definition read back by key; a key that wouldn't
   survive a file refused; re-defining replacing it with every stack following; a stack whose key nothing
   defines staying perfectly usable; a custom stack refusing to merge with an ordinary one and merging with

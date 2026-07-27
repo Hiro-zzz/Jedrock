@@ -1,5 +1,7 @@
 package com.jedrock.network.handler.je;
 
+import com.jedrock.api.item.ItemDisplay;
+import com.jedrock.network.je.packet.JeItemNbt;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 
@@ -26,16 +28,27 @@ final class JeInventoryCodec {
      * is a canonical {@code (id << 4) | meta}; the item id is {@code state >> 4} and the damage the meta.
      */
     static void writeWindowItems(ByteBuf buf, int[] states, int[] counts, int totalSlots) {
+        writeWindowItems(buf, states, counts, null, totalSlots);
+    }
+
+    /** As above, with each core slot's custom-item name and lore ({@code null} entries = ordinary items). */
+    static void writeWindowItems(ByteBuf buf, int[] states, int[] counts, ItemDisplay[] display,
+                                 int totalSlots) {
         buf.writeByte(0);              // window id 0 = the player inventory
         buf.writeShort(totalSlots);
         for (int w = 0; w < totalSlots; w++) {
             int model = modelIndex(w);
             if (model < 0 || model >= states.length) {
-                writeSlot(buf, 0, 0);  // crafting output/grid, or a slot the model doesn't back — empty
+                writeSlot(buf, 0, 0, null); // crafting output/grid, or a slot the model doesn't back
             } else {
-                writeSlot(buf, states[model], counts[model]);
+                writeSlot(buf, states[model], counts[model], displayAt(display, model));
             }
         }
+    }
+
+    /** The display for a slot, tolerating a null array or a short one — the plain case stays plain. */
+    private static ItemDisplay displayAt(ItemDisplay[] display, int index) {
+        return display == null || index >= display.length ? null : display[index];
     }
 
     /**
@@ -44,12 +57,17 @@ final class JeInventoryCodec {
      * Unlike {@link #encode}, this applies no core→window remapping — it writes the array as given.
      */
     static byte[] encodeRaw(int windowId, int[] states, int[] counts) {
+        return encodeRaw(windowId, states, counts, null);
+    }
+
+    /** As above, with a per-slot display in the same wire order. */
+    static byte[] encodeRaw(int windowId, int[] states, int[] counts, ItemDisplay[] display) {
         ByteBuf buf = Unpooled.buffer();
         try {
             buf.writeByte(windowId);
             buf.writeShort(states.length);
             for (int i = 0; i < states.length; i++) {
-                writeSlot(buf, states[i], counts[i]);
+                writeSlot(buf, states[i], counts[i], displayAt(display, i));
             }
             byte[] out = new byte[buf.readableBytes()];
             buf.readBytes(out);
@@ -61,9 +79,14 @@ final class JeInventoryCodec {
 
     /** Encode a Window Items body to a byte array (for the 1.12.2 typed packet). */
     static byte[] encode(int[] states, int[] counts, int totalSlots) {
+        return encode(states, counts, null, totalSlots);
+    }
+
+    /** As above, with each core slot's custom-item name and lore. */
+    static byte[] encode(int[] states, int[] counts, ItemDisplay[] display, int totalSlots) {
         ByteBuf buf = Unpooled.buffer();
         try {
-            writeWindowItems(buf, states, counts, totalSlots);
+            writeWindowItems(buf, states, counts, display, totalSlots);
             byte[] out = new byte[buf.readableBytes()];
             buf.readBytes(out);
             return out;
@@ -107,8 +130,16 @@ final class JeInventoryCodec {
         return 45;                     // off-hand → 45
     }
 
-    /** One JE Slot: {@code short id} (-1 = empty), else {@code byte count, short damage, byte 0} (no NBT). */
     static void writeSlot(ByteBuf buf, int state, int count) {
+        writeSlot(buf, state, count, null);
+    }
+
+    /**
+     * One JE Slot: {@code short id} (-1 = empty), else {@code byte count, short damage}, then the NBT
+     * field — a single {@code TAG_End} for an ordinary item, or a {@code display} compound carrying a
+     * custom item's name and lore (see {@link JeItemNbt}).
+     */
+    static void writeSlot(ByteBuf buf, int state, int count, ItemDisplay display) {
         if (state == 0 || count <= 0) {
             buf.writeShort(-1);
             return;
@@ -116,6 +147,6 @@ final class JeInventoryCodec {
         buf.writeShort((state >> 4) & 0xFFFF); // item id
         buf.writeByte(count);
         buf.writeShort(state & 0xF);           // damage = block meta
-        buf.writeByte(0);                      // no NBT (TAG_End)
+        JeItemNbt.write(buf, display);
     }
 }

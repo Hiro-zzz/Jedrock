@@ -480,13 +480,21 @@ final class McpePackets {
      */
     static void playerInventory(ByteBuf b, long selfEntityId,
                                 IntUnaryOperator state, IntUnaryOperator count) {
+        playerInventory(b, selfEntityId, state, count, slot -> null);
+    }
+
+    /** As above, with a per-slot custom-item display ({@code null} from the lookup = an ordinary item). */
+    static void playerInventory(ByteBuf b, long selfEntityId,
+                                IntUnaryOperator state, IntUnaryOperator count,
+                                java.util.function.IntFunction<com.jedrock.api.item.ItemDisplay> display) {
         ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_CONTENT);
         ByteBufUtils.writeVarInt(b, WINDOW_ID_PLAYER);
         ByteBufUtils.writeSignedVarLong(b, selfEntityId);
         ByteBufUtils.writeVarInt(b, PE_PLAYER_WINDOW_SLOTS);
         for (int slot = 0; slot < PE_PLAYER_WINDOW_SLOTS; slot++) {
             if (slot < PE_PLAYER_SLOTS) {
-                McpeCodec.writeSlot(b, state.applyAsInt(slot), count.applyAsInt(slot));
+                McpeCodec.writeSlot(b, state.applyAsInt(slot), count.applyAsInt(slot),
+                        display.apply(slot));
             } else {
                 McpeCodec.writeSlot(b, Blocks.AIR, 0); // 9 trailing hotbar-area slots are air
             }
@@ -499,11 +507,17 @@ final class McpePackets {
 
     /** A single-slot update. PMMP's {@code sendSlot} leaves hotbarSlot and selectSlot at 0 — match it. */
     static void containerSetSlot(ByteBuf b, int windowId, int slot, int state, int count) {
+        containerSetSlot(b, windowId, slot, state, count, null);
+    }
+
+    /** As above, carrying a custom item's name and lore. */
+    static void containerSetSlot(ByteBuf b, int windowId, int slot, int state, int count,
+                                 com.jedrock.api.item.ItemDisplay display) {
         ByteBufUtils.writeVarInt(b, ID_CONTAINER_SET_SLOT);
         b.writeByte(windowId);                             // window id (a byte here, not a varint)
         ByteBufUtils.writeSignedVarInt(b, slot);           // inventory slot
         ByteBufUtils.writeSignedVarInt(b, 0);              // hotbarSlot (PMMP default)
-        McpeCodec.writeSlot(b, state, count);
+        McpeCodec.writeSlot(b, state, count, display);
         b.writeByte(0);                                    // selectSlot (PMMP default)
     }
 

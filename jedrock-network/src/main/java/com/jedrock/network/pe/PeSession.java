@@ -1062,14 +1062,26 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
 
     @Override
     public void setInventorySlot(int slot, int state, int count) {
+        setInventorySlot(slot, state, count, null);
+    }
+
+    @Override
+    public void setInventorySlot(int slot, int state, int count, com.jedrock.api.item.ItemDisplay display) {
         // A single-slot update refreshes the hotbar HUD live; a full ContainerSetContent updates the data
         // but the client only shows it once the inventory is opened.
-        sendGameBatch(b -> McpePackets.containerSetSlot(b, WINDOW_ID_PLAYER, slot, state, count));
+        sendGameBatch(b -> McpePackets.containerSetSlot(b, WINDOW_ID_PLAYER, slot, state, count, display));
     }
 
     @Override
     public void setInventory(int[] states, int[] counts) {
-        sendPlayerInventory(slot -> states[slot], slot -> counts[slot]);
+        setInventory(states, counts, null);
+    }
+
+    @Override
+    public void setInventory(int[] states, int[] counts, com.jedrock.api.item.ItemDisplay[] display) {
+        sendGameBatch(b -> McpePackets.playerInventory(b, SELF_ENTITY_ID,
+                slot -> states[slot], slot -> counts[slot],
+                slot -> display == null || slot >= display.length ? null : display[slot]));
     }
 
     /** Send the player's own inventory (window 0) — see {@link McpePackets#playerInventory}. */

@@ -160,6 +160,7 @@ final class ConnectionBridge implements ConnectionListener {
         CorePlayer player = new CorePlayer(uuid, username, connection, defaultWorld, spawn,
                 gameModeFor(uuid), eventBus);
         player.setPermissions(opList, permissions); // isOp/hasPermission/getPrefix resolve against these
+        player.setItems(server.getItems());          // turns a stack's custom-item key into a shown name
         // Changed equipment redraws on every other client's copy of this avatar.
         player.setEquipmentListener(new CorePlayer.EquipmentListener() {
             @Override
