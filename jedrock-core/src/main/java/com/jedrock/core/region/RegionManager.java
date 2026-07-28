@@ -83,7 +83,8 @@ public final class RegionManager {
     private static final JLogger LOGGER = JLogger.getLogger(RegionManager.class);
 
     private static final byte[] MAGIC = {'J', 'D', 'R', 'G'};
-    private static final int FORMAT_VERSION = 1;
+    /** v2 records each region's world; a v1 file's regions are all in the default world. */
+    private static final int FORMAT_VERSION = 2;
 
     /** Scanned on every lookup; a snapshot array so a reader never locks and never allocates. */
     private final CopyOnWriteArrayList<CoreRegion> regions = new CopyOnWriteArrayList<>();
@@ -91,13 +92,20 @@ public final class RegionManager {
     private final Map<String, CoreRegion> byName = new ConcurrentHashMap<>();
 
     private final EventBus events;
+    /** Which world a region from a pre-v2 file belongs to — the only world that existed when it was written. */
+    private final String defaultWorldName;
     /** Live only while at least one region exists — see the class doc. */
     private final List<EventBus.Subscription> enforcement = new ArrayList<>();
 
     private volatile boolean dirty;
 
     public RegionManager(EventBus events) {
+        this(events, "world");
+    }
+
+    public RegionManager(EventBus events, String defaultWorldName) {
         this.events = events;
+        this.defaultWorldName = defaultWorldName;
     }
 
     // ===== The registry =====
@@ -140,12 +148,13 @@ public final class RegionManager {
      * @return the new region, or {@code null} if the name is unusable or already taken — a caller that
      *         silently replaced a region would lose whatever rules were on it
      */
-    public CoreRegion create(String name, int x1, int y1, int z1, int x2, int y2, int z2) {
-        if (!isValidName(name)) {
+    public CoreRegion create(String name, com.jedrock.api.world.World world,
+                             int x1, int y1, int z1, int x2, int y2, int z2) {
+        if (!isValidName(name) || world == null) {
             return null;
         }
         String key = name.trim().toLowerCase(Locale.ROOT);
-        CoreRegion region = new CoreRegion(name.trim(), x1, y1, z1, x2, y2, z2);
+        CoreRegion region = new CoreRegion(name.trim(), world.getName(), x1, y1, z1, x2, y2, z2);
         if (byName.putIfAbsent(key, region) != null) {
             return null; // taken
         }
@@ -183,8 +192,13 @@ public final class RegionManager {
      * Whether {@code flag} is allowed at this point <em>for anyone</em> — the rule as the world states it,
      * before any player's exemptions. {@code true} where no region has an opinion.
      */
-    public boolean allows(double x, double y, double z, RegionFlag flag) {
-        return allows(null, x, y, z, flag);
+    public boolean allows(com.jedrock.api.world.World world, double x, double y, double z, RegionFlag flag) {
+        return allows(null, world, x, y, z, flag);
+    }
+
+    /** The player's own world is the one their point is in — the overload the core actually calls. */
+    public boolean allows(Player player, double x, double y, double z, RegionFlag flag) {
+        return allows(player, player == null ? null : player.getWorld(), x, y, z, flag);
     }
 
     /**
@@ -199,11 +213,12 @@ public final class RegionManager {
      * happens on a region that <em>has</em> denied — the ordinary "nothing forbids this" answer never
      * touches the permission store.
      */
-    public boolean allows(Player player, double x, double y, double z, RegionFlag flag) {
+    public boolean allows(Player player, com.jedrock.api.world.World world,
+                          double x, double y, double z, RegionFlag flag) {
         List<CoreRegion> snapshot = regions;
         for (int i = 0, n = snapshot.size(); i < n; i++) {
             CoreRegion region = snapshot.get(i);
-            if (region.contains(x, y, z) && !region.allows(flag)
+            if (region.inWorld(world) && region.contains(x, y, z) && !region.allows(flag)
                     && !isExempt(player, region, flag)) {
                 return false; // deny wins, and nothing excused this player from it
             }
@@ -217,13 +232,13 @@ public final class RegionManager {
     }
 
     /** The regions containing this point, or an empty list. Allocates — not for the movement path. */
-    public List<Region> at(double x, double y, double z) {
+    public List<Region> at(com.jedrock.api.world.World world, double x, double y, double z) {
         if (regions.isEmpty()) {
             return List.of();
         }
         List<Region> found = new ArrayList<>(2);
         for (CoreRegion region : regions) {
-            if (region.contains(x, y, z)) {
+            if (region.inWorld(world) && region.contains(x, y, z)) {
                 found.add(region);
             }
         }
@@ -237,12 +252,12 @@ public final class RegionManager {
      * around inside a region allocates nothing at all. Returns {@code -1} if the buffer is too small, which
      * tells the caller to grow it and ask again (regions are few, so this happens approximately once).
      */
-    public int fillAt(double x, double y, double z, CoreRegion[] into) {
+    public int fillAt(com.jedrock.api.world.World world, double x, double y, double z, CoreRegion[] into) {
         int found = 0;
         List<CoreRegion> snapshot = regions;
         for (int i = 0, n = snapshot.size(); i < n; i++) {
             CoreRegion region = snapshot.get(i);
-            if (region.contains(x, y, z)) {
+            if (region.inWorld(world) && region.contains(x, y, z)) {
                 if (found >= into.length) {
                     return -1; // caller grows and retries
                 }
@@ -278,10 +293,10 @@ public final class RegionManager {
     public boolean updateMembership(CorePlayer player, double x, double y, double z) {
         RegionMembership membership = player.getRegionMembership();
         CoreRegion[] candidate = membership.scratch(regions.size());
-        int found = fillAt(x, y, z, candidate);
+        int found = fillAt(player.getWorld(), x, y, z, candidate);
         if (found < 0) { // the list grew under us — take the bigger buffer and ask again
             candidate = membership.scratch(regions.size());
-            found = fillAt(x, y, z, candidate);
+            found = fillAt(player.getWorld(), x, y, z, candidate);
             if (found < 0) {
                 return true; // still racing; let the step through and settle on the next report
             }
@@ -407,6 +422,8 @@ public final class RegionManager {
                 out.writeInt(written.size());
                 for (CoreRegion region : written) {
                     writeString(out, region.getName());
+                    writeString(out, region.getWorldName()); // v2
+
                     out.writeInt(region.getMinX());
                     out.writeInt(region.getMinY());
                     out.writeInt(region.getMinZ());
@@ -453,7 +470,7 @@ public final class RegionManager {
                 throw new IOException("Not a Jedrock region file: " + file);
             }
             int version = header.readInt();
-            if (version != FORMAT_VERSION) {
+            if (version < 1 || version > FORMAT_VERSION) {
                 throw new IOException("Unsupported region format " + version + " in " + file);
             }
             try (DataInputStream in = new DataInputStream(new InflaterInputStream(raw))) {
@@ -462,7 +479,10 @@ public final class RegionManager {
                 int count = in.readInt();
                 for (int i = 0; i < count; i++) {
                     String name = readString(in);
-                    CoreRegion region = new CoreRegion(name,
+                    // A v1 file predates worlds having names worth recording: everything in it was in
+                    // the one world there was.
+                    String worldName = version < 2 ? defaultWorldName : readString(in);
+                    CoreRegion region = new CoreRegion(name, worldName,
                             in.readInt(), in.readInt(), in.readInt(),
                             in.readInt(), in.readInt(), in.readInt());
                     region.setDeniedMask(in.readInt());

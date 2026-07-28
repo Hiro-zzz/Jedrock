@@ -160,6 +160,45 @@ public final class LevelIO {
     }
 
     /**
+     * Read only the header of a level file — what kind of world it is, its seed, its extent and its
+     * spawn — without inflating a single section. This is what the uncompressed header was for: the
+     * world registry reads it for every world folder at boot to decide what to construct, and paying
+     * a full load per world just to learn a dimension byte would defeat the point.
+     */
+    public static LevelData readHeader(Path file) throws IOException {
+        try (InputStream raw = Files.newInputStream(file)) {
+            return readHeader(new DataInputStream(raw));
+        }
+    }
+
+    /** Read the header off an already-open stream, leaving the body's DEFLATE stream untouched. */
+    private static LevelData readHeader(DataInputStream header) throws IOException {
+        byte[] magic = new byte[4];
+        header.readFully(magic);
+        if (magic[0] != MAGIC[0] || magic[1] != MAGIC[1] || magic[2] != MAGIC[2] || magic[3] != MAGIC[3]) {
+            throw new IOException("Not a Jedrock level file (bad magic)");
+        }
+        int version = header.readInt();
+        // Load every older layout as well as the current one, so an existing world upgrades in place:
+        // v2 has no chests, v3 has chests but no custom-item keys, v4 no dimension. It loads fine,
+        // then the next save rewrites it at {@link #FORMAT_VERSION}, which is what save always writes.
+        if (version < 2 || version > FORMAT_VERSION) {
+            throw new IOException("Unsupported level format version " + version
+                    + " (expected 2.." + FORMAT_VERSION + ")");
+        }
+        long seed = header.readLong();
+        int boundsX = header.readInt();
+        int boundsZ = header.readInt();
+        boolean generated = header.readBoolean();
+        double spawnX = header.readDouble(), spawnY = header.readDouble(), spawnZ = header.readDouble();
+        float yaw = header.readFloat(), pitch = header.readFloat();
+        // Every world written before v5 was an overworld — it was the only kind there was.
+        int dimensionId = version < 5 ? 0 : header.readByte();
+        return new LevelData(version, seed, boundsX, boundsZ, generated,
+                spawnX, spawnY, spawnZ, yaw, pitch, dimensionId);
+    }
+
+    /**
      * Read a level file, filling {@code storage} with its sections, and return the header metadata.
      * Intended for single-threaded startup (no other thread touches {@code storage} yet).
      *
@@ -172,29 +211,8 @@ public final class LevelIO {
             // Header: read straight off the raw stream (DataInputStream does no read-ahead, so the
             // body's DEFLATE stream that follows is left intact for the inflater below).
             DataInputStream header = new DataInputStream(raw);
-            byte[] magic = new byte[4];
-            header.readFully(magic);
-            if (magic[0] != MAGIC[0] || magic[1] != MAGIC[1] || magic[2] != MAGIC[2] || magic[3] != MAGIC[3]) {
-                throw new IOException("Not a Jedrock level file (bad magic)");
-            }
-            int version = header.readInt();
-            // Load every older layout as well as the current one, so an existing world upgrades in place:
-            // v2 has no chests, v3 has chests but no custom-item keys, v4 no dimension. It loads fine,
-            // then the next save rewrites it at {@link #FORMAT_VERSION}, which is what save always writes.
-            if (version < 2 || version > FORMAT_VERSION) {
-                throw new IOException("Unsupported level format version " + version
-                        + " (expected 2.." + FORMAT_VERSION + ")");
-            }
-            long seed = header.readLong();
-            int boundsX = header.readInt();
-            int boundsZ = header.readInt();
-            boolean generated = header.readBoolean();
-            double spawnX = header.readDouble(), spawnY = header.readDouble(), spawnZ = header.readDouble();
-            float yaw = header.readFloat(), pitch = header.readFloat();
-            // Every world written before v5 was an overworld — it was the only kind there was.
-            int dimensionId = version < 5 ? 0 : header.readByte();
-            LevelData meta = new LevelData(version, seed, boundsX, boundsZ, generated,
-                    spawnX, spawnY, spawnZ, yaw, pitch, dimensionId);
+            LevelData meta = readHeader(header);
+            int version = meta.formatVersion();
 
             // Body: inflate the section list off the same underlying stream.
             Inflater inflater = new Inflater();

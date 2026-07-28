@@ -55,7 +55,8 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     private final RakNetServerSession session;
     private final ConnectionListener listener;
     private final ProtocolVersion protocol;
-    private final World world;
+    /** The world this client is currently in — not final: a player can travel to another one. */
+    private volatile World world;
     private final ServerProperties properties;
     /** Shared uuid → skin map (owned by the PE server); lets us render other PE players' real skins. */
     private final Map<UUID, McpeSkin.Skin> skins;
@@ -399,6 +400,50 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         // Reposition our own player via MovePlayer in teleport mode (the judge snapping back a move).
         sendGameBatch(b -> McpePackets.movePlayer(b, SELF_ENTITY_ID, x, y + EYE_HEIGHT, z, yaw, pitch,
                 MOVE_MODE_TELEPORT));
+    }
+
+    /**
+     * Move this client into another world. ChangeDimension is what makes the nether look like one — the
+     * client drops its terrain, shows a loading screen and waits for chunks and a spawn status, exactly
+     * the tail of the join sequence. That packet is the one step in this path no real client has been
+     * watched through, so it can be turned off: without it the player still arrives, still gets the new
+     * world's blocks (every chunk is re-sent), and only the sky stays wrong — a degradation that cannot
+     * strand anyone on a loading screen.
+     */
+    @Override
+    public void switchWorld(World target, double x, double y, double z, float yaw, float pitch,
+                            GameMode mode) {
+        this.world = target;
+        if (chunkView == null) {
+            teleport(x, y, z, yaw, pitch); // still mid-join; the join sequence will stream the new world
+            return;
+        }
+        boolean announce = Boolean.parseBoolean(
+                System.getProperty("jedrock.pe.changeDimension", "true"));
+        if (announce) {
+            sendGameBatch(b -> McpePackets.changeDimension(b, bedrockDimension(target.getDimension()),
+                    (float) x, (float) y + EYE_HEIGHT, (float) z, true));
+        }
+        // Re-send every chunk around the destination: the client either dropped its world with the
+        // packet above, or still holds the old one and needs these to overwrite it.
+        chunkView.forgetAll();
+        chunkView.recenter(((int) Math.floor(x)) >> 4, ((int) Math.floor(z)) >> 4, chunkSink);
+        if (announce) {
+            sendGameBatch(b -> McpePackets.playStatus(b, PLAY_STATUS_PLAYER_SPAWN)); // out of the load screen
+        }
+        teleport(x, y, z, yaw, pitch);
+    }
+
+    /**
+     * Bedrock numbers its dimensions 0/1/2; Java uses 0/-1/1. The world model speaks Java's, so this is
+     * the one place the two disagree and the translation lives.
+     */
+    static int bedrockDimension(com.jedrock.api.world.Dimension dimension) {
+        return switch (dimension) {
+            case OVERWORLD -> 0;
+            case NETHER -> 1;
+            case END -> 2;
+        };
     }
 
     @Override

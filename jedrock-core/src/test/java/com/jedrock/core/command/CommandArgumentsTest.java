@@ -272,6 +272,15 @@ class CommandArgumentsTest {
      * resolve and complete names. Everything else throws, so a test that leans on more fails loudly.
      */
     private static final class RosterServer implements Server {
+        @Override public com.jedrock.api.world.World createWorld(String name, String template, Long seed) {
+            throw new UnsupportedOperationException("test server has one world");
+        }
+        @Override public boolean unloadWorld(String name) { return false; }
+        @Override public java.util.Collection<com.jedrock.api.world.WorldTemplate> getWorldTemplates() {
+            return java.util.List.of();
+        }
+        @Override public void registerWorldTemplate(com.jedrock.api.world.WorldTemplate template) { }
+
         private final Map<String, Player> byName = new LinkedHashMap<>();
 
         RosterServer(Player... players) {

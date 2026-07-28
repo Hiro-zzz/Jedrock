@@ -23,16 +23,23 @@ public final class LevelManager {
 
     private final CoreWorld world;
     private final EventBus events;
+    private final Path root;
     private final AtomicBoolean saving = new AtomicBoolean(false);
 
     public LevelManager(CoreWorld world, EventBus events) {
+        this(world, events, Path.of("."));
+    }
+
+    /** {@code root} is where world folders live — the working directory in production. */
+    public LevelManager(CoreWorld world, EventBus events, Path root) {
         this.world = world;
         this.events = events;
+        this.root = root;
     }
 
     /** Path of the level file for the world, e.g. {@code world/level.jdw}. */
     private Path levelFile() {
-        return Path.of(world.getName(), "level.jdw");
+        return root.resolve(world.getName()).resolve(WorldManager.LEVEL_FILE);
     }
 
     /**
@@ -41,6 +48,11 @@ public final class LevelManager {
      * left untouched and we bake a fresh world over it in memory rather than clobber it.
      */
     public void prepare() {
+        prepare(true);
+    }
+
+    /** As {@link #prepare()}, with {@code decorate == false} baking bare terrain (a template's choice). */
+    public void prepare(boolean decorate) {
         Path file = levelFile();
         if (Files.isRegularFile(file)) {
             try {
@@ -61,10 +73,10 @@ public final class LevelManager {
         }
 
         if (!world.isGenerated()) {
-            LOGGER.info("Baking finite " + CoreWorld.BOUNDS_CHUNKS + "x" + CoreWorld.BOUNDS_CHUNKS
-                    + "-chunk world (one-time)...");
+            LOGGER.info("Baking finite " + world.boundsChunks() + "x" + world.boundsChunks()
+                    + "-chunk " + world.getDimension() + " world '" + world.getName() + "' (one-time)...");
             long t0 = System.nanoTime();
-            world.bake();
+            world.bake(world.boundsChunks(), decorate);
             long ms = (System.nanoTime() - t0) / 1_000_000;
             LOGGER.info("Baked " + world.loadedSections() + " sections ("
                     + world.compressedSections() + " compressed) in " + ms + " ms");

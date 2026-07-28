@@ -31,11 +31,26 @@ import com.jedrock.core.region.RegionManager;
 public final class ScriptRegions {
 
     private final RegionManager regions;
+    private final com.jedrock.api.Server server;
     private final ScriptRegion.RegionManagerView view;
 
-    ScriptRegions(RegionManager regions) {
+    ScriptRegions(RegionManager regions, com.jedrock.api.Server server) {
         this.regions = regions;
+        this.server = server;
         this.view = regions::markDirty;
+    }
+
+    /**
+     * The world a call means when it doesn't name one: the default world. Every method here has a short
+     * form without a world, because a server with one world — which is most of them — should not have to
+     * repeat its name, and because that is the form every script written before worlds existed uses.
+     */
+    private com.jedrock.api.world.World worldOr(String name) {
+        if (name == null || name.isEmpty()) {
+            return server.getDefaultWorld();
+        }
+        return server.getWorld(name).orElseThrow(
+                () -> new IllegalArgumentException("no world named '" + name + "'"));
     }
 
     /**
@@ -44,7 +59,17 @@ public final class ScriptRegions {
      * @return the region, or {@code null} if the name is blank or already taken
      */
     public ScriptRegion create(String name, int x1, int y1, int z1, int x2, int y2, int z2) {
-        Region created = regions.create(name, x1, y1, z1, x2, y2, z2);
+        return createIn(null, name, x1, y1, z1, x2, y2, z2);
+    }
+
+    /**
+     * As {@link #create}, in a named world. A region is six numbers <em>in a world</em>; with more than
+     * one loaded, the same box in the nether is a different place and this is how a script says which.
+     *
+     * @param world the world's name, or {@code null} / {@code ""} for the default world
+     */
+    public ScriptRegion createIn(String world, String name, int x1, int y1, int z1, int x2, int y2, int z2) {
+        Region created = regions.create(name, worldOr(world), x1, y1, z1, x2, y2, z2);
         return created == null ? null : new ScriptRegion(view, created);
     }
 
@@ -71,7 +96,12 @@ public final class ScriptRegions {
 
     /** The regions containing this point — empty when none do. */
     public ScriptRegion[] at(double x, double y, double z) {
-        return wrap(regions.at(x, y, z));
+        return wrap(regions.at(worldOr(null), x, y, z));
+    }
+
+    /** The regions containing this point in a named world. */
+    public ScriptRegion[] atIn(String world, double x, double y, double z) {
+        return wrap(regions.at(worldOr(world), x, y, z));
     }
 
     /**
@@ -86,7 +116,7 @@ public final class ScriptRegions {
             throw new IllegalArgumentException("regions.of expects a player");
         }
         Location at = target.getLocation();
-        return wrap(regions.at(at.x(), at.y(), at.z()));
+        return wrap(regions.at(target.getWorld(), at.x(), at.y(), at.z()));
     }
 
     /**
@@ -95,7 +125,12 @@ public final class ScriptRegions {
      * opinion.
      */
     public boolean allows(double x, double y, double z, String flag) {
-        return regions.allows(x, y, z, flagOf(flag));
+        return regions.allows(worldOr(null), x, y, z, flagOf(flag));
+    }
+
+    /** As {@link #allows}, in a named world. */
+    public boolean allowsIn(String world, double x, double y, double z, String flag) {
+        return regions.allows(worldOr(world), x, y, z, flagOf(flag));
     }
 
     /**

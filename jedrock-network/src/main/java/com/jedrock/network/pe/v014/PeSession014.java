@@ -44,7 +44,8 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
 
     private final RakNetServerSession session;
     private final ConnectionListener listener;
-    private final World world;
+    /** The world this client is currently in — not final: a player can travel to another one. */
+    private volatile World world;
     private final ServerProperties properties;
 
     private volatile boolean loggedIn = false;
@@ -240,6 +241,24 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     public void teleport(double x, double y, double z, float yaw, float pitch) {
         sendWrapped(b -> Mcpe014Packets.movePlayerSelf(b,
                 (float) x, (float) y + EYE_HEIGHT, (float) z, yaw, pitch, MOVE_MODE_RESET));
+    }
+
+    /**
+     * Move this client into another world — with no dimension packet, because 0.14 has none this project
+     * has ground-truthed, and this is the client that crashes on a guessed id. So the world changes the
+     * only way it safely can: re-send every chunk in view from the new world, then put the player down.
+     * The blocks, the biome tint and the spawn are all the destination's; the sky is not. A nether looks
+     * like an overworld with netherrack in it, which is the honest half of the feature this era can have.
+     */
+    @Override
+    public void switchWorld(World target, double x, double y, double z, float yaw, float pitch,
+                            GameMode mode) {
+        this.world = target;
+        if (chunkView != null) {
+            chunkView.forgetAll();
+            chunkView.recenter(((int) Math.floor(x)) >> 4, ((int) Math.floor(z)) >> 4, chunkSink);
+        }
+        teleport(x, y, z, yaw, pitch);
     }
 
     @Override

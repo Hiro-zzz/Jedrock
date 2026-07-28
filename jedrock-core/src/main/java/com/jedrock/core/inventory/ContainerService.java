@@ -27,16 +27,27 @@ import com.jedrock.core.world.CoreWorld;
 public final class ContainerService {
 
     private final PlayerRegistry players;
-    private final CoreWorld world;
+    /** Only a fallback: every chest operation belongs to the world of the player doing it. */
+    private final CoreWorld defaultWorld;
     private final EventBus events;
     private final PlayerBroadcast broadcast;
 
-    public ContainerService(PlayerRegistry players, CoreWorld world, EventBus events,
+    public ContainerService(PlayerRegistry players, CoreWorld defaultWorld, EventBus events,
                             PlayerBroadcast broadcast) {
         this.players = players;
-        this.world = world;
+        this.defaultWorld = defaultWorld;
         this.events = events;
         this.broadcast = broadcast;
+    }
+
+    /**
+     * The world a click happens in — the clicker's. A chest is a position, and a position only means
+     * something inside a world; with two worlds loaded, the same {@code (x, y, z)} names two different
+     * blocks. Falls back to the default world for a connection with no player yet (a half-logged-in
+     * client), which is the only world it could be in anyway.
+     */
+    private CoreWorld worldOf(CorePlayer player) {
+        return player != null ? player.getCoreWorld() : defaultWorld;
     }
 
     public void onWindowClick(PlayerConnection connection, int coreSlot, int button, boolean shift) {
@@ -288,6 +299,10 @@ public final class ContainerService {
 
     public boolean onUseBlock(PlayerConnection connection, int x, int y, int z) {
         CorePlayer clicker = players.getByConnectionOrNull(connection);
+        // Whose world the block is in: the clicker's. A chest is identified by a position, and a position
+        // means nothing without a world once there is more than one — the same coordinates hold a chest
+        // in the overworld and open air in the nether.
+        CoreWorld world = worldOf(clicker);
         // Let listeners gate the right-click on any block. Cancelling consumes the click — no chest opens
         // and no block is placed against it — so a plugin can protect a block or handle it itself.
         if (clicker != null && events.hasListeners(PlayerInteractBlockEvent.class)) {
@@ -302,7 +317,7 @@ public final class ContainerService {
         // A chest: consume the right-click (so no block is placed on it) and open it. Works in creative
         // too — the creative inventory is mirrored server-side via onCreativeSetSlot, so the chest's
         // player-inventory half is tracked.
-        CorePlayer player = players.getByConnectionOrNull(connection);
+        CorePlayer player = clicker;
         if (player != null) {
             Container chest = world.getChestContainer(x, y, z);
             player.openContainer(CHEST_WINDOW_ID, chest);
@@ -313,6 +328,7 @@ public final class ContainerService {
     }
 
     public boolean onChestInteract(PlayerConnection connection, int x, int y, int z, int heldSlot) {
+        CoreWorld world = worldOf(players.getByConnectionOrNull(connection));
         if (Blocks.idOf(world.getBlockId(x, y, z)) != Blocks.CHEST) {
             return false; // not a chest — let the caller place the held block
         }
@@ -349,7 +365,7 @@ public final class ContainerService {
             int have = chest.countAt(i);
             int moved = takeStack(player, chest, i, creative);
             if (moved > 0) {
-                world.markDirty();
+                player.getCoreWorld().markDirty();
                 player.sendMessage("{gray}" + (creative ? "Убрано из сундука ×" : "Взято из сундука ×") + moved
                         + (moved < have ? " {dark_gray}(инвентарь полон)" : ""));
             }
@@ -375,7 +391,7 @@ public final class ContainerService {
         }
         int moved = putStack(player, chest, heldSlot, creative);
         if (moved > 0) {
-            world.markDirty();
+            player.getCoreWorld().markDirty();
             player.sendMessage("{gray}Положено в сундук ×" + moved
                     + (moved < have ? " {dark_gray}(сундук полон)" : ""));
         } else {
@@ -498,7 +514,7 @@ public final class ContainerService {
                 InventoryClick.normal(target, player.getCursor(), index, button == 1);
             }
             if (player.isOpenContainerPersistent()) {
-                world.markDirty(); // a world-chest edit must be persisted; a menu's is transient
+                player.getCoreWorld().markDirty(); // a world-chest edit must be persisted; a menu's is transient
             }
         }
         sendChestContents(player, connection);
@@ -575,7 +591,7 @@ public final class ContainerService {
             if (slot < chest.size()) {
                 chest.set(slot, state, count);
                 if (player.isOpenContainerPersistent()) {
-                    world.markDirty(); // a world-chest edit persists; a menu's is transient
+                    player.getCoreWorld().markDirty(); // a world-chest edit persists; a menu's is transient
                 }
             }
         } else if (windowId == 0 && slot < CorePlayer.STORAGE_SLOTS) {

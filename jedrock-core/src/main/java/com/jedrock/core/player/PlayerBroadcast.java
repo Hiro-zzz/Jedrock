@@ -39,11 +39,16 @@ public final class PlayerBroadcast {
         }
     }
 
-    /** Relay a player's move to every other player's copy of their avatar. */
+    /**
+     * Relay a player's move to every other player's copy of their avatar — in the same world only. A
+     * player in the nether has no avatar on an overworld client to move, and telling one to move it
+     * anyway is how a ghost appears at the coordinates of someone who isn't there.
+     */
     public void move(CorePlayer player, double x, double y, double z, float yaw, float pitch) {
         long entityId = player.getEntityId();
+        com.jedrock.api.world.World world = player.getWorld();
         for (CorePlayer other : players.online()) {
-            if (other != player) {
+            if (other != player && other.getWorld() == world) {
                 other.getConnection().moveAvatar(entityId, x, y, z, yaw, pitch);
             }
         }
@@ -68,8 +73,9 @@ public final class PlayerBroadcast {
         boolean sneaking = player.isSneaking();
         boolean sprinting = player.isSprinting();
         boolean usingItem = player.isUsingItem();
+        com.jedrock.api.world.World world = player.getWorld();
         for (CorePlayer other : players.online()) {
-            if (other != player) {
+            if (other != player && other.getWorld() == world) {
                 other.getConnection().setPose(entityId, sneaking, sprinting, usingItem);
             }
         }
@@ -83,8 +89,9 @@ public final class PlayerBroadcast {
     public void heldItem(CorePlayer holder) {
         int state = holder.getHeldItem();
         long entityId = holder.getEntityId();
+        com.jedrock.api.world.World world = holder.getWorld();
         for (CorePlayer other : players.online()) {
-            if (other != holder) {
+            if (other != holder && other.getWorld() == world) {
                 other.getConnection().showHeldItem(entityId, state);
             }
         }
@@ -102,8 +109,9 @@ public final class PlayerBroadcast {
         int leggings = wearer.getArmor(ArmorSlot.LEGGINGS);
         int boots = wearer.getArmor(ArmorSlot.BOOTS);
         long entityId = wearer.getEntityId();
+        com.jedrock.api.world.World world = wearer.getWorld();
         for (CorePlayer other : players.online()) {
-            if (other != wearer) {
+            if (other != wearer && other.getWorld() == world) {
                 other.getConnection().showArmor(entityId, helmet, chestplate, leggings, boots);
             }
         }

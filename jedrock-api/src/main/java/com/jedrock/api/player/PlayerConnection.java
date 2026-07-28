@@ -143,6 +143,23 @@ public interface PlayerConnection {
     void teleport(double x, double y, double z, float yaw, float pitch);
 
     /**
+     * Move this client into another {@code world} and put it down at the given position. Unlike
+     * {@link #teleport}, the terrain itself changes: the connection re-points at the new world, drops the
+     * chunks it had sent, streams the ones around the destination, and — where the protocol has a way to
+     * say so — tells the client which kind of world it is now in, which is what gives a nether its sky.
+     *
+     * <p>{@code mode} is the player's current game mode: the editions that carry a dimension change carry
+     * a game mode with it, and passing the wrong one would silently flip the player into another mode.
+     *
+     * <p>The default is the honest degradation for a connection that has no dimension concept: a plain
+     * teleport. The player ends up in the right place with the wrong-looking sky — never in limbo.
+     */
+    default void switchWorld(com.jedrock.api.world.World world, double x, double y, double z,
+                             float yaw, float pitch, GameMode mode) {
+        teleport(x, y, z, yaw, pitch);
+    }
+
+    /**
      * Change <em>this</em> client's own game mode live (survival ↔ creative …), so the client flips its
      * HUD and abilities (flight allowed only in creative / spectator). Each edition encodes it in its
      * own way; a connection that can't switch mode on the wire (e.g. MCPE 0.14) applies it on next join.

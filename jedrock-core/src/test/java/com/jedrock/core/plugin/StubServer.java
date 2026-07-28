@@ -57,6 +57,12 @@ final class StubServer implements com.jedrock.api.Server {
     @Override public Collection<World> getWorlds() { return List.of(world); }
     @Override public Optional<World> getWorld(String name) { return Optional.of(world); }
     @Override public World getDefaultWorld() { return world; }
+    @Override public World createWorld(String name, String template, Long seed) {
+        throw new UnsupportedOperationException("the stub server has exactly one world");
+    }
+    @Override public boolean unloadWorld(String name) { return false; }
+    @Override public Collection<com.jedrock.api.world.WorldTemplate> getWorldTemplates() { return List.of(); }
+    @Override public void registerWorldTemplate(com.jedrock.api.world.WorldTemplate template) { }
     @Override public PuppetEntity spawnPuppet(EntityType type, Location at, String name) {
         return new StubPuppet(at);
     }

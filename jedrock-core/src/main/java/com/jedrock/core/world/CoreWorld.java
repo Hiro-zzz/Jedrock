@@ -33,9 +33,9 @@ public final class CoreWorld implements World {
     private static final long DEFAULT_SEED = 0x5EED1EAFL;
 
     /**
-     * Finite world extent, in chunks per side, centred on the origin. The world is a bounded
-     * "decoration" (see the world-generation roadmap): 48×48 chunks = 768×768 blocks. Recorded in the
-     * level file today; enforced (edge wall) once the bake/edge phases land.
+     * Default finite world extent, in chunks per side, centred on the origin: 48×48 chunks = 768×768
+     * blocks. A world built from a template may be smaller or larger; this is what a world gets when
+     * nobody says otherwise, and what the level file records so a reload keeps the same edge.
      */
     public static final int BOUNDS_CHUNKS = 48;
 
@@ -43,6 +43,8 @@ public final class CoreWorld implements World {
     private final UUID uniqueId;
     private final Dimension dimension;
     private final long seed;
+    /** This world's extent in chunks per side. Not final: a loaded level's own bounds win over ours. */
+    private volatile int boundsChunks;
     private volatile Location spawnLocation;
     private final BlockStorage storage = new BlockStorage();
     private final BiomeStorage biomes = new BiomeStorage();
@@ -65,7 +67,12 @@ public final class CoreWorld implements World {
     }
 
     public CoreWorld(String name, Dimension dimension, long seed) {
+        this(name, dimension, seed, BOUNDS_CHUNKS);
+    }
+
+    public CoreWorld(String name, Dimension dimension, long seed, int boundsChunks) {
         this.name = name;
+        this.boundsChunks = boundsChunks;
         this.uniqueId = UUID.randomUUID();
         this.dimension = dimension;
         this.seed = seed;
@@ -294,14 +301,19 @@ public final class CoreWorld implements World {
 
     // ===== Finite bounds (the world edge) =====
 
+    /** This world's extent, in chunks per side, centred on the origin. */
+    public int boundsChunks() {
+        return boundsChunks;
+    }
+
     /** Inclusive minimum block coordinate on the x and z axes. */
     public int minBound() {
-        return (-BOUNDS_CHUNKS / 2) << 4;
+        return (-boundsChunks / 2) << 4;
     }
 
     /** Exclusive maximum block coordinate on the x and z axes. */
     public int maxBound() {
-        return (BOUNDS_CHUNKS - BOUNDS_CHUNKS / 2) << 4;
+        return (boundsChunks - boundsChunks / 2) << 4;
     }
 
     /** Whether a column {@code (x, z)} lies inside the finite world; outside is void (the edge wall). */
@@ -341,7 +353,7 @@ public final class CoreWorld implements World {
      * so a coordinate outside the baked region reads air (the world is finite). A no-op if already baked.
      */
     public void bake() {
-        bake(BOUNDS_CHUNKS, true);
+        bake(boundsChunks, true);
     }
 
     /** Bake a square of {@code chunksPerSide}×{@code chunksPerSide} chunks centred on the origin. */
@@ -354,6 +366,8 @@ public final class CoreWorld implements World {
         if (generated) {
             return;
         }
+        // Whatever we actually bake is what the edge wall must enforce and what the level file records.
+        this.boundsChunks = chunksPerSide;
         int half = chunksPerSide / 2;
         int lo = -half;
         int hi = chunksPerSide - half; // exclusive
@@ -389,7 +403,7 @@ public final class CoreWorld implements World {
      */
     public void save(Path file) throws IOException {
         Location s = spawnLocation;
-        LevelData meta = new LevelData(LevelIO.FORMAT_VERSION, seed, BOUNDS_CHUNKS, BOUNDS_CHUNKS,
+        LevelData meta = new LevelData(LevelIO.FORMAT_VERSION, seed, boundsChunks, boundsChunks,
                 generated, s.x(), s.y(), s.z(), s.yaw(), s.pitch(), dimension.getId());
         // Clear before writing so an edit arriving mid-save re-marks the world dirty for the next cycle.
         dirty = false;
@@ -404,6 +418,11 @@ public final class CoreWorld implements World {
     public LevelData load(Path file) throws IOException {
         LevelData meta = LevelIO.load(file, storage, biomes, containers);
         this.generated = meta.generated();
+        // A baked world's edge is a property of the bytes on disk, not of whatever size we were built
+        // with: adopting it is what stops a config change from putting a wall through an existing world.
+        if (meta.generated() && meta.boundsChunksX() > 0) {
+            this.boundsChunks = meta.boundsChunksX();
+        }
         // The saved spawn wins over the one the constructor computed: it may have been moved since
         // (setSpawnLocation, /world setspawn), and a world that forgets where its spawn is on every
         // restart is the kind of quiet loss persistence exists to prevent.

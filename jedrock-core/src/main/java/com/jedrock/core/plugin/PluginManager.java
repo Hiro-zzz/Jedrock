@@ -253,11 +253,15 @@ public final class PluginManager {
                             Context.javaToJS(new ScriptWorld(this, server.getDefaultWorld()), scope));
                     ScriptableObject.putProperty(scope, "entities",
                             Context.javaToJS(new ScriptEntities(this, plugin), scope));
+                    // Worlds are server-owned like regions: this global is a view onto the server's set,
+                    // not a set of the plugin's own, so a reload doesn't unmake a world a script created.
+                    ScriptableObject.putProperty(scope, "worlds",
+                            Context.javaToJS(new ScriptWorlds(server, this), scope));
                     // Regions are server-owned (like scenes), so this global isn't torn down with the
                     // plugin — it is a view onto the server's set, not a set of the plugin's own.
                     if (server instanceof JedrockServer js) {
                         ScriptableObject.putProperty(scope, "regions",
-                                Context.javaToJS(new ScriptRegions(js.getRegions()), scope));
+                                Context.javaToJS(new ScriptRegions(js.getRegions(), server), scope));
                         // Also server-owned, and the door that ScriptWrapFactory closed by accident
                         // (server.getOpList()) reopened deliberately, with a written shape.
                         ScriptableObject.putProperty(scope, "permissions",

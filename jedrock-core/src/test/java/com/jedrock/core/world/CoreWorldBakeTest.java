@@ -52,10 +52,13 @@ class CoreWorldBakeTest {
         assertEquals(Blocks.AIR, world.getBlockId(0, surface, 0), "broken baked block is air");
         assertEquals(Blocks.DIRT, Blocks.idOf(world.getBlockId(0, surface - 1, 0)), "layer below intact");
 
-        // Placing outside the baked region still works (storage grows on demand).
+        // Placing outside the baked region is refused: a world's edge is wherever its bake ended. This
+        // used to succeed only because the bounds were a constant (48) while the test baked 4 — with the
+        // extent now a property of the world, the wall is where the terrain actually stops.
         int placed = Blocks.state(Blocks.STONE, 0);
         world.setBlockId(OUT_X, 60, OUT_Z, placed);
-        assertEquals(placed, world.getBlockId(OUT_X, 60, OUT_Z), "placed block outside bake persists");
+        assertEquals(Blocks.AIR, world.getBlockId(OUT_X, 60, OUT_Z), "outside the bake is void, and stays void");
+        assertEquals(4, world.boundsChunks(), "the bake decides the extent");
     }
 
     @Test

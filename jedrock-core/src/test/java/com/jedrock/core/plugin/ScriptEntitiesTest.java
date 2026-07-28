@@ -93,6 +93,15 @@ class ScriptEntitiesTest {
 
     /** The slice of Server the entity API touches: a world, a roster, and puppet spawning. */
     private final class FakeServer implements Server {
+        @Override public com.jedrock.api.world.World createWorld(String name, String template, Long seed) {
+            throw new UnsupportedOperationException("test server has one world");
+        }
+        @Override public boolean unloadWorld(String name) { return false; }
+        @Override public java.util.Collection<com.jedrock.api.world.WorldTemplate> getWorldTemplates() {
+            return java.util.List.of();
+        }
+        @Override public void registerWorldTemplate(com.jedrock.api.world.WorldTemplate template) { }
+
         final List<FakePuppet> spawned = new CopyOnWriteArrayList<>();
         final List<Player> players = new ArrayList<>();
         private long nextId = 1;
