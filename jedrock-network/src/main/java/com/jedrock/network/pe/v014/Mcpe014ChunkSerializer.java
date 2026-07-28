@@ -36,6 +36,7 @@ public final class Mcpe014ChunkSerializer {
             case 4 -> 0x59AE30;   // forest
             case 5 -> 0x86B87F;   // taiga
             case 35 -> 0xBFB755;  // savanna
+            case 8 -> 0x9B4A28;   // hell — nothing grows there, but the tint colours foliage a player carries
             default -> 0x85B24A;  // plains (and anything unknown)
         };
     }

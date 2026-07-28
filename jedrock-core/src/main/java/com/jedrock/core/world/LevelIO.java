@@ -36,6 +36,7 @@ import java.util.zip.InflaterInputStream;
  *   byte   generated (0/1)
  *   double spawnX, spawnY, spawnZ
  *   float  spawnYaw, spawnPitch
+ *   byte   dimensionId             (v5+: 0 = overworld, -1 = nether)
  *   === DEFLATE stream from here ===
  *   int    sectionCount
  *   repeat sectionCount:
@@ -61,8 +62,8 @@ import java.util.zip.InflaterInputStream;
 public final class LevelIO {
 
     /** Current on-disk format version; bump on any incompatible layout change. (v2 added the biome map,
-     *  v3 the chest container contents, v4 the custom-item key each stack carries.) */
-    public static final int FORMAT_VERSION = 4;
+     *  v3 the chest container contents, v4 the custom-item key each stack carries, v5 the dimension.) */
+    public static final int FORMAT_VERSION = 5;
 
     private static final byte[] MAGIC = {'J', 'D', 'W', 'L'};
     private static final int SECTION_SHORTS = 4096;
@@ -100,6 +101,7 @@ public final class LevelIO {
             header.writeDouble(meta.spawnZ());
             header.writeFloat(meta.spawnYaw());
             header.writeFloat(meta.spawnPitch());
+            header.writeByte(meta.dimensionId()); // v5+
             header.flush();
 
             // Body: one DEFLATE stream over the section list.
@@ -177,20 +179,22 @@ public final class LevelIO {
             }
             int version = header.readInt();
             // Load every older layout as well as the current one, so an existing world upgrades in place:
-            // v2 has no chests, v3 has chests but no custom-item keys. It loads fine, then the next save
-            // rewrites it at {@link #FORMAT_VERSION}, which is what save always writes.
-            if (version != 2 && version != 3 && version != FORMAT_VERSION) {
+            // v2 has no chests, v3 has chests but no custom-item keys, v4 no dimension. It loads fine,
+            // then the next save rewrites it at {@link #FORMAT_VERSION}, which is what save always writes.
+            if (version < 2 || version > FORMAT_VERSION) {
                 throw new IOException("Unsupported level format version " + version
-                        + " (expected 2, 3 or " + FORMAT_VERSION + ")");
+                        + " (expected 2.." + FORMAT_VERSION + ")");
             }
-            LevelData meta = new LevelData(
-                    version,
-                    header.readLong(),
-                    header.readInt(),
-                    header.readInt(),
-                    header.readBoolean(),
-                    header.readDouble(), header.readDouble(), header.readDouble(),
-                    header.readFloat(), header.readFloat());
+            long seed = header.readLong();
+            int boundsX = header.readInt();
+            int boundsZ = header.readInt();
+            boolean generated = header.readBoolean();
+            double spawnX = header.readDouble(), spawnY = header.readDouble(), spawnZ = header.readDouble();
+            float yaw = header.readFloat(), pitch = header.readFloat();
+            // Every world written before v5 was an overworld — it was the only kind there was.
+            int dimensionId = version < 5 ? 0 : header.readByte();
+            LevelData meta = new LevelData(version, seed, boundsX, boundsZ, generated,
+                    spawnX, spawnY, spawnZ, yaw, pitch, dimensionId);
 
             // Body: inflate the section list off the same underlying stream.
             Inflater inflater = new Inflater();

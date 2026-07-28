@@ -180,7 +180,9 @@ public final class WorldDecorator {
 
     // ===== Deterministic hashing / noise (position-based, order-independent). =====
 
-    private static long hash(long seed, int a, int b, int salt) {
+    // Package-private, not private: {@link NetherDecorator} hashes positions the same way, and one
+    // shared mixer is what keeps "same seed ⇒ same world" true across both decorators.
+    static long hash(long seed, int a, int b, int salt) {
         long h = seed + salt * 0x9E3779B97F4A7C15L;
         h ^= (long) a * 0xBF58476D1CE4E5B9L;
         h ^= (h >>> 27);
@@ -191,7 +193,7 @@ public final class WorldDecorator {
     }
 
     /** A hash mapped to [0, 1). */
-    private static double unit(long h) {
+    static double unit(long h) {
         return (h >>> 11) * (1.0 / (1L << 53));
     }
 

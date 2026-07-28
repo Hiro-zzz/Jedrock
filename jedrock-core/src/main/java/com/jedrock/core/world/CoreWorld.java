@@ -19,14 +19,15 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
- * In-memory world implementation. A thin state holder over {@link BlockStorage} and a procedural
- * {@link TerrainGenerator}; it does not simulate physics, light or AI — the client renders the
+ * In-memory world implementation. A thin state holder over {@link BlockStorage} and a
+ * {@link WorldGenerator}; it does not simulate physics, light or AI — the client renders the
  * illusion and collides against the ground we serialize to it.
+ *
+ * <p>Storage, bounds, edits, containers, weather and persistence are the same for every world. What
+ * kind of world it is — an overworld of grass and trees, or a 128-tall nether of netherrack and lava —
+ * is entirely the generator's business, chosen once from the {@link Dimension} at construction.
  */
 public final class CoreWorld implements World {
-
-    /** Depth of the dirt layer below the grass surface; everything deeper is stone. */
-    private static final int DIRT_DEPTH = 3;
 
     /** Default world seed — fixed so restarts reproduce the same terrain (until config lands). */
     private static final long DEFAULT_SEED = 0x5EED1EAFL;
@@ -45,8 +46,8 @@ public final class CoreWorld implements World {
     private volatile Location spawnLocation;
     private final BlockStorage storage = new BlockStorage();
     private final BiomeStorage biomes = new BiomeStorage();
-    private final TerrainGenerator terrain;
-    private final BiomeGenerator biomeGen;
+    /** What this world is made of — the only thing an overworld and a nether disagree about. */
+    private final WorldGenerator generator;
     private final Set<Player> players = new CopyOnWriteArraySet<>();
 
     /**
@@ -68,11 +69,11 @@ public final class CoreWorld implements World {
         this.uniqueId = UUID.randomUUID();
         this.dimension = dimension;
         this.seed = seed;
-        this.terrain = new TerrainGenerator(seed);
-        this.biomeGen = new BiomeGenerator(seed);
-        // Spawn standing on top of the generated ground at the origin column.
-        int surface = surfaceHeight(0, 0);
-        this.spawnLocation = new Location(this, 0.5, surface + 1, 0.5);
+        this.generator = WorldGenerator.forDimension(dimension, seed);
+        // Spawn standing on the generated ground at the origin column. The generator decides what
+        // "standing" means: the grass surface in an overworld, the platform above the lava sea in a
+        // nether — computed here, before the bake, and made solid by the same generator's decoration.
+        this.spawnLocation = new Location(this, 0.5, generator.spawnHeight(0, 0), 0.5);
     }
 
     @Override
@@ -149,27 +150,8 @@ public final class CoreWorld implements World {
         if (stored != Blocks.AIR) {
             return stored;              // a player placed a block here (packed state)
         }
-        return generatedBlock(x, y, z); // procedural terrain
-    }
-
-    /** Classify a coordinate into a block state from the surface height: grass / dirt / stone / air. */
-    private int generatedBlock(int x, int y, int z) {
-        return generatedBlock(y, surfaceHeight(x, z));
-    }
-
-    /** Same classification, but with the column's surface height already known (hot-path helper). */
-    private static int generatedBlock(int y, int surface) {
-        if (y < 0 || y > 255) {
-            return Blocks.AIR;
-        }
-        if (y > surface) {
-            return Blocks.AIR;
-        }
-        // Natural terrain is all meta-0, so each state is simply the id shifted into place.
-        if (y == surface) {
-            return Blocks.state(Blocks.GRASS, 0);
-        }
-        return y >= surface - DIRT_DEPTH ? Blocks.state(Blocks.DIRT, 0) : Blocks.state(Blocks.STONE, 0);
+        // Procedural terrain: one column evaluation, then the generator's classification of the cell.
+        return generator.blockAt(y, generator.column(x, z));
     }
 
     /**
@@ -190,8 +172,8 @@ public final class CoreWorld implements World {
         boolean any = false;
         for (int z = 0; z < 16; z++) {
             for (int x = 0; x < 16; x++) {
-                // One height eval per column (reused across the 16 y-layers); noise is allocation-free.
-                int surface = terrain.surfaceHeight(baseX + x, baseZ + z);
+                // One column eval per column (reused across the 16 y-layers); noise is allocation-free.
+                long column = generator.column(baseX + x, baseZ + z);
                 for (int y = 0; y < 16; y++) {
                     int idx = BlockStorage.index(x, y, z);
                     int s = BlockStorage.cellOf(stored, idx); // compact-/full-/null-aware read
@@ -201,7 +183,7 @@ public final class CoreWorld implements World {
                     } else if (s != Blocks.AIR) {
                         id = s;                     // a player placed a block here
                     } else {
-                        id = generatedBlock(baseY + y, surface); // procedural terrain
+                        id = generator.blockAt(baseY + y, column); // procedural terrain
                     }
                     out[idx] = (short) id;
                     if (id != Blocks.AIR) {
@@ -219,13 +201,26 @@ public final class CoreWorld implements World {
      * The chunk-serialization hot path calls the generator directly via {@link #fillSection}.
      */
     public int surfaceHeight(int x, int z) {
-        return terrain.surfaceHeight(x, z);
+        return generator.surfaceHeight(x, z);
+    }
+
+    /** Highest buildable y in this world: 255 in an overworld, 127 in the 128-tall nether. */
+    public int maxY() {
+        return generator.maxY();
+    }
+
+    /**
+     * A point a player can stand at in this column — one above the ground the generator promises is
+     * solid. What {@code /world tp} and a cross-world teleport aim at when no destination is given.
+     */
+    public Location safeSpot(int x, int z) {
+        return new Location(this, x + 0.5, generator.spawnHeight(x, z), z + 0.5);
     }
 
     @Override
     public int getBiome(int x, int z) {
         // Baked world reads the frozen map; pre-bake resolves it on demand from the generator.
-        return generated ? biomes.getBiome(x, z) : biomeGen.biomeAt(x, z).id();
+        return generated ? biomes.getBiome(x, z) : generator.biomeAt(x, z);
     }
 
     @Override
@@ -237,7 +232,7 @@ public final class CoreWorld implements World {
         int baseX = chunkX << 4, baseZ = chunkZ << 4;
         for (int z = 0; z < 16; z++) {
             for (int x = 0; x < 16; x++) {
-                out[(z << 4) | x] = (byte) biomeGen.biomeAt(baseX + x, baseZ + z).id();
+                out[(z << 4) | x] = (byte) generator.biomeAt(baseX + x, baseZ + z);
             }
         }
     }
@@ -262,7 +257,8 @@ public final class CoreWorld implements World {
     public void setBlockId(int x, int y, int z, int state) {
         // The finite world can't grow: a write outside the bounds (or the vertical range) is dropped
         // here at the storage boundary, so no API or script path can allocate sections past the edge.
-        if (y < 0 || y > 255 || !isInsideBounds(x, z)) {
+        // The vertical range is the generator's, so a nether write can't punch through its 128-tall roof.
+        if (y < 0 || y > generator.maxY() || !isInsideBounds(x, z)) {
             return;
         }
         if (generated) {
@@ -361,6 +357,9 @@ public final class CoreWorld implements World {
         int half = chunksPerSide / 2;
         int lo = -half;
         int hi = chunksPerSide - half; // exclusive
+        // Only the sections the generator can reach: a 128-tall nether bakes half the columns an
+        // overworld does, and the ones above its roof are never allocated at all.
+        int sections = (generator.maxY() >> 4) + 1;
         short[] scratch = new short[4096];
         for (int cx = lo; cx < hi; cx++) {
             for (int cz = lo; cz < hi; cz++) {
@@ -368,7 +367,7 @@ public final class CoreWorld implements World {
                 byte[] bio = new byte[256];
                 fillBiomes(cx, cz, bio);
                 biomes.putChunk(cx, cz, bio);
-                for (int sy = 0; sy < 16; sy++) {
+                for (int sy = 0; sy < sections; sy++) {
                     // fillSection resolves terrain + any loaded edits; store a private copy so the
                     // reused scratch buffer doesn't alias the section.
                     if (fillSection(cx, sy, cz, scratch)) {
@@ -379,7 +378,7 @@ public final class CoreWorld implements World {
         }
         generated = true; // storage is now the world; decoration reads/writes it in generated mode
         if (decorate) {
-            WorldDecorator.decorate(this, seed, lo, hi);
+            generator.decorate(this, seed, lo, hi);
         }
         dirty = true;
     }
@@ -391,7 +390,7 @@ public final class CoreWorld implements World {
     public void save(Path file) throws IOException {
         Location s = spawnLocation;
         LevelData meta = new LevelData(LevelIO.FORMAT_VERSION, seed, BOUNDS_CHUNKS, BOUNDS_CHUNKS,
-                generated, s.x(), s.y(), s.z(), s.yaw(), s.pitch());
+                generated, s.x(), s.y(), s.z(), s.yaw(), s.pitch(), dimension.getId());
         // Clear before writing so an edit arriving mid-save re-marks the world dirty for the next cycle.
         dirty = false;
         LevelIO.save(file, meta, storage, biomes, containers);
@@ -405,6 +404,11 @@ public final class CoreWorld implements World {
     public LevelData load(Path file) throws IOException {
         LevelData meta = LevelIO.load(file, storage, biomes, containers);
         this.generated = meta.generated();
+        // The saved spawn wins over the one the constructor computed: it may have been moved since
+        // (setSpawnLocation, /world setspawn), and a world that forgets where its spawn is on every
+        // restart is the kind of quiet loss persistence exists to prevent.
+        this.spawnLocation = new Location(this, meta.spawnX(), meta.spawnY(), meta.spawnZ(),
+                meta.spawnYaw(), meta.spawnPitch());
         return meta;
     }
 
