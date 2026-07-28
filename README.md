@@ -20,7 +20,7 @@ Target versions:
 > named custom items and cross-play all work, but the retail 1.1.5 client (confirmed on **both PC and
 > mobile**) double-fires place/break (mitigated server-side, not eliminated) and **will not raise a chest
 > window at all** — every route was tried and the client either crashes or shows nothing, so chests and
-> storage menus trade through click-transfer and `/pick` lists instead (see [Known limits](#roadmap)).
+> storage menus trade through click-transfer and `/pick` lists instead (see [Known limits](#known-limits)).
 > **0.14** and **Java** are the clean Bedrock/PC targets. The problems are specific to the protocol-113
 > client across platforms — not the input method, and not the core.
 
@@ -401,7 +401,7 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
 
 Not yet: a real chest <em>window</em> on Bedrock 1.1.5 (click-transfer is the interim), cross-edition skin
 fidelity (a signed-texture limit, see above), knockback (deliberately — the server simulates no physics).
-See [Roadmap](#roadmap).
+See [Known limits](#known-limits).
 
 ---
 
@@ -661,108 +661,71 @@ my own reader" — the rule these tests try to follow wherever a real client is 
 
 ---
 
-## Roadmap
+## Known limits
 
-Jedrock isn't chasing a faithful simulator — it's a cross-edition **illusionist** and a **platform to
-script illusions**. So the roadmap grows three things: the *content* the server can show cheaply, the
-*tools* to author it, and the *scripting layer* that drives it. Anything that smells like world
-simulation stays out (see non-goals).
+What [What works today](#what-works-today) doesn't say. Most of these aren't bugs waiting on a fix —
+they're a legacy client's answer, a protocol that predates the feature, or a line this project drew on
+purpose. Each one shaped a decision above, so they're recorded rather than hidden.
 
-- **Finite "bake once" world — landed.** A bounded (48×48-chunk) world generated once on first run then
-  frozen (all generation disabled, served as static decoration): persistence, the terrain bake, biomes,
-  tree/lake/cave decoration and the edge wall are all in, and the block matrix is palette-compressed
-  (per-section palette + bit-packed indices) so the whole world stays cheap in RAM (~13 MB for 48×48).
-- **The platform API — the centrepiece (in progress).** Turn `api` from a thin contract into a real
-  extension surface. **The event engine is in:** a cancellable, priority-ordered **event model** the core
-  actually routes its decisions through — cancel `BlockBreakEvent` and the block stays; cancel
-  `PlayerChatEvent` and the line never sends; cancel `PlayerMoveEvent` and the player is snapped back. The
-  set spans the player's whole arc — login gate / join / quit / chat / command / move / teleport / block
-  break / place / right-click / interact-entity / item-pickup / damage / death / respawn / sneak / sprint /
-  use-item / game-mode / armor-change / held-item-change — plus server lifecycle (start / stop / per-tick
-  heartbeat), world save and weather change, each
-  honoured by the core (cancel a `PlayerLoginEvent` to reject a connection, a `PlayerDamageEvent` for
-  invulnerability, redirect a `GameModeChangeEvent` or `PlayerRespawnEvent`, suppress a `PlayerDeathEvent`).
-  `EventBus` gained priorities (LOWEST…MONITOR), `ignoreCancelled` listeners, precise removal handles, and a
-  `hasListeners` fast-path so the hottest paths (movement) allocate nothing when unlistened — reflection-free
-  and dependency-free by design. **The script loader landed too:** custom gameplay now lives in
-  hot-reloadable **JavaScript** plugins (`plugins/*.js`) on a **Rhino** backend, not the compiled core.
-  Rhino (`rhino-runtime`, ~1.5 MB, pure Java, zero transitive deps) was chosen over GraalJS (tens of MB
-  incl. ICU4J) to keep the tree lean; it lives only in `core`, so the `api` stays runtime-neutral. That
-  gate is what the rest of the roadmap waited on, and the surface behind it has kept growing — thirteen
-  globals now (`server` / `events` / `scheduler` / `commands` / `packets` / `world` / `entities` /
-  `regions` / `items` / `permissions` / `menus` / `storage` / `console`) and 30 built-in events, covering
-  custom events, `/slash` commands, scheduling, raw packet taps, block editing,
-  weather, sounds and particles, and **programmable entities** (see [What works today](#what-works-today)).
-  The event model has since caught up with the newer features: **weather** (`WeatherChange`, cancellable and
-  redirectable, posted by the world itself so `/weather`, a script and the api all pass through it) and
-  **equipment** (`PlayerArmorChange` and `PlayerHeldItemChange`, whatever the piece came from — a creative
-  drag, a survival window click, or `setArmor` from code). And **script state now survives a restart** —
-  the `storage` global, the last thing this section was waiting on (see [What works today](#what-works-today)).
-  **Typed command arguments and tab-completion** landed too — a command declares its arguments and the core
-  parses them and completes them (Java clients), scripts included. And the **illusion toolkit** grew a
-  **sidebar** (a scoreboard on Java, the displaced item-name line on both Bedrock eras), a **boss bar**
-  (Java 1.8 + 1.12.2 and Bedrock 1.1.5), and **virtual chests** for scripts (the `menus` global — a window
-  on Java, a `/pick` list on Bedrock). **Storage menus reached Bedrock too** — the last gap in that
-  toolkit: a list could only ever *signal*, so the transfer moved into it (`/pick <n>` takes, `/pick put`
-  puts, and it redraws after each one), rather than waiting for a window neither legacy client will raise.
-  What it still wants: a real-client pass on the rest of the unverified PE wire, and for the **storage list
-  to use the names custom items now have** — it still addresses stacks by slot number and prints a raw
-  state, which was the only honest option before items had names and is simply not wired up yet.
-  **Forms** stay out, since the legacy PE clients predate them.
-  **Custom items and scriptable permissions landed** after that (both in [What works
-  today](#what-works-today)): items are a name, lore and behaviour hung on a vanilla state, identified by a
-  key the *stack* carries so a hot reload re-points every existing one; permissions gained the writing half
-  a script never had, which is also the door `ScriptWrapFactory` had shut by accident being reopened on
-  purpose. What items still want: a **cooldown** primitive (every `onUse` script writes its own), and
-  per-*stack* state — there is nowhere to put "this particular sword's remaining charges", since a
-  definition is shared by every stack that names it.
-  **Regions landed** as the platform's next primitive (see [What works today](#what-works-today)): named
-  boxes with flags, enforced by cancelling the events the core already routes decisions through rather
-  than by a second rulebook, with `PlayerRegionEnter` / `PlayerRegionLeave` for the crossings and a
-  `world/regions.jdb` that puts them in force before the first login, and **per-player / per-group
-  exceptions** carried by permission nodes rather than a roster on the region (which is what taught the
-  permission system per-player nodes). What would grow them: a **greeting / farewell** message per region,
-  and a **priority** escape hatch for the case deny-wins can't express — an allow island inside a deny.
-- **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
-  **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
-  cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry
-  (`EntityTypeIds` — the block palette's counterpart, the two-headed monster's entity tax), `spawnEntity` /
-  `moveEntity` / `removeEntity` on all four editions, a `CorePuppet` / `PuppetRegistry` with cross-edition
-  spawn/move/despawn relay, and an **interaction hook** (hitting a puppet fires a callback).
-  A puppet can now **act**: a **name tag** (floating text in the unified markup), **`lookAt`** — the whole
-  "it noticed me" illusion, trigonometry rather than pathfinding — **flags** (`ON_FIRE` / `INVISIBLE` /
-  `SNEAKING`, a canonical set holding only what maps to one bit on *every* edition, mapped by `EntityFlagIds`),
-  and **swing / hurt** animations. **Holograms** are the purest form of it — a name tag with the body taken
-  away: each line is its own invisible entity (Java: a marker armor stand; Bedrock: an item entity with no
-  item, PocketMine's own floating-text hack), authored once in the shared markup. `/puppet` and `/hologram`
-  place them by hand, but the **API drives them now**: the same primitive is what scripts spawn as
-  programmable entities (with a JS `onTick` for a brain) and as decoration props, so a mob *appears* alive
-  without the server ever running AI or pathfinding.
-- **Decoration — the accidental discovery.** That a puppet can stand anywhere, at any fraction of a block,
-  in mid-air and inside walls, turned out to be the feature rather than the limitation: entities are how
-  this server does **scenery**. Three ways to pose a block or item where no block can go are in (a small
-  item model, a full-size block, or a block worn on an invisible head), on all four protocols and with no
-  resource pack, plus **labels** and **groups** so an arrangement is authored and moved as one, and a
-  cast of **23 mob types** to pose. **Saving a scene landed:** `group.save(name)` freezes an arrangement
-  and the *server* stands it back up at boot — no script involved, so decoration finally outlives the code
-  that authored it (`world/scenes.jdb`; behaviour is deliberately not saved, since a saved prop has no
-  plugin). What would grow it further: **splitting head yaw from body yaw** (the packets already exist) and
-  a `/pose` in-game editor that exports one as a committable file. Known limits: no armor stands in
-  either PE era, no per-entity scale, no limb posing, and 0.14 renders only the mobs it is old enough to
-  know. And the one number to watch as scenes grow — a static prop costs no ticks but one spawn packet
-  per joining player, and a 0.14 client will find that ceiling first.
-- **Final touch-ups.** Smaller polish, mostly unlocked by the API. Landed since: the **held-item /
-  equipment relay** (what a player holds and wears, on avatars and puppets alike), **titles / action
-  bars**, **sounds and particles**, **weather**, `getPing` and chat **display names**, and a fuller
-  **command framework** (a `CommandSender` abstraction, a unified console, op + group **permissions**).
-  Typed command args and tab-completion have since landed, as have a **sidebar scoreboard**, a **boss bar**
-  and script-driven **virtual chests** (`menus`) — all Java for now. Still open: those illusions on
-  **Bedrock 1.1.5** (against a real client; **forms** stay out — the legacy PE clients predate them), and a
-  **sharper judge** (per-axis limits, interaction ray-casts).
+- **Bedrock 1.1.5 will not raise a chest window.** Confirmed on the retail client on **both PC and
+  mobile** — every route was tried and the client either crashes or shows nothing. So chests and storage
+  menus trade through click-transfer and a `/pick` list instead. The same client also double-fires
+  place / break, mitigated server-side by a per-cell debounce but not eliminated. This is specific to
+  the protocol-113 client across platforms — not the input method, and not the core.
+- **The `/pick` storage list still addresses stacks by slot number** and prints a raw block state. That
+  was the only honest option before items had names; now that they do, it's simply not wired up yet.
+- **Forms are out on both PE eras** — the legacy clients predate them, so a menu is a window (Java) or a
+  list (Bedrock) and nothing richer.
+- **Entities can't be posed finely.** No armor stands in either PE era, no per-entity scale, no limb
+  posing, and head yaw isn't split from body yaw yet. 0.14 renders only the mobs it is old enough to
+  know; anything younger silently doesn't appear.
+- **Scenes cost packets, not ticks.** A static prop runs no logic, but every joining player pays one
+  spawn packet for it. A 0.14 client will find that ceiling first — it's the number to watch as a scene
+  grows.
+- **Cross-edition skins are approximate.** A signed-texture limit, not a plumbing one: a Bedrock skin
+  can't be handed to a Java client verbatim, so avatars are close, not identical.
+- **Parts of the PE wire have never met a real client.** Join, movement, chat, edits and inventories
+  have; the newer illusions largely haven't. Everything ground-truthed against PocketMine is byte-tested,
+  but a byte test only proves the encoder agrees with itself — the item-NBT dialect passed its own tests
+  and still failed on a real client. Where a client is the only other judge, read "tested" as "not yet
+  disproven".
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
-  runtime world simulation or physics, no 1.13+ flattening. Knockback is deliberately excluded for the
-  same reason — the server simulates no physics. Custom logic that wants any of these lives in a script
-  as an *illusion*, not in the core.
+  runtime world simulation or physics, no 1.13+ flattening. Knockback is excluded for the same reason —
+  the server simulates no physics. Custom logic that wants any of these lives in a script as an
+  *illusion*, not in the core.
+
+---
+
+## Might be in the future
+
+The big arcs are done: the world bakes and persists, the platform API is a real extension surface, the
+puppet primitive carries mobs and scenery alike, and four clients share one world. What's left is
+smaller by nature — a missing convenience on a surface that already exists, a polish pass, a real-client
+verification run, and packaging the whole thing so it can be handed to someone. Nothing here is
+promised; it's the list of what would be worth doing next, roughly in the order it would pay off.
+
+- **Small additions to the script API.** A **cooldown** primitive for custom items (every `onUse` script
+  writes its own today), and per-*stack* state — there is nowhere to put "this particular sword's
+  remaining charges", since a definition is shared by every stack that names it. Regions want a
+  **greeting / farewell** message and a **priority** escape hatch for the case deny-wins can't express:
+  an allow island inside a deny. And the `/pick` storage list should show the names custom items now
+  have, instead of a slot number and a raw state.
+- **Polish on what's already there.** Split **head yaw from body yaw** on puppets (the packets exist; a
+  puppet just can't glance without turning). A **sharper judge** — per-axis movement limits and a real
+  interaction ray-cast, still cheap, still approximate. And the illusion toolkit (sidebar, boss bar,
+  menus) wants a **real-client pass on Bedrock 1.1.5**, which is the only way anything on that wire
+  becomes true.
+- **Authoring tools.** A `/pose` in-game editor that exports a scene as a committable file, so
+  decoration is built where it's seen rather than written blind and reloaded.
+- **Packaging.** Right now the server runs from an IDE or a hand-assembled classpath. It deserves a
+  **single runnable jar** and a first-run folder that lays itself out (config, `plugins/`, `world/`) —
+  the difference between a project you can build and a server someone can start. Alongside it: a
+  scripting reference generated from the contract rather than kept in step by hand, since
+  `plugins/example.js` is currently both the reference and the test.
+- **The parked multiversion framework.** `feature/multiversion-framework` carries a generalized
+  version-dispatch layer plus a JE **1.20.4** target, deliberately not merged onto the legacy path — the
+  1.13+ flattening it implies is a non-goal for the world model as it stands. It stays on the branch
+  until there's a reason strong enough to pay for it.
 
 ---
 
