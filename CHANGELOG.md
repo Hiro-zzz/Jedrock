@@ -71,7 +71,9 @@ unstable — anything may change between entries.
   bake used to succeed, because the finite world's extent was a constant (48) while the test baked 4. The
   extent is now a property of the world, adopted from the level file on load — so the edge wall is where
   the terrain actually ends, which is what it always claimed to be.
-  14 new tests (the world registry, the nether's shape, per-world regions); 400 total.
+  19 new tests (the world registry, the nether's shape, per-world regions, and the two new
+  packets byte for byte — the Java Respawn's big-endian int dimension and Bedrock's own 0/1/2
+  numbering of the same thing); 561 total.
 
 - **Custom item names and lore reach the client — item NBT on all four protocols.** The other half of
   custom items. Until now no item NBT was written anywhere: every serializer explicitly sent "no NBT" (a

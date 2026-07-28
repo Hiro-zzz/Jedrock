@@ -696,7 +696,7 @@ logged with `-Djedrock.status.seconds=30`.
 > default. Add a loopback exemption once:
 > `CheckNetIsolation LoopbackExempt -a -n=Microsoft.MinecraftUWP_yourid`
 
-Tests are plain JUnit 5 (`mvn test`) — ~530 of them, no client required. Beyond the block matrix,
+Tests are plain JUnit 5 (`mvn test`) — ~560 of them, no client required. Beyond the block matrix,
 player registry, chunk encoding and MCPE compression, they pin the things that are expensive to get
 wrong: the **byte layout** of packets that were ground-truthed against PocketMine or minecraft-data
 (titles, sounds, particles, equipment, inventories, item NBT, props), the per-edition **id tables**, the
