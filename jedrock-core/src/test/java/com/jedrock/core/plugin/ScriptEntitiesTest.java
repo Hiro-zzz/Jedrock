@@ -38,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ScriptEntitiesTest {
 
     private final CoreWorld world = new CoreWorld("entities", Dimension.OVERWORLD, 1L);
+    private final CoreWorld nether = new CoreWorld("hell", Dimension.NETHER, 1L);
 
     /** A puppet that records its life instead of relaying to a network. */
     private static final class FakePuppet implements PuppetEntity {
@@ -142,8 +143,12 @@ class ScriptEntitiesTest {
         }
 
         @Override public World getDefaultWorld() { return world; }
-        @Override public Collection<World> getWorlds() { return List.of(world); }
-        @Override public Optional<World> getWorld(String name) { return Optional.of(world); }
+        @Override public Collection<World> getWorlds() { return List.of(world, nether); }
+        @Override public Optional<World> getWorld(String name) {
+            if (world.getName().equalsIgnoreCase(name)) return Optional.of(world);
+            if (nether.getName().equalsIgnoreCase(name)) return Optional.of(nether);
+            return Optional.empty();
+        }
         @Override public Collection<Player> getPlayers() { return players; }
         @Override public Optional<Player> getPlayer(String name) { return Optional.empty(); }
         @Override public Optional<Player> getPlayer(UUID uuid) { return Optional.empty(); }
@@ -165,6 +170,46 @@ class ScriptEntitiesTest {
     private PluginManager manager(Path dir, Scheduler scheduler) {
         return new PluginManager(new EventBus(), server, scheduler, new CommandManager(null),
                 new PacketTapRegistry(), dir);
+    }
+
+    @Test
+    void aWorldViewSpawnsIntoThatWorldAndStillBelongsToThePlugin(@TempDir Path dir) {
+        Scheduler scheduler = new Scheduler();
+        PluginManager plugins = manager(dir, scheduler);
+        plugins.loadSource("hell.js",
+                "var here = entities.spawn('pig', 1, 65, 1);\n"
+              + "var hell = entities.in('hell');\n"
+              + "var there = hell.spawn('zombie', 2, 40, 2);\n"
+              + "hell.spawnItem(89 << 4, 3, 40, 3);\n", 1L);
+
+        assertEquals(3, server.spawned.size());
+        assertEquals("entities", server.spawned.get(0).getWorld().getName(), "the plain global is unchanged");
+        assertEquals("hell", server.spawned.get(1).getWorld().getName(), "the view spawns into its world");
+        assertEquals("hell", server.spawned.get(2).getWorld().getName());
+
+        // The roster is shared: everything a view spawned is still the plugin's, so a reload clears it.
+        assertEquals(3, plugins.entityCount("hell.js"));
+        plugins.unload("hell.js");
+        for (FakePuppet puppet : server.spawned) {
+            assertFalse(puppet.isAlive(), "a hot reload takes a view's entities too");
+        }
+    }
+
+    @Test
+    void aWorldViewOnlyCountsWhatIsInItsWorld(@TempDir Path dir) {
+        Scheduler scheduler = new Scheduler();
+        PluginManager plugins = manager(dir, scheduler);
+        // The script reports through storage, since a script's own variables aren't reachable from here.
+        plugins.loadSource("counts.js",
+                "entities.spawn('pig', 1, 65, 1);\n"
+              + "var hell = entities.in('hell');\n"
+              + "hell.spawn('zombie', 2, 40, 2);\n"
+              + "storage.set('report', entities.count() + '/' + hell.count() + '/'\n"
+              + "    + hell.near(2, 40, 2, 5).length + '/' + hell.getWorld().getName());\n", 1L);
+
+        PluginStorage.Value report = plugins.storage().get("counts.js", "report");
+        // root sees both worlds / the view sees only its own / near() is scoped the same way / its world
+        assertEquals("2/1/1/hell", report.text());
     }
 
     @Test

@@ -45,7 +45,12 @@ public final class ScriptWorld {
         this.world = world;
     }
 
-    /** The world's name (today always {@code "world"}). */
+    /** The world behind this view — for the core's own wiring, never reachable from a script. */
+    World unwrap() {
+        return world;
+    }
+
+    /** The world's name. */
     public String getName() {
         return world.getName();
     }

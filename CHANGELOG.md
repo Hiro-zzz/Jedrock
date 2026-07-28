@@ -62,6 +62,13 @@ unstable — anything may change between entries.
   while there was one world to be in. The server installs a `Teleporter` on every player it registers, so
   a teleport from a command, a script and the api are the same teleport, and a cross-world one routes
   through `WorldTravel`.
+  **The script surface reaches every world without any global growing a world argument.**
+  `worlds.get('hell')` hands back the same `ScriptWorld` the `world` global is; `entities.in('hell')`
+  hands back the same `entities` object pointed elsewhere, sharing the plugin's roster (so a hot reload
+  still clears what a view spawned) while its own `all` / `count` / `near` / `removeAll` see only that
+  world; and regions grew `createIn` / `atIn` / `allowsIn` beside their short forms. A script written
+  before any of this existed behaves exactly as it did, because every short form still means the default
+  world.
   Also: **`/world`** (list, info, tp, spawn, create, unload, templates), the **`worlds`** script global —
   which hands back the same `ScriptWorld` the `world` global is, so everything a script knows how to do to
   one world works on any of them — and **`PlayerWorldChangeEvent`**, cancellable and redirectable, fired
@@ -73,7 +80,7 @@ unstable — anything may change between entries.
   the terrain actually ends, which is what it always claimed to be.
   19 new tests (the world registry, the nether's shape, per-world regions, and the two new
   packets byte for byte — the Java Respawn's big-endian int dimension and Bedrock's own 0/1/2
-  numbering of the same thing); 561 total.
+  numbering of the same thing); 563 total.
 
 - **Custom item names and lore reach the client — item NBT on all four protocols.** The other half of
   custom items. Until now no item NBT was written anywhere: every serializer explicitly sent "no NBT" (a

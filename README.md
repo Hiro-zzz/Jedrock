@@ -131,6 +131,10 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   created from a **template** — a recipe (kind, size, decoration, optionally a fixed seed), not a saved
   world, so two worlds from one template share its rules and nothing else. Five are built in
   (`overworld`, `nether`, `overworld_small`, `nether_small`, `bare`) and a script can register more.
+  Scripts reach the rest of it the way they reach the world they start in: `worlds.get('hell')` hands
+  back the same object the `world` global is, `entities.in('hell')` the same object `entities` is, and
+  regions grew `createIn` / `atIn` / `allowsIn` beside their existing short forms — so no global had to
+  learn a world argument and no script that predates worlds had to change.
   Travel is `/world tp`, `worlds.send(player, 'hell')` or simply teleporting to a `Location` in another
   world; the terrain, the avatars, the props and the world's roster all change together. **Java** gets a
   Respawn packet (with the same-dimension bounce every server has used since 1.8, since the client only

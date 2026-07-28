@@ -9,6 +9,8 @@
 //   world      — the shared world: getBlock / setBlock / fill / getHighestY / getBiome / spawn / weather /
 //                playSound / spawnParticle. Edits render live on every client, cross-edition.
 //   entities   — spawn and drive puppets, props and labels; group() builds a scene. See /guard and /decor.
+//                entities.in('hell') is the same object pointed at another world: everything on it works
+//                unchanged, and its all/count/near/removeAll see only that world. See /hell.
 //   menus      — menus.create(title, rows): a virtual chest (a window on Java; a /pick list on Bedrock,
 //                where a storage menu is picked by slot number and /pick put / close — see /menu, /bag).
 //   entities   — …and scenes: group.save(name) freezes an arrangement, and the SERVER stands it back up
@@ -860,7 +862,17 @@ events.on('ServerStart', function () {
     // A world you are not standing in is still an ordinary world object: this drops a glowstone marker
     // at the nether's spawn with nobody there to see it happen.
     var at = hell.getSpawn();
-    hell.setBlock(Math.round(at.x()) + 2, Math.round(at.y()), Math.round(at.z()), 89, 0);
+    var x = Math.round(at.x()), y = Math.round(at.y()), z = Math.round(at.z());
+    hell.setBlock(x + 2, y, z, 89, 0);
+
+    // Props belong to a world too. entities.in(name) is the same entities object pointed elsewhere —
+    // spawned bodies are still owned by this plugin, so a hot reload clears them like any other.
+    var props = entities.in('hell');
+    props.spawnText('{red}Welcome to the nether', x, y + 2.5, z);
+    props.circle(6, x, y + 0.5, z, 3, function (px, py, pz) {
+        return props.spawnItem(89 << 4, px, py, pz);   // a ring of floating glowstone
+    });
+    console.log('props in the nether: ' + props.count() + ', everywhere: ' + entities.count());
 });
 
 // /hell — go there and back. worlds.send fires PlayerTeleport and PlayerWorldChange, so either can
