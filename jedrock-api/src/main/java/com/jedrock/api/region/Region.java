@@ -23,6 +23,12 @@ public interface Region {
     /** The region's name, as it was created. Unique per server, matched case-insensitively. */
     String getName();
 
+    /**
+     * The name of the world this region is in. A region is six numbers <em>in a world</em>: the same box
+     * of coordinates in another world is a different place, and this region has nothing to say about it.
+     */
+    String getWorldName();
+
     /** Lowest corner, inclusive. */
     int getMinX();
 

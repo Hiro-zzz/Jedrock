@@ -6,7 +6,9 @@ package com.jedrock.core.world;
  *
  * <p>Written uncompressed at the front of the file by {@link LevelIO} so it can be read cheaply
  * without inflating the whole world. {@code generated} marks a world whose one-time bake has already
- * run (see the world-generation roadmap); in the persistence-only Phase 0 it stays {@code false}.
+ * run; {@code dimensionId} makes the file self-describing — a level knows whether it is an overworld
+ * or a nether without the registry that named it, so a world folder can be moved or recovered on its
+ * own and a mismatched registry entry is caught instead of quietly serving the wrong terrain.
  */
 public record LevelData(
         int formatVersion,
@@ -15,5 +17,6 @@ public record LevelData(
         int boundsChunksZ,
         boolean generated,
         double spawnX, double spawnY, double spawnZ,
-        float spawnYaw, float spawnPitch) {
+        float spawnYaw, float spawnPitch,
+        int dimensionId) {
 }

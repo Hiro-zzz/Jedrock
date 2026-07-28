@@ -175,6 +175,9 @@ final class ConnectionBridge implements ConnectionListener {
         });
 
         playerRegistry.add(player);
+        // Every teleport a command, script or the api asks for goes through the server from here on —
+        // which is what makes player.teleport() move the client, and cross worlds when it has to.
+        player.setTeleporter(server::teleport);
         defaultWorld.addPlayer(player);
 
         PlayerJoinEvent event = new PlayerJoinEvent(player);
@@ -214,9 +217,11 @@ final class ConnectionBridge implements ConnectionListener {
             }
         }
 
-        // Avatars: show the existing roster to the newcomer, and the newcomer to everyone else.
+        // Avatars: show the existing roster to the newcomer, and the newcomer to everyone else — but only
+        // those standing in the same world. The tab list above stays server-wide (it is a roster, not a
+        // view); an avatar is a thing in a place, and a player in the nether is not in this place.
         for (Player other : playerRegistry.all()) {
-            if (other == player) continue;
+            if (other == player || other.getWorld() != player.getWorld()) continue;
             Location loc = other.getLocation();
             connection.showPlayer(other.getUniqueId(), other.getName(), other.getEntityId(),
                     loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
@@ -239,7 +244,7 @@ final class ConnectionBridge implements ConnectionListener {
         }
 
         // Show every existing puppet and hologram to the newcomer (existing players already see them).
-        entities.showAllTo(connection);
+        entities.showAllTo(connection, player.getWorld());
 
         LOGGER.info(username + " joined [" + connection.getProtocolVersion().getVersionName()
                 + "] (" + playerRegistry.size() + " online)");
@@ -269,7 +274,7 @@ final class ConnectionBridge implements ConnectionListener {
      */
     private void evictPlayer(CorePlayer player) {
         playerRegistry.removeByConnection(player.getConnection());
-        defaultWorld.removePlayer(player);
+        player.getCoreWorld().removePlayer(player); // whichever world they were standing in, not the default
         for (Player other : playerRegistry.all()) {
             other.getConnection().removeFromTab(player.getUniqueId());
             other.getConnection().hidePlayer(player.getUniqueId(), player.getEntityId());
@@ -289,11 +294,14 @@ final class ConnectionBridge implements ConnectionListener {
         // Edge wall: the world is finite. Refuse a step past the bounds and snap the player back inside
         // (an invisible wall, keeping their look angles); if they're somehow already outside, send them
         // home to spawn. Enforced regardless of the anti-cheat toggle — the edge is a world constraint.
-        if (!defaultWorld.isInsideBounds(x, z)) {
-            if (defaultWorld.isInsideBounds(from.x(), from.z())) {
+        // "The world" is the one this player is standing in: worlds may differ in size, so the wall is
+        // wherever THEIR world ends, and home is their world's spawn, not the default one's.
+        CoreWorld world = player.getCoreWorld();
+        if (!world.isInsideBounds(x, z)) {
+            if (world.isInsideBounds(from.x(), from.z())) {
                 connection.teleport(from.x(), from.y(), from.z(), yaw, pitch);
             } else {
-                Location spawn = defaultWorld.getSpawnLocation();
+                Location spawn = world.getSpawnLocation();
                 player.setLocation(new Location(player.getWorld(), spawn.x(), spawn.y(), spawn.z(), yaw, pitch));
                 connection.teleport(spawn.x(), spawn.y(), spawn.z(), yaw, pitch);
             }
@@ -349,27 +357,31 @@ final class ConnectionBridge implements ConnectionListener {
 
     @Override
     public void onBlockChange(PlayerConnection connection, int x, int y, int z, int state) {
+        // Every coordinate below belongs to the editor's world — the one they are standing in. An edit
+        // is otherwise a position with no world, and would land in whichever world the server was built
+        // around, which is exactly the bug that makes a nether dig into the overworld.
+        CorePlayer editor = playerRegistry.getByConnectionOrNull(connection);
+        CoreWorld world = editor != null ? editor.getCoreWorld() : defaultWorld;
         // Edge wall: an edit outside the finite world is refused and the client corrected with the
         // real (void = air) block, so the world can't grow past its bounds.
-        if (!defaultWorld.isInsideBounds(x, z)) {
+        if (!world.isInsideBounds(x, z)) {
             LOGGER.debug(() -> "[edit] REFUSED (out of bounds) " + x + "," + y + "," + z);
-            connection.sendBlockChange(x, y, z, defaultWorld.getBlockId(x, y, z));
+            connection.sendBlockChange(x, y, z, world.getBlockId(x, y, z));
             return;
         }
         // Blind judge: reject an edit outside the editor's reach sphere and correct their client by
         // re-sending the real (unchanged) block, so a reach hack can't touch distant blocks.
-        CorePlayer editor = playerRegistry.getByConnectionOrNull(connection);
         if (editor != null) {
             Location loc = editor.getLocation();
             if (!judge.allowsInteraction(loc.x(), loc.y(), loc.z(), x, y, z)) {
                 LOGGER.debug(() -> "[edit] REFUSED (reach) " + x + "," + y + "," + z + " from "
                         + String.format("%.1f,%.1f,%.1f", loc.x(), loc.y(), loc.z()));
-                connection.sendBlockChange(x, y, z, defaultWorld.getBlockId(x, y, z));
+                connection.sendBlockChange(x, y, z, world.getBlockId(x, y, z));
                 return;
             }
         }
         // The block that was here, captured before the edit — a survival miner picks it up.
-        int previous = defaultWorld.getBlockId(x, y, z);
+        int previous = world.getBlockId(x, y, z);
 
         // Let listeners veto the edit. A break is state 0 (air); anything else is a place. Cancelling
         // leaves the world untouched and re-sends the real block to the editor, so their client reverts
@@ -390,10 +402,10 @@ final class ConnectionBridge implements ConnectionListener {
         // Apply to the shared world; the world's change listener pushes the edit to every client
         // (including the editor, so the server stays authoritative). {@code state} is the canonical
         // (id << 4 | meta) value; each connection serializes it in its own protocol.
-        defaultWorld.setBlockId(x, y, z, state);
+        world.setBlockId(x, y, z, state);
         // A broken chest drops its container (contents lost — no item entities in the illusion).
         if (state == Blocks.AIR && Blocks.idOf(previous) == Blocks.CHEST) {
-            defaultWorld.removeChestContainer(x, y, z);
+            world.removeChestContainer(x, y, z);
         }
 
         // Minimal survival inventory: mining a block drops it straight into the inventory, placing one

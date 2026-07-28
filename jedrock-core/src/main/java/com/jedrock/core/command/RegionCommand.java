@@ -144,6 +144,10 @@ public final class RegionCommand implements Command {
 
     private void finish(JedrockServer server, CommandSender sender, String name,
                         int x1, int y1, int z1, int x2, int y2, int z2) {
+        // A region belongs to the world it was drawn in — the sender's, or the default one for a console
+        // that isn't standing anywhere.
+        com.jedrock.api.world.World world = sender instanceof com.jedrock.api.player.Player p
+                ? p.getWorld() : server.getDefaultWorld();
         if (!com.jedrock.core.region.RegionManager.isValidName(name)) {
             sender.sendMessage("{red}'" + ChatText.escape(name) + "' won't do as a name — letters, digits, "
                     + "{white}_{red} and {white}-{red} only, up to 32. "
@@ -151,7 +155,7 @@ public final class RegionCommand implements Command {
                     + "would make that node ambiguous.)");
             return;
         }
-        CoreRegion region = server.getRegions().create(name, x1, y1, z1, x2, y2, z2);
+        CoreRegion region = server.getRegions().create(name, world, x1, y1, z1, x2, y2, z2);
         if (region == null) {
             sender.sendMessage("{red}There is already a region called {white}" + ChatText.escape(name)
                     + "{red} — remove it first, or pick another name.");

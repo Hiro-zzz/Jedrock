@@ -19,6 +19,13 @@ import com.jedrock.api.region.RegionFlag;
 public final class CoreRegion implements Region {
 
     private final String name;
+    /**
+     * The world this region is in, by name — not by reference. A region outlives the loading and
+     * unloading of its world (it is read from disk before any world is asked for), and a name is the
+     * only handle that survives that; comparing names also means a world that comes back after an
+     * unload is recognised as the same one.
+     */
+    private final String worldName;
     private final int minX, minY, minZ;
     private final int maxX, maxY, maxZ;
 
@@ -26,14 +33,26 @@ public final class CoreRegion implements Region {
     private volatile int deniedMask;
 
     /** Build from any two opposite corners, in any order — they are normalized here, once. */
-    public CoreRegion(String name, int x1, int y1, int z1, int x2, int y2, int z2) {
+    public CoreRegion(String name, String worldName, int x1, int y1, int z1, int x2, int y2, int z2) {
         this.name = name;
+        this.worldName = worldName;
         this.minX = Math.min(x1, x2);
         this.minY = Math.min(y1, y2);
         this.minZ = Math.min(z1, z2);
         this.maxX = Math.max(x1, x2);
         this.maxY = Math.max(y1, y2);
         this.maxZ = Math.max(z1, z2);
+    }
+
+    /** The name of the world this region governs; a point in any other world is simply not in it. */
+    @Override
+    public String getWorldName() {
+        return worldName;
+    }
+
+    /** Whether this region governs {@code world} — the first question every lookup asks. */
+    public boolean inWorld(com.jedrock.api.world.World world) {
+        return world != null && world.getName().equalsIgnoreCase(worldName);
     }
 
     @Override

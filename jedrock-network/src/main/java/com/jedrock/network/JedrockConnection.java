@@ -1,6 +1,7 @@
 package com.jedrock.network;
 
 import com.jedrock.api.config.ServerProperties;
+import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Location;
@@ -41,7 +42,8 @@ public class JedrockConnection implements Connection, PlayerConnection {
 
     private final Channel channel;
     private final ConnectionListener listener;
-    private final World world;
+    /** The world this client is currently in — not final: a player can travel to another one. */
+    private volatile World world;
     private final ServerProperties properties;
     private final ConnectionProtocol connectionProtocol;
 
@@ -407,9 +409,31 @@ public class JedrockConnection implements Connection, PlayerConnection {
         }
     }
 
-    /** The shared world clients serialize chunks from; used by protocol handlers during the join. */
+    /** The world this client serializes chunks from; used by protocol handlers during the join. */
     public World getWorld() {
         return world;
+    }
+
+    /**
+     * Move this client into another world. The order matters and is the whole of the trick: re-point at
+     * the new world first (so every chunk serialized from here on comes from it), tell the client to
+     * throw its terrain away, forget what we had sent it, then stream the destination and put the player
+     * down. Streaming before the Respawn would hand the client chunks it is about to discard.
+     */
+    @Override
+    public void switchWorld(World target, double x, double y, double z, float yaw, float pitch,
+                            GameMode mode) {
+        World previous = this.world;
+        this.world = target;
+        protocolHandler.switchDimension(this, previous.getDimension(), target.getDimension(), mode);
+        chunkView.forgetAll();
+        this.lastX = x;
+        this.lastY = y;
+        this.lastZ = z;
+        this.lastYaw = yaw;
+        this.lastPitch = pitch;
+        chunkView.recenter(((int) Math.floor(x)) >> 4, ((int) Math.floor(z)) >> 4, chunkSink);
+        teleport(x, y, z, yaw, pitch);
     }
 
     /** View distance (in chunks) streamed around the player — from server config. */

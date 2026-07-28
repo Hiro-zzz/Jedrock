@@ -901,6 +901,29 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
         c.send(Java1_8ChunkData.unload(chunkX, chunkZ));
     }
 
+    /**
+     * Respawn (0x07 at 1.8) — the same body as 1.12.2's 0x35 under a different id, and the same quirk:
+     * the client rebuilds its world only when the dimension changes, so a move between two worlds of the
+     * same kind bounces through a third dimension first (see the 1.12.2 handler's note).
+     */
+    @Override
+    public void switchDimension(JedrockConnection c, com.jedrock.api.world.Dimension from,
+                                com.jedrock.api.world.Dimension to, GameMode mode) {
+        if (from == to) {
+            sendRespawn(c, JavaEditionProtocolHandler.bounceDimension(to), mode);
+        }
+        sendRespawn(c, to.getId(), mode);
+    }
+
+    private static void sendRespawn(JedrockConnection c, int dimension, GameMode mode) {
+        send(c, CB_RESPAWN, b -> {
+            b.writeInt(dimension);
+            b.writeByte(2);                          // difficulty: normal, matching Join Game
+            b.writeByte(mode.getId());
+            ByteBufUtils.writeString(b, "default");  // level type
+        });
+    }
+
     // ===== helpers =====
 
     private static void send(JedrockConnection c, int id, Consumer<ByteBuf> body) {

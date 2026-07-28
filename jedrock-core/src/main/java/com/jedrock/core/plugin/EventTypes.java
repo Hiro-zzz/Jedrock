@@ -23,6 +23,7 @@ import com.jedrock.api.event.player.PlayerRegionEnterEvent;
 import com.jedrock.api.event.player.PlayerRegionLeaveEvent;
 import com.jedrock.api.event.player.PlayerRespawnEvent;
 import com.jedrock.api.event.player.PlayerTeleportEvent;
+import com.jedrock.api.event.player.PlayerWorldChangeEvent;
 import com.jedrock.api.event.player.PlayerToggleSneakEvent;
 import com.jedrock.api.event.player.PlayerToggleSprintEvent;
 import com.jedrock.api.event.player.PlayerUseItemEvent;
@@ -61,6 +62,7 @@ public final class EventTypes {
         register("PlayerRegionEnter", PlayerRegionEnterEvent.class);
         register("PlayerRegionLeave", PlayerRegionLeaveEvent.class);
         register("PlayerTeleport", PlayerTeleportEvent.class);
+        register("PlayerWorldChange", PlayerWorldChangeEvent.class);
         register("PlayerRespawn", PlayerRespawnEvent.class);
         register("PlayerDamage", PlayerDamageEvent.class);
         register("PlayerDeath", PlayerDeathEvent.class);

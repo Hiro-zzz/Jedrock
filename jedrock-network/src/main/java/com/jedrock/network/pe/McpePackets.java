@@ -694,4 +694,25 @@ final class McpePackets {
         b.writeFloatLE(y);
         b.writeFloatLE(z);
     }
+
+    /**
+     * ChangeDimension (0x3D): move the client to another world — it drops the terrain it holds, shows a
+     * loading screen, and waits for chunks followed by PlayStatus(PLAYER_SPAWN).
+     *
+     * <p>The dimension here is <b>Bedrock's</b> numbering (0 overworld, 1 nether, 2 end), not Java's
+     * {@code -1} for the nether: the two editions disagree, and this is the boundary that translates.
+     * The id is signed-varint encoded, as every id-like field on this protocol is.
+     *
+     * <p>Unverified against a real 1.1.5 client — it is the one packet in this path nobody has watched
+     * land. {@code -Djedrock.pe.changeDimension=false} skips it and falls back to a plain chunk resend,
+     * which leaves the sky wrong but cannot hang a client on a loading screen.
+     */
+    static void changeDimension(ByteBuf b, int bedrockDimension, float x, float y, float z, boolean respawn) {
+        ByteBufUtils.writeVarInt(b, ID_CHANGE_DIMENSION);
+        ByteBufUtils.writeSignedVarInt(b, bedrockDimension);
+        b.writeFloatLE(x);
+        b.writeFloatLE(y);
+        b.writeFloatLE(z);
+        b.writeBoolean(respawn);
+    }
 }

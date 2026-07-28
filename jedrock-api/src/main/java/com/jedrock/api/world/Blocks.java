@@ -26,6 +26,17 @@ public final class Blocks {
     public static final int GLASS = 20;
     public static final int CHEST = 54;  // a container block — right-click opens its 27-slot inventory
 
+    // The nether's palette. Every id here is legacy and predates both PE eras (the nether landed in
+    // MCPE 0.12), so a nether chunk renders on 0.14 exactly as it does on Java.
+    public static final int BEDROCK = 7;      // the floor and the roof of the nether — unbreakable cap
+    public static final int LAVA = 11;        // stationary (still) lava — the sea, like WATER is for lakes
+    public static final int GRAVEL = 13;      // scattered patches in the netherrack
+    public static final int NETHERRACK = 87;
+    public static final int SOUL_SAND = 88;
+    public static final int GLOWSTONE = 89;   // clusters hanging from the ceiling — the nether's only light
+    public static final int NETHER_BRICK = 112;
+    public static final int QUARTZ_ORE = 153;
+
     /** Maximum numeric ID that safely fits into a single byte for the legacy protocol chunk matrix. */
     public static final int MAX_LEGACY_ID = 255;
 

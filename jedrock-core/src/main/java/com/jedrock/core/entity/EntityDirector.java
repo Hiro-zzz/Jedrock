@@ -47,31 +47,42 @@ public final class EntityDirector {
     // ===== Puppets (server-puppeteered visual entities) =====
 
     public PuppetEntity spawnPuppet(EntityType type, Location at, String name) {
-        return register(new CorePuppet(type, name, world, at, this), at);
+        return register(new CorePuppet(type, name, worldOf(at), at, this), at);
     }
 
     public PuppetEntity spawnItem(Location at, int state) {
         return register(new CorePuppet(EntityType.ITEM, EntityType.ITEM.canonicalName(),
-                world, at, this, state), at);
+                worldOf(at), at, this, state), at);
     }
 
     public PuppetEntity spawnFallingBlock(Location at, int state) {
         return register(new CorePuppet(EntityType.FALLING_BLOCK, EntityType.FALLING_BLOCK.canonicalName(),
-                world, at, this, state), at);
+                worldOf(at), at, this, state), at);
     }
 
     public PuppetEntity spawnText(Location at, String text) {
         CorePuppet puppet = new CorePuppet(EntityType.TEXT, EntityType.TEXT.canonicalName(),
-                world, at, this, 0);
+                worldOf(at), at, this, 0);
         puppet.initNameTag(text); // the text must be set before the spawn relay carries it out
         return register(puppet, at);
     }
 
-    /** Add a freshly built puppet to the roster and show it to everyone online (joiners get it in showAllTo). */
+    /**
+     * The world a prop is being placed in — the one its location names. A puppet has always carried a
+     * Location, and a Location has always carried a world; with one world those two facts were the same
+     * fact, and this is where they stop being.
+     */
+    private CoreWorld worldOf(Location at) {
+        return at != null && at.world() instanceof CoreWorld cw ? cw : world;
+    }
+
+    /** Add a freshly built puppet to the roster and show it to everyone in its world (joiners get it in showAllTo). */
     private PuppetEntity register(CorePuppet puppet, Location at) {
         puppets.add(puppet);
         for (CorePlayer p : players.online()) {
-            spawnPuppetTo(p.getConnection(), puppet);
+            if (p.getWorld() == puppet.getLocation().world()) {
+                spawnPuppetTo(p.getConnection(), puppet);
+            }
         }
         LOGGER.info("Spawned puppet " + puppet.getEntityType().canonicalName() + " #" + puppet.getEntityId()
                 + " at " + String.format(Locale.ROOT, "%.1f,%.1f,%.1f", at.x(), at.y(), at.z()));
@@ -79,15 +90,39 @@ public final class EntityDirector {
     }
 
     /**
-     * Catch a joining connection up on everything already standing in the world — every puppet and
-     * every hologram line. Existing players were shown each one as it spawned.
+     * Catch a connection up on everything standing in {@code world} — every puppet and every hologram
+     * line in it. Called when a player joins and again whenever one travels to another world, which is
+     * the same problem twice: a client that has just been given a world knows nothing of what is in it.
      */
-    public void showAllTo(PlayerConnection connection) {
+    public void showAllTo(PlayerConnection connection, com.jedrock.api.world.World world) {
         for (CorePuppet puppet : puppets.all()) {
-            spawnPuppetTo(connection, puppet);
+            if (puppet.getLocation().world() == world) {
+                spawnPuppetTo(connection, puppet);
+            }
         }
         for (CoreHologram hologram : holograms) {
-            spawnHologramTo(connection, hologram);
+            if (hologram.getLocation().world() == world) {
+                spawnHologramTo(connection, hologram);
+            }
+        }
+    }
+
+    /**
+     * Take everything in {@code world} off a client — the other half of a world switch. Without it a
+     * traveller keeps every prop of the world they left, hanging in the air of the one they arrived in.
+     */
+    public void hideAllFrom(PlayerConnection connection, com.jedrock.api.world.World world) {
+        for (CorePuppet puppet : puppets.all()) {
+            if (puppet.getLocation().world() == world) {
+                despawnPuppetFrom(connection, puppet);
+            }
+        }
+        for (CoreHologram hologram : holograms) {
+            if (hologram.getLocation().world() == world) {
+                for (long lineId : hologram.getLineIds()) {
+                    connection.removeEntity(lineId);
+                }
+            }
         }
     }
 
@@ -209,6 +244,16 @@ public final class EntityDirector {
             } else {
                 p.getConnection().moveEntity(entityId, to.x(), to.y(), to.z(), to.yaw(), to.pitch());
             }
+        }
+    }
+
+    /** Take one puppet off one client — the world-switch counterpart to {@link #spawnPuppetTo}. */
+    private void despawnPuppetFrom(PlayerConnection conn, CorePuppet puppet) {
+        if (puppet.getEntityType().isPlayer()) {
+            conn.hidePlayer(puppet.getUniqueId(), puppet.getEntityId());
+            conn.removeFromTab(puppet.getUniqueId());
+        } else {
+            conn.removeEntity(puppet.getEntityId());
         }
     }
 

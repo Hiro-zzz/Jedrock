@@ -23,6 +23,7 @@ import com.jedrock.core.command.ClearCommand;
 import com.jedrock.core.command.CommandManager;
 import com.jedrock.core.command.GameModeCommand;
 import com.jedrock.core.command.WeatherCommand;
+import com.jedrock.core.command.WorldCommand;
 import com.jedrock.core.command.HealCommand;
 import com.jedrock.core.command.HelpCommand;
 import com.jedrock.core.command.KillCommand;
@@ -55,7 +56,7 @@ import com.jedrock.core.player.PlayerBroadcast;
 import com.jedrock.core.net.PacketTapRegistry;
 import com.jedrock.core.player.PlayerRegistry;
 import com.jedrock.core.world.CoreWorld;
-import com.jedrock.core.world.LevelManager;
+import com.jedrock.core.world.WorldManager;
 import com.jedrock.gameloop.GameLoop;
 import com.jedrock.gameloop.Scheduler;
 import com.jedrock.network.ConnectionListener;
@@ -131,8 +132,11 @@ public class JedrockServer implements Server {
     private final ContainerService containers;
     /** Fall, void and melee — the one path from a source of damage to a health bar. */
     private final CombatService combat;
-    /** The world's life on disk: the one-time bake, the autosave and the shutdown write. */
-    private final LevelManager levels;
+    /** The one path from a world to another world, for a player standing in the first. */
+    private final WorldTravel travel;
+    /** Every world the server has, and the only thing allowed to make one. */
+    private final WorldManager levels;
+    /** The world players join into — the manager owns it, this is the handle everything else was built on. */
     private final CoreWorld defaultWorld;
     private final BlindJudge judge;
     /** Remembers each player's last chosen game mode this run, so it survives a reconnect. */
@@ -144,17 +148,22 @@ public class JedrockServer implements Server {
         // Load configuration first — everything below is parameterized by it.
         this.config = JedrockConfig.load();
         this.name = config.name();
-        this.defaultWorld = new CoreWorld("world", Dimension.OVERWORLD, config.seed());
+        // Worlds come up here rather than in start(): every collaborator below is handed the default
+        // one, and the bake has to have happened before any of them can read a block. The manager also
+        // owns the per-world block relay, so an edit only reaches the clients standing in that world.
+        this.levels = new WorldManager(eventBus, playerRegistry, Path.of("."));
+        this.defaultWorld = levels.openDefault("world", config.seed());
         this.judge = new BlindJudge(config.judgeEnabled(), config.maxReach(), config.maxMoveDelta());
-        this.defaultWorld.setEventBus(eventBus); // so a weather change can be vetoed wherever it came from
         this.entities = new EntityDirector(playerRegistry, defaultWorld);
         this.scenes = new com.jedrock.core.entity.SceneManager(entities, defaultWorld);
-        this.regions = new com.jedrock.core.region.RegionManager(eventBus);
+        // Regions written before they recorded a world all belong to the default one — it was the only
+        // world there was when that file was saved.
+        this.regions = new com.jedrock.core.region.RegionManager(eventBus, defaultWorld.getName());
         this.items = new com.jedrock.core.item.ItemRegistry(eventBus);
         this.containers = new ContainerService(playerRegistry, defaultWorld, eventBus, broadcast);
         this.combat = new CombatService(playerRegistry, defaultWorld, eventBus, broadcast, entities, judge);
         this.combat.setItems(items);
-        this.levels = new LevelManager(defaultWorld, eventBus);
+        this.travel = new WorldTravel(playerRegistry, entities, eventBus);
         // Everything the protocol layer reports lands here, not on the server itself.
         this.bridge = new ConnectionBridge(this, eventBus, playerRegistry, broadcast, defaultWorld, judge,
                 combat, containers, entities, commandManager, packetTaps, opList, permissions,
@@ -198,6 +207,7 @@ public class JedrockServer implements Server {
         commandManager.register(new PermCommand());
         commandManager.register(new PickCommand());
         commandManager.register(new RegionCommand());
+        commandManager.register(new WorldCommand());
     }
 
     /** The in-game command registry — used by commands (e.g. {@code /help}) to introspect. */
@@ -278,6 +288,12 @@ public class JedrockServer implements Server {
             }
             to = event.getTo();
         }
+        // A destination in another world is a different operation entirely — the terrain changes, not just
+        // the coordinates. Routed here rather than at every call site, so /tp, /spawn, a script and the api
+        // all cross worlds for free and none of them has to know they did.
+        if (WorldTravel.isCrossWorld(player, to)) {
+            return travel.travel(player, to);
+        }
         broadcast.teleport(player, to);
         return true;
     }
@@ -324,9 +340,16 @@ public class JedrockServer implements Server {
 
         LOGGER.info("Starting " + getVersion());
 
-        // Load (or, on first run, generate) the world before any listener accepts logins, so a joining
-        // player sees the baked terrain and persisted edits rather than a half-built world.
-        levels.prepare();
+        // The default world came up with the constructor; every OTHER world folder is picked up here,
+        // before any listener accepts logins, so a world that existed last run is back before the first
+        // player can be sent to it.
+        int others = levels.discover();
+        if (others > 0) {
+            LOGGER.info("Loaded " + others + " additional world(s): " + levels.all().stream()
+                    .filter(w -> w != defaultWorld)
+                    .map(w -> w.getName() + " (" + w.getDimension() + ")")
+                    .reduce((a, b) -> a + ", " + b).orElse(""));
+        }
 
         // Saved scenes are world decoration, so they come back with the world and before anyone can see
         // it — no script involved, which is the whole point of having saved them.
@@ -350,17 +373,6 @@ public class JedrockServer implements Server {
         } catch (java.io.IOException e) {
             LOGGER.error("Failed to load regions from " + regionFile().toAbsolutePath(), e);
         }
-
-        // From here on, every world write — a player's edit or a script/API call — is pushed to each
-        // online client in its own protocol, so World.setBlockId is all an edit needs to be visible.
-        // Registered after the bake so the one-time generation doesn't fire millions of callbacks.
-        defaultWorld.setChangeListener((x, y, z, state) -> {
-            // Iterates the registry's live view: a script `world.fill` walks this per changed cell,
-            // so the loop must not mint a collection wrapper on every block it writes.
-            for (CorePlayer p : playerRegistry.online()) {
-                p.getConnection().sendBlockChange(x, y, z, state);
-            }
-        });
 
         try {
             // Java Edition 1.12.2 (TCP) — the primary listener; a failure here is fatal.
@@ -389,7 +401,7 @@ public class JedrockServer implements Server {
         long saveSeconds = Long.getLong("jedrock.world.save-seconds", 300L);
         if (saveSeconds > 0) {
             long periodTicks = saveSeconds * TickUtil.TPS;
-            scheduler.runTaskTimer(levels::autosave, periodTicks, periodTicks);
+            scheduler.runTaskTimer(levels::autosaveAll, periodTicks, periodTicks);
             // Script state rides the same cadence — it is small, and a dirty flag skips an idle store.
             scheduler.runTaskTimer(() -> plugins.storage().saveIfDirty(PLUGIN_STORAGE_FILE),
                     periodTicks, periodTicks);
@@ -474,7 +486,7 @@ public class JedrockServer implements Server {
         networkServer.shutdown();
 
         // Save last, with the loop stopped and listeners closed, so no edit races the snapshot.
-        levels.saveIfDirty();
+        levels.saveAllIfDirty();
 
         LOGGER.info("Shutdown complete.");
     }
@@ -506,17 +518,46 @@ public class JedrockServer implements Server {
 
     @Override
     public Collection<World> getWorlds() {
-        return List.of(defaultWorld);
+        return levels.asApi();
     }
 
     @Override
     public Optional<World> getWorld(String name) {
-        return defaultWorld.getName().equalsIgnoreCase(name) ? Optional.of(defaultWorld) : Optional.empty();
+        return levels.get(name).map(w -> (World) w);
     }
 
     @Override
     public World getDefaultWorld() {
         return defaultWorld;
+    }
+
+    @Override
+    public World createWorld(String name, String template, Long seed) {
+        com.jedrock.api.world.WorldTemplate recipe = levels.template(template)
+                .orElseThrow(() -> new IllegalArgumentException("No world template named '" + template
+                        + "' — registered: " + levels.templates().stream()
+                        .map(com.jedrock.api.world.WorldTemplate::name).toList()));
+        return levels.create(name, recipe, seed);
+    }
+
+    @Override
+    public boolean unloadWorld(String name) {
+        return levels.unload(name);
+    }
+
+    @Override
+    public Collection<com.jedrock.api.world.WorldTemplate> getWorldTemplates() {
+        return levels.templates();
+    }
+
+    @Override
+    public void registerWorldTemplate(com.jedrock.api.world.WorldTemplate template) {
+        levels.registerTemplate(template);
+    }
+
+    /** The world registry — used by {@code /world} and the script {@code worlds} global. */
+    public WorldManager getWorldManager() {
+        return levels;
     }
 
     // ===== Puppets and holograms — the EntityDirector does the work =====

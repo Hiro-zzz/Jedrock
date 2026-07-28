@@ -1,6 +1,7 @@
 package com.jedrock.core.world;
 
 import com.jedrock.api.world.Blocks;
+import com.jedrock.api.world.Dimension;
 import com.jedrock.core.inventory.Container;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -20,8 +21,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LevelIOTest {
 
     private static LevelData meta(long seed, boolean generated) {
+        return meta(seed, generated, Dimension.OVERWORLD);
+    }
+
+    private static LevelData meta(long seed, boolean generated, Dimension dimension) {
         return new LevelData(LevelIO.FORMAT_VERSION, seed, 48, 48, generated,
-                0.5, 63.0, 0.5, 90.0f, 0.0f);
+                0.5, 63.0, 0.5, 90.0f, 0.0f, dimension.getId());
+    }
+
+    @Test
+    void theDimensionRidesInTheHeader(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("level.jdw");
+        LevelIO.save(file, meta(7L, true, Dimension.NETHER), new BlockStorage(), new BiomeStorage(), chests());
+
+        LevelData out = LevelIO.load(file, new BlockStorage(), new BiomeStorage(), chests());
+        assertEquals(Dimension.NETHER.getId(), out.dimensionId());
     }
 
     /** A fresh, empty chest map — most tests don't exercise containers. */

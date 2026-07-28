@@ -67,7 +67,8 @@ public final class CombatService {
             return;
         }
         for (CorePlayer player : players.online()) {
-            if (player.getGameMode() == GameMode.SURVIVAL && world.isInVoid(player.getLocation().y())) {
+            if (player.getGameMode() == GameMode.SURVIVAL
+                    && player.getCoreWorld().isInVoid(player.getLocation().y())) {
                 hurt(player, VOID_DAMAGE, DamageCause.VOID,
                         "{gray}" + ChatText.escape(player.getName()) + " fell out of the world");
             }
@@ -123,8 +124,9 @@ public final class CombatService {
                 message = events.post(new PlayerDeathEvent(player, cause, deathMessage)).getDeathMessage();
             }
             player.setHealth(CorePlayer.MAX_HEALTH); // clamps + refreshes the client's health HUD
-            // Where they respawn — world spawn by default, but a listener may redirect it (a bed, a lobby).
-            Location respawn = world.getSpawnLocation();
+            // Where they respawn — the spawn of the world they died in by default (dying in the nether
+            // does not silently move you home), but a listener may redirect it (a bed, a lobby).
+            Location respawn = player.getWorld().getSpawnLocation();
             if (events.hasListeners(PlayerRespawnEvent.class)) {
                 respawn = events.post(new PlayerRespawnEvent(player, respawn)).getRespawnLocation();
             }

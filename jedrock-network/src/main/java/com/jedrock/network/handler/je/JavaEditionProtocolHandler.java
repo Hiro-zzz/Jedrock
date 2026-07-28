@@ -2,6 +2,7 @@ package com.jedrock.network.handler.je;
 
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.world.Blocks;
+import com.jedrock.api.world.Dimension;
 import com.jedrock.api.world.Location;
 import com.jedrock.network.EntityFlagIds;
 import com.jedrock.network.EntityTypeIds;
@@ -697,5 +698,25 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     @Override
     public void unloadChunk(JedrockConnection c, int chunkX, int chunkZ) {
         c.send(new ClientboundUnloadChunk(chunkX, chunkZ));
+    }
+
+    /**
+     * Respawn is the packet that changes worlds, and it has one famous quirk: the client only tears its
+     * terrain down when the dimension it is told <em>differs</em> from the one it is in. Travel between
+     * two overworlds and it would keep the old blocks and quietly render the wrong world. So a same-kind
+     * move bounces through a dimension the player is not in — one throwaway packet, the client's own
+     * reload trigger, and the well-worn way every server has done this since 1.8.
+     */
+    @Override
+    public void switchDimension(JedrockConnection c, Dimension from, Dimension to, GameMode mode) {
+        if (from == to) {
+            c.send(new ClientboundRespawn(bounceDimension(to), mode.getId()));
+        }
+        c.send(new ClientboundRespawn(to.getId(), mode.getId()));
+    }
+
+    /** Any dimension id that isn't {@code to} — the client only needs it to be different. */
+    static int bounceDimension(Dimension to) {
+        return to == Dimension.OVERWORLD ? Dimension.NETHER.getId() : Dimension.OVERWORLD.getId();
     }
 }

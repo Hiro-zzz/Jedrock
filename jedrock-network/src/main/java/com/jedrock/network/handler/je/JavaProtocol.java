@@ -179,4 +179,20 @@ public interface JavaProtocol extends ProtocolHandler {
 
     /** Tell the client to drop a chunk column that fell out of range. */
     void unloadChunk(JedrockConnection c, int chunkX, int chunkZ);
+
+    /**
+     * Move the client to another world: send the Respawn packet, which makes it throw away the terrain
+     * it holds and rebuild from the chunks that follow. The dimension it carries is what gives the
+     * nether its sky and fog; a teleport alone would leave the player in the old world's weather with
+     * the old world's blocks.
+     *
+     * <p>A client only rebuilds when the dimension it is told <em>changes</em>, so travelling between
+     * two worlds of the same kind needs a bounce through a third dimension first. Implementations
+     * handle that; callers just say where the player is going.
+     *
+     * @param from the dimension the player is leaving, so the implementation can spot the same-kind case
+     * @param to   the dimension being entered
+     */
+    default void switchDimension(JedrockConnection c, com.jedrock.api.world.Dimension from,
+                                 com.jedrock.api.world.Dimension to, GameMode mode) {}
 }

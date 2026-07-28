@@ -7,6 +7,7 @@ import com.jedrock.api.event.EventBus;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
+import com.jedrock.api.world.WorldTemplate;
 
 import java.util.Collection;
 import java.util.Optional;
@@ -87,19 +88,60 @@ public interface Server {
     void dispatchCommand(Player player, String commandLine);
 
     /**
-     * World management - minimal.
+     * Every world currently loaded — an overworld, a nether, or several of each. Each is a separate
+     * finite world with its own terrain, chests, spawn and weather; a player stands in exactly one.
      */
     Collection<World> getWorlds();
 
     Optional<World> getWorld(String name);
 
     /**
-     * The world players join into — the one every current implementation runs exactly one of.
-     * Never {@code null}; the default returns the first of {@link #getWorlds()}.
+     * The world players join into. Never {@code null}; the default returns the first of
+     * {@link #getWorlds()}.
      */
     default World getDefaultWorld() {
         return getWorlds().iterator().next();
     }
+
+    /**
+     * Create a world from a named {@link WorldTemplate} and bring it up — baked on the spot if it is new
+     * (which blocks the calling thread for as long as the bake takes: a few seconds for the default
+     * size), loaded from its folder if it has one. The world is live when this returns: players can be
+     * teleported into it, scripts can edit it, and it saves with every other world.
+     *
+     * @param name     the world's name, which is also its folder next to the process. Letters, digits,
+     *                 {@code _} and {@code -} only
+     * @param template the name of a registered template ({@code overworld}, {@code nether},
+     *                 {@code overworld_small}, {@code nether_small}, {@code bare}, or one a script
+     *                 registered)
+     * @param seed     the seed to grow it from, or {@code null} for the template's own (or a random one)
+     * @throws IllegalArgumentException if the name is unusable or no such template is registered
+     * @throws IllegalStateException    if a world by that name already exists
+     */
+    World createWorld(String name, String template, Long seed);
+
+    /** As {@link #createWorld(String, String, Long)} with the template's own seed. */
+    default World createWorld(String name, String template) {
+        return createWorld(name, template, null);
+    }
+
+    /**
+     * Take a world out of memory, saving it first. Its folder stays on disk, so it comes back at the
+     * next boot (and {@link #createWorld} will refuse the name until the folder is gone). Refused for
+     * the default world and for one that still has players in it — move them out first.
+     *
+     * @return {@code true} if it was unloaded
+     */
+    boolean unloadWorld(String name);
+
+    /** Every registered world template, built-ins first. */
+    Collection<WorldTemplate> getWorldTemplates();
+
+    /**
+     * Register (or replace) a named template, so {@link #createWorld} can build from it. A script that
+     * wants "my arena world" declares it once at load and creates by name from then on.
+     */
+    void registerWorldTemplate(WorldTemplate template);
 
     /**
      * Spawn a puppet — a server-controlled visual entity (the base for mobs / NPCs / holograms) — of the

@@ -655,6 +655,16 @@ public final class CorePlayer implements Player {
         return world;
     }
 
+    /**
+     * The same world, typed — what every core collaborator actually needs. A player's world is the one
+     * thing that used to be a constant on the server (there was only ever one); now that a player can be
+     * standing in any of several, "which world" is a question asked <em>of the player</em>, and this is
+     * where it is answered.
+     */
+    public CoreWorld getCoreWorld() {
+        return world;
+    }
+
     @Override
     public Location getLocation() {
         return location;
@@ -665,9 +675,40 @@ public final class CorePlayer implements Player {
         this.location = location;
     }
 
+    /**
+     * How a teleport actually happens. The player itself can only move its own state; telling the client,
+     * relaying the move to everyone else and — since worlds became plural — swapping the terrain under
+     * them are all the server's business. It installs this on every player it registers, so
+     * {@code player.teleport(...)} means the same thing from a command, a script and the api.
+     */
+    @FunctionalInterface
+    public interface Teleporter {
+        boolean teleport(CorePlayer player, Location to);
+    }
+
+    private volatile Teleporter teleporter;
+
+    public void setTeleporter(Teleporter teleporter) {
+        this.teleporter = teleporter;
+    }
+
     @Override
     public void teleport(Location location) {
-        // State-only for now; sending the position packet to the client is a later step.
+        Teleporter handler = this.teleporter;
+        if (handler != null) {
+            handler.teleport(this, location);
+            return;
+        }
+        // No server behind this player (a bare test fixture): move the state and nothing else.
+        enterWorld(location);
+    }
+
+    /**
+     * Move this player's own state — position, and the world if the destination names another one.
+     * The inside of a teleport, called once the server has decided one is happening; calling
+     * {@link #teleport} from here instead would ask the server to decide all over again.
+     */
+    public void enterWorld(Location location) {
         this.location = location;
         if (location.world() instanceof CoreWorld cw) {
             this.world = cw;

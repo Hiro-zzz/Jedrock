@@ -31,13 +31,75 @@ public final class ScriptEntities {
 
     private final PluginManager manager;
     private final ScriptPlugin plugin;
-    private final List<ScriptEntity> entities = new ArrayList<>();
+    private final List<ScriptEntity> entities;
+    /**
+     * The world this view spawns into, or {@code null} for the default one. The {@code entities} global
+     * is the {@code null} view, which is why a script that has never heard of other worlds is unaffected.
+     */
+    private final com.jedrock.api.world.World world;
+    /** The view this one was made from, or {@code null} if this IS the root the plugin owns. */
+    private final ScriptEntities root;
     /** The one repeating task that drives every ticking entity of this plugin; started on first use. */
     private volatile com.jedrock.gameloop.Scheduler.Task ticker;
 
     ScriptEntities(PluginManager manager, ScriptPlugin plugin) {
         this.manager = manager;
         this.plugin = plugin;
+        this.entities = new ArrayList<>();
+        this.world = null;
+        this.root = null;
+    }
+
+    /**
+     * A view bound to another world. It shares the root's roster deliberately: a hot reload has to clear
+     * every entity this plugin spawned, and one spawned through a view is no less the plugin's.
+     */
+    private ScriptEntities(ScriptEntities root, com.jedrock.api.world.World world) {
+        this.manager = root.manager;
+        this.plugin = root.plugin;
+        this.entities = root.entities;
+        this.world = world;
+        this.root = root;
+    }
+
+    /**
+     * The same {@code entities} object, pointed at another world:
+     *
+     * <pre>{@code
+     *   const hell = entities.in('hell');
+     *   hell.spawn('zombie', 0, 40, 0);        // spawns THERE, seen only by players there
+     *   hell.circle(8, 0, 40, 0, 3, (x, y, z) => hell.spawnItem(lamp, x, y, z));
+     * }</pre>
+     *
+     * <p>Everything else on the object works unchanged, so nothing had to grow a world argument. The
+     * view's {@code all} / {@code near} / {@code removeAll} see only that world's entities, which is what
+     * "the entities in the nether" ought to mean; the plugin's own teardown still clears them all.
+     *
+     * @param world a world name, or a world object from {@code worlds.get(...)}
+     */
+    public ScriptEntities in(Object world) {
+        return new ScriptEntities(root != null ? root : this, resolveWorld(world));
+    }
+
+    /** The world this view spawns into. */
+    public ScriptWorld getWorld() {
+        return new ScriptWorld(manager, worldOrDefault());
+    }
+
+    private com.jedrock.api.world.World worldOrDefault() {
+        return world != null ? world : manager.server().getDefaultWorld();
+    }
+
+    private com.jedrock.api.world.World resolveWorld(Object world) {
+        if (world instanceof ScriptWorld view) {
+            return view.unwrap();
+        }
+        if (world instanceof com.jedrock.api.world.World real) {
+            return real;
+        }
+        String name = String.valueOf(world);
+        return manager.server().getWorld(name).orElseThrow(
+                () -> new IllegalArgumentException("no world named '" + name + "'"));
     }
 
     /**
@@ -46,7 +108,7 @@ public final class ScriptEntities {
      * cross-edition, and owned by this plugin.
      */
     public ScriptEntity spawn(String type, double x, double y, double z) {
-        Location spawn = new Location(manager.server().getDefaultWorld(), x, y, z);
+        Location spawn = new Location(worldOrDefault(), x, y, z);
         return spawnAt(type, spawn, null);
     }
 
@@ -76,7 +138,7 @@ public final class ScriptEntities {
      * }</pre>
      */
     public ScriptEntity spawnItem(int state, double x, double y, double z) {
-        return spawnItem(state, new Location(manager.server().getDefaultWorld(), x, y, z));
+        return spawnItem(state, new Location(worldOrDefault(), x, y, z));
     }
 
     /** Spawn an item prop at a {@link Location}. */
@@ -91,7 +153,7 @@ public final class ScriptEntities {
      * drift there).
      */
     public ScriptEntity spawnBlock(int state, double x, double y, double z) {
-        return spawnBlock(state, new Location(manager.server().getDefaultWorld(), x, y, z));
+        return spawnBlock(state, new Location(worldOrDefault(), x, y, z));
     }
 
     /** Spawn a full-size block prop at a {@link Location}. */
@@ -106,7 +168,7 @@ public final class ScriptEntities {
      * them together) for a multi-line sign.
      */
     public ScriptEntity spawnText(String text, double x, double y, double z) {
-        return spawnText(text, new Location(manager.server().getDefaultWorld(), x, y, z));
+        return spawnText(text, new Location(worldOrDefault(), x, y, z));
     }
 
     /** Spawn a floating line of text at a {@link Location}. */
@@ -232,18 +294,32 @@ public final class ScriptEntities {
         return track(puppet);
     }
 
-    /** Every live entity this plugin owns. */
+    /** Every live entity this plugin owns — in this view's world, if it is bound to one. */
     public ScriptEntity[] all() {
+        ScriptEntity[] snapshot;
         synchronized (entities) {
-            return entities.toArray(new ScriptEntity[0]);
+            snapshot = entities.toArray(new ScriptEntity[0]);
         }
+        if (world == null) {
+            return snapshot;
+        }
+        List<ScriptEntity> here = new ArrayList<>(snapshot.length);
+        for (ScriptEntity entity : snapshot) {
+            if (entity.getLocation().world() == world) {
+                here.add(entity);
+            }
+        }
+        return here.toArray(new ScriptEntity[0]);
     }
 
-    /** How many this plugin owns. */
+    /** How many this plugin owns (in this view's world, if it is bound to one). */
     public int count() {
-        synchronized (entities) {
-            return entities.size();
+        if (world == null) {
+            synchronized (entities) {
+                return entities.size();
+            }
         }
+        return all().length;
     }
 
     /** This plugin's entities within {@code radius} blocks of a point. */
@@ -310,6 +386,10 @@ public final class ScriptEntities {
      * scheduled task. It is tracked on the plugin, so teardown cancels it like any other task.
      */
     synchronized void ensureTicking() {
+        if (root != null) {
+            root.ensureTicking(); // one driver per plugin, however many world views it made
+            return;
+        }
         if (ticker != null) {
             return;
         }

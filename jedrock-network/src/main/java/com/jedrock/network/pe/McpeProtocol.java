@@ -63,6 +63,8 @@ final class McpeProtocol {
     static final int ID_AVAILABLE_COMMANDS = 0x4E;    // JSON manifest of the commands the client may send
     static final int ID_COMMAND_STEP = 0x4F;          // inbound: a slash command the client parsed
     static final int ID_FULL_CHUNK_DATA = 0x3A;
+    static final int ID_CHANGE_DIMENSION = 0x3D;     // move the client to another world (sits between
+                                                     //   SetDifficulty 0x3C and SetPlayerGameType 0x3E)
     static final int ID_SET_PLAYER_GAME_TYPE = 0x3E; // live game-mode switch (gameType as signed varint)
     static final int ID_PLAYER_LIST = 0x3F;
     static final int ID_REQUEST_CHUNK_RADIUS = 0x45;

@@ -72,6 +72,18 @@ public final class ChunkView {
         }
     }
 
+    /**
+     * Forget every chunk this view has sent, without telling the client to unload any of them — what a
+     * world switch needs. The client either drops its terrain itself (a Java Respawn, a Bedrock
+     * ChangeDimension) or is about to be sent the same coordinates again from the new world; in both
+     * cases an unload packet per chunk would be wasted bytes, and in the second it would make the world
+     * blink. The next {@link #recenter} therefore re-sends the whole window.
+     */
+    public void forgetAll() {
+        loaded.clear();
+        initialized = false;
+    }
+
     /** Send one chunk if this view doesn't already hold it. */
     private void loadIfNew(int chunkX, int chunkZ, Sink sink) {
         if (loaded.add(key(chunkX, chunkZ))) {

@@ -3,8 +3,9 @@
 **A lightweight, cross-platform Minecraft server core written from scratch in Java.**
 
 Jedrock speaks **two protocols natively at once** — Java Edition and Bedrock (Pocket) Edition —
-and treats them as one world. A player on a PC and a player on a phone join the same server,
-share the same chat, the same player list, and the same terrain. The core never learns which
+and treats them as one server. A player on a PC and a player on a phone join the same world,
+share the same chat, the same player list, and the same terrain — and can walk into a nether
+together. The core never learns which
 protocol a player speaks; that stays behind the network layer.
 
 Target versions:
@@ -16,11 +17,13 @@ Target versions:
 | Bedrock / Pocket Edition | **1.1.5** ⚠️ | 113 | RakNet over UDP |
 | Bedrock / Pocket Edition | **0.14** | 45 | RakNet over UDP |
 
-> ⚠️ **1.1.5 is experimental / known-buggy.** Join, movement, chat, block edits and cross-play work, but
-> the retail 1.1.5 client (confirmed on **both PC and mobile**) double-fires place/break (mitigated
-> server-side, not eliminated) and chests can't be opened on it (see [Known limits](#roadmap)). **0.14**
-> and **Java** are the clean Bedrock/PC targets. The problems are specific to the protocol-113 client
-> across platforms — not the input method, and not the core.
+> ⚠️ **1.1.5 is experimental / known-buggy.** Join, movement, chat, block edits, the survival inventory,
+> named custom items and cross-play all work, but the retail 1.1.5 client (confirmed on **both PC and
+> mobile**) double-fires place/break (mitigated server-side, not eliminated) and **will not raise a chest
+> window at all** — every route was tried and the client either crashes or shows nothing, so chests and
+> storage menus trade through click-transfer and `/pick` lists instead (see [Known limits](#known-limits)).
+> **0.14** and **Java** are the clean Bedrock/PC targets. The problems are specific to the protocol-113
+> client across platforms — not the input method, and not the core.
 
 Java Edition is **multi-version on one port**: the client's handshake protocol selects the encoder,
 so 1.8 and 1.12.2 share the listener (see [Multiversion](#multiversion)). Bedrock spans two eras that
@@ -86,8 +89,9 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   saplings, carpets, torch, ladder, spawner… plus the item half — all five tool/weapon tiers, four
   armor sets, bow, food and materials) — every id/meta battle-tested against this exact client
   generation, because the old client crashes on an id it can't render; anything item-shaped sent to
-  0.14 passes one crash gate that turns an unknown id into an empty slot. Items are inert (held /
-  stored — no durability, crafting or eating; a door doesn't place). The **player-inventory sync**
+  0.14 passes one crash gate that turns an unknown id into an empty slot. A *vanilla* item is inert (held /
+  stored — no durability, crafting or eating; a door doesn't place); behaviour is what
+  [custom items](#what-works-today) add on top of one. The **player-inventory sync**
   (window 0 + the hotbar-link table) landed with it, so the inventory API (`giveItem`, `/inv`, survival
   pickup) now works on 0.14 too. The player can fly (fixed `AdventureSettings`), and a movement-speed
   attribute kills the runaway acceleration.
@@ -113,11 +117,38 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   spawn), and biome-weighted trees (dense in forest, sparse on plains; spruce in taiga, oak elsewhere).
   All position-hashed, so a seed always yields the same world, and all baked into storage — no runtime
   simulation. Features cross chunk borders freely (the whole finite world is in memory at bake time).
-- ✅ **World persistence** — the world (baked terrain + player edits) survives a restart, written to a
-  compact Jedrock level file (`world/level.jdw` — an uncompressed metadata header plus every allocated
+- ✅ **The nether** — the second kind of world, generated the way the overworld is: one enormous cavern
+  between a netherrack floor and a netherrack roof, bedrock-capped top and bottom, with a lava sea in its
+  low ground. It is two height fields rather than one, not a carve — the floor rolls through the lava
+  line, so the same noise that makes hills makes *shores*, and a column whose floor sits under it is a
+  lake. Four bake-time passes dress it (a spawn platform, glowstone clusters under the roof, soul sand on
+  the shore, quartz and gravel in the floor), all position-hashed like the overworld's and sharing its
+  mixer, so a seed always yields the same nether. It is **128 tall**, which is not a style choice: MCPE
+  0.14 has no taller world, so 128 is the one shape every target edition renders identically.
+- ✅ **Several worlds, and travel between them** — a world is a folder (`<name>/level.jdw`), and since the
+  level file records its own dimension the set of worlds is **discovered, not registered**: every folder
+  with a level file comes back at boot, so copying one in is all it takes to add a world. New ones are
+  created from a **template** — a recipe (kind, size, decoration, optionally a fixed seed), not a saved
+  world, so two worlds from one template share its rules and nothing else. Five are built in
+  (`overworld`, `nether`, `overworld_small`, `nether_small`, `bare`) and a script can register more.
+  Scripts reach the rest of it the way they reach the world they start in: `worlds.get('hell')` hands
+  back the same object the `world` global is, `entities.in('hell')` the same object `entities` is, and
+  regions grew `createIn` / `atIn` / `allowsIn` beside their existing short forms — so no global had to
+  learn a world argument and no script that predates worlds had to change.
+  Travel is `/world tp`, `worlds.send(player, 'hell')` or simply teleporting to a `Location` in another
+  world; the terrain, the avatars, the props and the world's roster all change together. **Java** gets a
+  Respawn packet (with the same-dimension bounce every server has used since 1.8, since the client only
+  rebuilds when the dimension changes); **1.1.5** gets ChangeDimension; **0.14** gets a chunk resend and
+  keeps the overworld sky, which is as much as that era can be told (see [Known limits](#known-limits)).
+  Everything that used to mean "the world" now means "the world this player is in" — blocks, chests, the
+  edge wall, the void floor, damage, avatars, props and regions.
+- ✅ **World persistence** — each world (baked terrain + player edits) survives a restart, written to a
+  compact Jedrock level file (`<world>/level.jdw` — an uncompressed metadata header plus every allocated
   16³ section in one DEFLATE stream; ~420 KB for a 48×48 world). Loaded before any client can join,
   saved on shutdown, and autosaved every `-Djedrock.world.save-seconds` (default 300, `0` = off) — a
-  dirty flag skips rewriting an unchanged world. Saves are atomic (temp + move).
+  dirty flag skips rewriting an unchanged world. Saves are atomic (temp + move). The header carries the
+  world's seed, extent and dimension, so a world folder is self-describing: it can be moved or recovered
+  on its own, and a mismatch is caught instead of quietly serving the wrong terrain.
 - ✅ **File-based config** — `jedrock.properties` (auto-created on first run) sets the bind host and
   ports, server name, world seed, tick rate, view distance and the server-list MOTD / max players;
   any key is overridable with `-Dkey=value`, and bad values fall back to defaults instead of failing.
@@ -148,7 +179,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   ever changes). **In-game commands** work cross-edition — Java sends `/…` straight through as chat, and
   Bedrock is handed an `AvailableCommands` manifest so its client parses the line and sends it back. The
   built-in set: `/help [cmd]`, `/list`, `/tps`, `/say`, `/me`, `/msg`, `/gamemode`, `/tp`, `/tphere`,
-  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/op`, `/deop`, `/perm`. A deliberately minimal **survival inventory** (36 slots)
+  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/op`, `/deop`, `/perm`, `/region`, `/world`, `/pick`,
+  `/puppet`, `/hologram`. A deliberately minimal **survival inventory** (36 slots)
   tracks only what a survival player mines and places: mining a block drops it into the hotbar, placing
   consumes it, and the changed slot is pushed live so the HUD refreshes. On PE 1.1.5 the player window is
   serialized PMMP-exact (45 slots + a 9-entry hotbar-link array), without which mined items filled storage
@@ -160,9 +192,13 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   `ops.txt` (an op holds every permission; the console is always an op, so the first `/op` is granted from
   the console). On top sits a **native group permission system** (`permissions.txt`): named groups with
   inheritance, a default group new players fall into, and permission nodes supporting `*` / `a.b.*`
-  wildcards and `-node` explicit deny (deny wins). Each group can carry a chat **prefix** (`{red}[Admin] `)
+  wildcards and `-node` explicit deny (deny wins). A player can also carry **nodes of their own**, on top of
+  whatever their groups give them — because a group answers "what may this *kind* of player do" and some
+  exceptions are genuinely about one person (the owner of one plot), which shouldn't need a throwaway group
+  each. Deny wins between the two either way round. Each group can carry a chat **prefix** (`{red}[Admin] `)
   shown via the `%prefix%` slot in the chat format. Manage it live with `/perm` (create/delete groups, grant
-  or deny nodes, set inheritance, prefix and the default group, assign players) — every change persists.
+  or deny nodes, set inheritance, prefix and the default group, assign players, `user <name> addnode`) —
+  every change persists. Scripts get the same surface through the `permissions` global.
   Guarded commands are gated on their node, and `/help` hides what the sender can't run.
 - ✅ **Typed command arguments and tab-completion.** A command can declare its arguments as typed
   `CommandArg`s instead of parsing a raw `String[]`: a name, an `ArgType` (`WORD`, `GREEDY`, `INTEGER`,
@@ -231,7 +267,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   armor and off-hand slots. **Chests** are a placeable block (right-click to open) backed by a 27-slot
   container: move items in and out, shift to quick-transfer, in survival <em>and</em> creative (the
   creative inventory is mirrored server-side so the chest's player half is tracked). Chest contents
-  **persist** in the level file (format v3, back-compatible with v2 worlds). Wired for JE 1.12.2 and 1.8.
+  **persist** in the level file (format v4, which loads a v2 or v3 world in place and rewrites it on the
+  next save; v3 added chests, v4 the custom-item key each stack carries). Wired for JE 1.12.2 and 1.8.
   True to the model, the server only <em>stores and moves</em> items — no crafting or smelting simulation,
   no item entities (a dropped / overflow item simply vanishes).
 - ✅ **Chests on Bedrock 1.1.5 — click-transfer.** The retail 1.1.5 client crashes on a real chest window,
@@ -328,8 +365,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   the region demo had to do until this landed.
 
 - ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
-  backend, not the compiled core: a script gets thirteen globals — `server` / `events` / `scheduler` /
-  `commands` / `packets` / `world` / `entities` / `regions` / `items` / `permissions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
+  backend, not the compiled core: a script gets fourteen globals — `server` / `events` / `scheduler` /
+  `commands` / `packets` / `world` / `worlds` / `entities` / `regions` / `items` / `permissions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
   name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
   work (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too
@@ -392,7 +429,7 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
 
 Not yet: a real chest <em>window</em> on Bedrock 1.1.5 (click-transfer is the interim), cross-edition skin
 fidelity (a signed-texture limit, see above), knockback (deliberately — the server simulates no physics).
-See [Roadmap](#roadmap).
+See [Known limits](#known-limits).
 
 ---
 
@@ -469,7 +506,8 @@ jedrock
 │   └── pe/              # Bedrock 1.1.5: PeRakNetServer (RakNet transport) + PeSession (MCPE game
 │                        #   layer) delegating to McpeProtocol, McpeCodec, McpeChunkSerializer,
 │                        #   McpeLoginIdentity, McpeSkin, PeBlockEditDecoder, McpeCompression
-│       │                #   (McpePackets holds every clientbound body, as Mcpe014Packets does for 0.14)
+│       │                #   (McpePackets holds every clientbound body, as Mcpe014Packets does for 0.14;
+│       │                #    McpeItemNbt writes item names for BOTH eras — see its note on dialects)
 │       └── v014/         # Bedrock 0.14 (protocol 45): Pe014RakNetServer + PeSession014 + the
 │                         #   pre-VarInt codec (Mcpe014Codec/Login/Packets/ChunkSerializer/Batch)
 ├── jedrock-gameloop     # Dedicated 20 TPS drift-correcting loop + Scheduler (Tickable)
@@ -478,8 +516,12 @@ jedrock
     ├── plugin/          #   the Rhino script host (the only non-api dep besides network) + its globals
     ├── entity/          #   CorePuppet / PuppetRegistry: the entity behind mobs, holograms and props
     ├── command/         #   CommandManager + the built-ins, on one CommandSender surface
-    ├── permission/      #   OpList + PermissionManager (groups, wildcards, prefixes)
-    └── world/           #   the bake (terrain, biomes, decoration), storage and level persistence
+    ├── permission/      #   OpList + PermissionManager (groups, per-player nodes, wildcards, prefixes)
+    ├── region/          #   RegionManager: named boxes with rules, enforced through the event bus
+    ├── item/            #   ItemRegistry: custom items — a name, lore and behaviour on a vanilla state
+    ├── inventory/       #   Container + ContainerService: everything that moves an item between slots
+    └── world/           #   WorldManager (every world, made from templates) + the bake per dimension
+                         #     (OverworldGenerator / NetherGenerator), storage and level persistence
 ```
 
 Dependency direction: `network → api`, `core → api + network + gameloop + utils`. The network
@@ -536,6 +578,20 @@ For the chunk hot path, both editions bulk-read a section through `World.fillSec
 out of the baked matrix) and the biome map through `World.fillBiomes`. Serializers reuse per-thread
 scratch buffers, so encoding a chunk allocates nothing per section.
 
+What a cell *contains* is the one thing an overworld and a nether disagree about, and it is the only
+thing a `WorldGenerator` decides — storage, bounds, edits, chests, weather and persistence are identical
+for both. Its shape is worth a line, because a naive signature would have made the bake unusable: a
+column is evaluated **once** (`column(x, z)`) and packed into a `long` the bake carries down the y-axis,
+so an overworld packs its surface height and the nether packs a floor and a ceiling, and the per-cell
+`blockAt` is then pure arithmetic. Two height fields per *block* instead of per *column* would have
+turned a few seconds of bake into minutes.
+
+Worlds are plural. `WorldManager` owns them, makes them from a `WorldTemplate`, and finds the ones
+already on disk by scanning for folders with a level file — the file records its own dimension, so
+nothing has to be listed anywhere. A player stands in exactly one world; their connection streams chunks
+from that one, and `WorldTravel` is what moves them (and their avatar, and the props they can see) to
+another.
+
 ---
 
 ## Key abstractions
@@ -548,13 +604,20 @@ scratch buffers, so encoding a chunk allocates nothing per section.
 | `PlayerConnection` | api | Protocol-agnostic handle the core talks to (message, tab, close) |
 | `World` / `BlockStorage` | api / core | Flat block matrix; canonical ids; the "illusion" |
 | `World.fillSection` | api / core | Bulk 16³ section read for zero-allocation chunk serialization |
-| `TerrainGenerator` / `BiomeGenerator` / `WorldDecorator` | core | One-time bake: heightmap, biomes, trees / lakes / caves — then frozen |
+| `WorldGenerator` | core | What an overworld and a nether disagree about, and nothing else; a column is evaluated once and packed into a `long` the bake carries down the y-axis |
+| `TerrainGenerator` / `BiomeGenerator` / `WorldDecorator` | core | The overworld's one-time bake: heightmap, biomes, trees / lakes / caves — then frozen |
+| `NetherGenerator` / `NetherDecorator` | core | The nether's: two height fields with a lava sea between them, glowstone / soul sand / ore — 128 tall |
+| `WorldManager` / `WorldTemplate` | core / api | Every world the server has, and the recipe one is made from; worlds are discovered from their folders, not from a list |
+| `WorldTravel` | core | The four things a world switch must do together — membership, avatars, props, terrain |
 | `LevelIO` / `BiomeStorage` | core | Persist the baked world + biome map to a compact `world/level.jdw` |
 | `PlayerRegistry` | core | Thread-safe roster indexed by uuid / name / connection |
 | `EventBus` / `EventPriority` | api | Cancellable, priority-ordered events the core routes decisions through; reflection-free, with a `hasListeners` hot-path gate |
 | `PluginManager` / `ScriptPlugin` | core/plugin | The Rhino host: loads `plugins/*.js`, injects the globals, and owns each script's listeners, tasks, commands, taps and entities so a hot-reload tears them all down |
 | `PuppetEntity` / `CorePuppet` | api / core | The server-driven entity: a mob, an NPC, a hologram line or a decoration prop — moved and dressed, never simulated |
-| `Region` / `RegionManager` | api / core | Named boxes with rules; flags enforced by cancelling the events the core already routes decisions through, and registered only while a region exists |
+| `Region` / `RegionManager` | api / core | Named boxes with rules **in one world**; flags enforced by cancelling the events the core already routes decisions through, and registered only while a region exists |
+| `CustomItem` / `ItemRegistry` | api / core | A name, lore and behaviour on a vanilla item state; a stack carries the **key**, the registry gives that key meaning |
+| `ItemDisplay` | api | The only part of a custom item the client learns — name + lore, legacy-rendered, `null` for an ordinary stack |
+| `SlotEchoGuard` | core/inventory | Tells a Bedrock client's own inventory move from its echo of one the server made — by timing, since the two are identical in content |
 | `ScriptEntity` / `ScriptEntities` | core/plugin | That primitive as scripts see it: movement, state, spatial queries and an `onTick` brain, owned per plugin |
 | `EntityTypeIds` / `EntityFlagIds` | network | The entity counterpart of the block palette: canonical type / flag → each edition's wire ids |
 | `CommandManager` / `CommandSender` | core | One command surface for players and the console, gated by `PermissionManager` (groups, wildcards, deny-wins) |
@@ -590,12 +653,21 @@ which binds (defaults, configurable in `jedrock.properties`):
 - **Bedrock 1.1.5** on UDP `0.0.0.0:19132`
 - **Bedrock 0.14** on UDP `0.0.0.0:19133` (`server.port.pe014`; disable with `pe014.enabled=false`)
 
+The first run also creates the default world's folder (`world/`), and every later boot picks up any
+other folder holding a `level.jdw` — so a world made with `/world create` (or by a script) is simply
+there again, and one copied in from elsewhere joins the server without being registered anywhere.
+
 The first run writes a `jedrock.properties` next to the process with the bind host/ports, server
 name, MOTD, max players, world seed, tick rate, view distance, the blind-judge limits
 (`judge.enabled`, `judge.max-reach`, `judge.max-move-delta`) and the Bedrock sidebar placement
 (`pe.sidebar.raise`, `pe.sidebar.shift`); edit and restart to apply, or override
-a single key with `-Dkey=value`. The RakNet protocol version defaults to `8` (MCPE 1.1.5)
-and can be overridden with `-Djedrock.pe.raknetProtocolVersion=N` for other client builds. The Bedrock
+a single key with `-Dkey=value`. A few knobs are `-D`-only, since they exist to be turned down rather
+than tuned: `-Djedrock.pe.raknetProtocolVersion=N` (default `8` = MCPE 1.1.5, for other client builds),
+`-Djedrock.pe.slotEchoGuardMs=<ms>` (default `750`, `0` = off — how long after the server pushes an
+inventory slot a Bedrock client's report of it is read as a stale echo), the 1.1.5 block-edit
+debounce windows (`-Djedrock.pe.placeBurstMs`, `placeSameCellMs`, `breakSameCellMs`), and
+`-Djedrock.pe.changeDimension=false` (send no ChangeDimension to a 1.1.5 client on a world switch —
+the sky stays wrong, but an unverified packet can't hang it on a loading screen). The Bedrock
 listeners bind best-effort — a busy UDP port (the Minecraft Bedrock client itself holds 19132 for LAN
 discovery) disables just that edition, never the whole server.
 
@@ -628,108 +700,103 @@ logged with `-Djedrock.status.seconds=30`.
 > default. Add a loopback exemption once:
 > `CheckNetIsolation LoopbackExempt -a -n=Microsoft.MinecraftUWP_yourid`
 
-Tests are plain JUnit 5 (`mvn test`) — ~340 of them, no client required. Beyond the block matrix,
+Tests are plain JUnit 5 (`mvn test`) — ~560 of them, no client required. Beyond the block matrix,
 player registry, chunk encoding and MCPE compression, they pin the things that are expensive to get
 wrong: the **byte layout** of packets that were ground-truthed against PocketMine or minecraft-data
-(titles, sounds, particles, equipment, inventories, props), the per-edition **id tables**, the
+(titles, sounds, particles, equipment, inventories, item NBT, props), the per-edition **id tables**, the
 scripting layer end-to-end (a real script loads, cancels events, registers commands, hot-reloads and
 tears down), and world persistence round-trips.
 
+A byte-level test is only worth what its assertions are, which the item-NBT work made concrete: the
+first encoder passed its own tests and still failed on a real client, because the tests agreed with it
+about the wrong NBT dialect. The replacements assert the exact bytes rather than "it round-trips through
+my own reader" — the rule these tests try to follow wherever a real client is the only other judge.
+
 ---
 
-## Roadmap
+## Known limits
 
-Jedrock isn't chasing a faithful simulator — it's a cross-edition **illusionist** and a **platform to
-script illusions**. So the roadmap grows three things: the *content* the server can show cheaply, the
-*tools* to author it, and the *scripting layer* that drives it. Anything that smells like world
-simulation stays out (see non-goals).
+What [What works today](#what-works-today) doesn't say. Most of these aren't bugs waiting on a fix —
+they're a legacy client's answer, a protocol that predates the feature, or a line this project drew on
+purpose. Each one shaped a decision above, so they're recorded rather than hidden.
 
-- **Finite "bake once" world — landed.** A bounded (48×48-chunk) world generated once on first run then
-  frozen (all generation disabled, served as static decoration): persistence, the terrain bake, biomes,
-  tree/lake/cave decoration and the edge wall are all in, and the block matrix is palette-compressed
-  (per-section palette + bit-packed indices) so the whole world stays cheap in RAM (~13 MB for 48×48).
-- **The platform API — the centrepiece (in progress).** Turn `api` from a thin contract into a real
-  extension surface. **The event engine is in:** a cancellable, priority-ordered **event model** the core
-  actually routes its decisions through — cancel `BlockBreakEvent` and the block stays; cancel
-  `PlayerChatEvent` and the line never sends; cancel `PlayerMoveEvent` and the player is snapped back. The
-  set spans the player's whole arc — login gate / join / quit / chat / command / move / teleport / block
-  break / place / right-click / interact-entity / item-pickup / damage / death / respawn / sneak / sprint /
-  use-item / game-mode / armor-change / held-item-change — plus server lifecycle (start / stop / per-tick
-  heartbeat), world save and weather change, each
-  honoured by the core (cancel a `PlayerLoginEvent` to reject a connection, a `PlayerDamageEvent` for
-  invulnerability, redirect a `GameModeChangeEvent` or `PlayerRespawnEvent`, suppress a `PlayerDeathEvent`).
-  `EventBus` gained priorities (LOWEST…MONITOR), `ignoreCancelled` listeners, precise removal handles, and a
-  `hasListeners` fast-path so the hottest paths (movement) allocate nothing when unlistened — reflection-free
-  and dependency-free by design. **The script loader landed too:** custom gameplay now lives in
-  hot-reloadable **JavaScript** plugins (`plugins/*.js`) on a **Rhino** backend, not the compiled core.
-  Rhino (`rhino-runtime`, ~1.5 MB, pure Java, zero transitive deps) was chosen over GraalJS (tens of MB
-  incl. ICU4J) to keep the tree lean; it lives only in `core`, so the `api` stays runtime-neutral. That
-  gate is what the rest of the roadmap waited on, and the surface behind it has kept growing — nine
-  globals now (`server` / `events` / `scheduler` / `commands` / `packets` / `world` / `entities` /
-  `regions` / `items` / `permissions` / `storage` / `console`), covering custom events, `/slash` commands, scheduling, raw packet taps, block editing,
-  weather, sounds and particles, and **programmable entities** (see [What works today](#what-works-today)).
-  The event model has since caught up with the newer features: **weather** (`WeatherChange`, cancellable and
-  redirectable, posted by the world itself so `/weather`, a script and the api all pass through it) and
-  **equipment** (`PlayerArmorChange` and `PlayerHeldItemChange`, whatever the piece came from — a creative
-  drag, a survival window click, or `setArmor` from code). And **script state now survives a restart** —
-  the `storage` global, the last thing this section was waiting on (see [What works today](#what-works-today)).
-  **Typed command arguments and tab-completion** landed too — a command declares its arguments and the core
-  parses them and completes them (Java clients), scripts included. And the **illusion toolkit** grew a
-  **sidebar** (a scoreboard on Java, the displaced item-name line on both Bedrock eras), a **boss bar**
-  (Java 1.8 + 1.12.2 and Bedrock 1.1.5), and **virtual chests** for scripts (the `menus` global — a window
-  on Java, a `/pick` list on Bedrock). **Storage menus reached Bedrock too** — the last gap in that
-  toolkit: a list could only ever *signal*, so the transfer moved into it (`/pick <n>` takes, `/pick put`
-  puts, and it redraws after each one), rather than waiting for a window neither legacy client will raise.
-  What it still wants: a real-client pass on the unverified PE wire, and item **names** — a storage list
-  addresses stacks by slot number because a block is an id by design, which is honest but not friendly.
-  **Forms** stay out, since the legacy PE clients predate them.
-  **Regions landed** as the platform's next primitive (see [What works today](#what-works-today)): named
-  boxes with flags, enforced by cancelling the events the core already routes decisions through rather
-  than by a second rulebook, with `PlayerRegionEnter` / `PlayerRegionLeave` for the crossings and a
-  `world/regions.jdb` that puts them in force before the first login, and **per-player / per-group
-  exceptions** carried by permission nodes rather than a roster on the region (which is what taught the
-  permission system per-player nodes). What would grow them: a **greeting / farewell** message per region,
-  and a **priority** escape hatch for the case deny-wins can't express — an allow island inside a deny.
-- **Puppet entities — landed (mobs, NPCs, holograms).** The illusionist take on mobs: a mob is a
-  **server-puppeteered entity**, not a simulated one — the server spawns a visual, moves it and relays it
-  cross-edition, and that's all. The primitive is **in**: a canonical `EntityType` + per-edition id registry
-  (`EntityTypeIds` — the block palette's counterpart, the two-headed monster's entity tax), `spawnEntity` /
-  `moveEntity` / `removeEntity` on all four editions, a `CorePuppet` / `PuppetRegistry` with cross-edition
-  spawn/move/despawn relay, and an **interaction hook** (hitting a puppet fires a callback).
-  A puppet can now **act**: a **name tag** (floating text in the unified markup), **`lookAt`** — the whole
-  "it noticed me" illusion, trigonometry rather than pathfinding — **flags** (`ON_FIRE` / `INVISIBLE` /
-  `SNEAKING`, a canonical set holding only what maps to one bit on *every* edition, mapped by `EntityFlagIds`),
-  and **swing / hurt** animations. **Holograms** are the purest form of it — a name tag with the body taken
-  away: each line is its own invisible entity (Java: a marker armor stand; Bedrock: an item entity with no
-  item, PocketMine's own floating-text hack), authored once in the shared markup. `/puppet` and `/hologram`
-  place them by hand, but the **API drives them now**: the same primitive is what scripts spawn as
-  programmable entities (with a JS `onTick` for a brain) and as decoration props, so a mob *appears* alive
-  without the server ever running AI or pathfinding.
-- **Decoration — the accidental discovery.** That a puppet can stand anywhere, at any fraction of a block,
-  in mid-air and inside walls, turned out to be the feature rather than the limitation: entities are how
-  this server does **scenery**. Three ways to pose a block or item where no block can go are in (a small
-  item model, a full-size block, or a block worn on an invisible head), on all four protocols and with no
-  resource pack, plus **labels** and **groups** so an arrangement is authored and moved as one, and a
-  cast of **23 mob types** to pose. **Saving a scene landed:** `group.save(name)` freezes an arrangement
-  and the *server* stands it back up at boot — no script involved, so decoration finally outlives the code
-  that authored it (`world/scenes.jdb`; behaviour is deliberately not saved, since a saved prop has no
-  plugin). What would grow it further: **splitting head yaw from body yaw** (the packets already exist) and
-  a `/pose` in-game editor that exports one as a committable file. Known limits: no armor stands in
-  either PE era, no per-entity scale, no limb posing, and 0.14 renders only the mobs it is old enough to
-  know. And the one number to watch as scenes grow — a static prop costs no ticks but one spawn packet
-  per joining player, and a 0.14 client will find that ceiling first.
-- **Final touch-ups.** Smaller polish, mostly unlocked by the API. Landed since: the **held-item /
-  equipment relay** (what a player holds and wears, on avatars and puppets alike), **titles / action
-  bars**, **sounds and particles**, **weather**, `getPing` and chat **display names**, and a fuller
-  **command framework** (a `CommandSender` abstraction, a unified console, op + group **permissions**).
-  Typed command args and tab-completion have since landed, as have a **sidebar scoreboard**, a **boss bar**
-  and script-driven **virtual chests** (`menus`) — all Java for now. Still open: those illusions on
-  **Bedrock 1.1.5** (against a real client; **forms** stay out — the legacy PE clients predate them), and a
-  **sharper judge** (per-axis limits, interaction ray-casts).
+- **Bedrock 1.1.5 will not raise a chest window.** Confirmed on the retail client on **both PC and
+  mobile** — every route was tried and the client either crashes or shows nothing. So chests and storage
+  menus trade through click-transfer and a `/pick` list instead. The same client also double-fires
+  place / break, mitigated server-side by a per-cell debounce but not eliminated. This is specific to
+  the protocol-113 client across platforms — not the input method, and not the core.
+- **The `/pick` storage list still addresses stacks by slot number** and prints a raw block state. That
+  was the only honest option before items had names; now that they do, it's simply not wired up yet.
+- **Forms are out on both PE eras** — the legacy clients predate them, so a menu is a window (Java) or a
+  list (Bedrock) and nothing richer.
+- **Entities can't be posed finely.** No armor stands in either PE era, no per-entity scale, no limb
+  posing, and head yaw isn't split from body yaw yet. 0.14 renders only the mobs it is old enough to
+  know; anything younger silently doesn't appear.
+- **Scenes cost packets, not ticks.** A static prop runs no logic, but every joining player pays one
+  spawn packet for it. A 0.14 client will find that ceiling first — it's the number to watch as a scene
+  grows.
+- **Cross-edition skins are approximate.** A signed-texture limit, not a plumbing one: a Bedrock skin
+  can't be handed to a Java client verbatim, so avatars are close, not identical.
+- **A nether looks like an overworld on 0.14.** That era has no dimension packet this project has
+  ground-truthed, and it is the client that crashes on a guessed id — so a world switch there is a chunk
+  resend and nothing more. The blocks, the biome tint and the spawn are the destination's; the sky, the
+  fog and the compass are not. On **1.1.5** the ChangeDimension packet *is* sent, and is unverified like
+  everything else new on that wire: `-Djedrock.pe.changeDimension=false` falls back to 0.14's behaviour if
+  it turns out to hang a client on a loading screen.
+- **Travel is API and command only.** `/world tp`, `worlds.send`, or a teleport to a `Location` in another
+  world. There is no portal block: noticing a player standing in a frame means checking positions every
+  tick, which is the shape of simulation this server doesn't do (see the wishlist for what would change
+  that).
+- **A player always joins into the default world**, wherever they logged out. Nothing remembers which
+  world someone was standing in across a restart.
+- **Parts of the PE wire have never met a real client.** Join, movement, chat, edits and inventories
+  have; the newer illusions largely haven't. Everything ground-truthed against PocketMine is byte-tested,
+  but a byte test only proves the encoder agrees with itself — the item-NBT dialect passed its own tests
+  and still failed on a real client. Where a client is the only other judge, read "tested" as "not yet
+  disproven".
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
-  runtime world simulation or physics, no 1.13+ flattening. Knockback is deliberately excluded for the
-  same reason — the server simulates no physics. Custom logic that wants any of these lives in a script
-  as an *illusion*, not in the core.
+  runtime world simulation or physics, no 1.13+ flattening. Knockback is excluded for the same reason —
+  the server simulates no physics. Custom logic that wants any of these lives in a script as an
+  *illusion*, not in the core.
+
+---
+
+## Might be in the future
+
+The big arcs are done: the world bakes and persists, the platform API is a real extension surface, the
+puppet primitive carries mobs and scenery alike, and four clients share one world. What's left is
+smaller by nature — a missing convenience on a surface that already exists, a polish pass, a real-client
+verification run, and packaging the whole thing so it can be handed to someone. Nothing here is
+promised; it's the list of what would be worth doing next, roughly in the order it would pay off.
+
+- **Small additions to the script API.** A **cooldown** primitive for custom items (every `onUse` script
+  writes its own today), and per-*stack* state — there is nowhere to put "this particular sword's
+  remaining charges", since a definition is shared by every stack that names it. Regions want a
+  **greeting / farewell** message and a **priority** escape hatch for the case deny-wins can't express:
+  an allow island inside a deny. And the `/pick` storage list should show the names custom items now
+  have, instead of a slot number and a raw state.
+- **What worlds still want.** **Remembering which world a player was in** across a restart — a one-line
+  store, once someone decides whether that is the friendly behaviour or the surprising one. A **portal**:
+  the honest version is a region flag ("standing here sends you to *that* world"), which costs one check
+  on the movement path the region system already runs, rather than a block that has to be recognised. And
+  **deleting** a world, which is deliberately absent — unloading leaves the folder, and removing it is a
+  decision that belongs to whoever can see the filesystem, not to a script.
+- **Polish on what's already there.** Split **head yaw from body yaw** on puppets (the packets exist; a
+  puppet just can't glance without turning). A **sharper judge** — per-axis movement limits and a real
+  interaction ray-cast, still cheap, still approximate. And the illusion toolkit (sidebar, boss bar,
+  menus) wants a **real-client pass on Bedrock 1.1.5**, which is the only way anything on that wire
+  becomes true.
+- **Authoring tools.** A `/pose` in-game editor that exports a scene as a committable file, so
+  decoration is built where it's seen rather than written blind and reloaded.
+- **Packaging.** Right now the server runs from an IDE or a hand-assembled classpath. It deserves a
+  **single runnable jar** and a first-run folder that lays itself out (config, `plugins/`, `world/`) —
+  the difference between a project you can build and a server someone can start. Alongside it: a
+  scripting reference generated from the contract rather than kept in step by hand, since
+  `plugins/example.js` is currently both the reference and the test.
+- **The parked multiversion framework.** `feature/multiversion-framework` carries a generalized
+  version-dispatch layer plus a JE **1.20.4** target, deliberately not merged onto the legacy path — the
+  1.13+ flattening it implies is a non-goal for the world model as it stands. It stays on the branch
+  until there's a reason strong enough to pay for it.
 
 ---
 

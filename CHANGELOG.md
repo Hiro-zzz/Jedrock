@@ -8,6 +8,80 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Several worlds, a nether to put in them, and a way to walk between the two.** The two halves landed
+  together because neither is much use alone: a second kind of world needs somewhere to be, and a second
+  world is only interesting if it isn't the same world again.
+  **The nether is generated the way the overworld is** — a height field, evaluated on demand, frozen once
+  by the bake — only with *two* fields instead of one: a netherrack floor and a netherrack roof with the
+  cavern being simply the air left between them, bedrock-capped top and bottom. Nothing is carved. The
+  floor rolls through the lava line, so the same noise that makes hills makes **shores**: a column whose
+  floor sits under y=31 is a lava lake, one above it is walkable ground. Four bake-time passes dress it
+  (a spawn platform, glowstone under the roof, soul sand on the shore, quartz and gravel in the floor),
+  position-hashed like the overworld's and sharing its mixer, so "same seed ⇒ same world" holds across
+  both decorators. It is **128 tall**, which is not a style choice: MCPE 0.14 has no taller world, so 128
+  is the one shape every target edition renders identically.
+  **`WorldGenerator` is the abstraction, and its signature is the interesting part.** It decides what a
+  cell contains and nothing else — storage, bounds, edits, chests, weather and persistence are identical
+  for every world. A column is evaluated **once** and packed into a `long` the bake carries down the
+  y-axis (an overworld packs its surface height; the nether packs a floor and a ceiling), so the per-cell
+  `blockAt` is pure arithmetic. The naive `blockAt(x, y, z)` would have cost two noise evaluations per
+  *block* rather than per *column*, turning a few seconds of bake into minutes. The overworld's own
+  classification moved out of `CoreWorld` whole, so its output is unchanged and its tests never moved.
+  **A world is a folder, and the set of worlds is discovered rather than registered.** The level file now
+  records its own dimension (format v5; older files load as the overworld they were), so at boot the
+  manager scans for folders holding a `level.jdw` and reads each header. There is no second list to drift
+  out of step with the files, and copying a world folder in is all it takes to add one. Creation goes
+  through a **`WorldTemplate`** — a recipe (kind, size, decoration, optionally a fixed seed), *not* a
+  saved world: two worlds from one template share its rules and nothing else, which is what makes it a
+  template rather than a cloner. Five are built in; a script registers its own with
+  `worlds.defineTemplate`. Size is capped at 96 chunks a side, because a bake is O(size²) sections in
+  memory and an unbounded number there is how `worlds.create` becomes an OOM on a live server.
+  **Travel is one operation** (`WorldTravel`) because it is four things that must happen together, and
+  omitting any one is a visible bug rather than a subtle one: membership (what the block relay and the
+  weather read), avatars (hidden from the world left, shown in the world entered — *and* the traveller's
+  own client told to forget the first set, or the departed stand around as ghosts forever), props, and
+  terrain. On the wire it is `switchWorld`, and each edition can be told a different amount:
+  **Java 1.8 / 1.12.2** get a Respawn packet — Join Game's tail, which makes the client throw its terrain
+  away. It only does that when the dimension *changes*, so a move between two worlds of the same kind
+  bounces through a third dimension first: one throwaway packet, the client's own reload trigger, and the
+  way every server has done this since 1.8.
+  **1.1.5** gets ChangeDimension (0x3D), unverified against a real client like everything else new on that
+  wire; `-Djedrock.pe.changeDimension=false` falls back to a plain chunk resend, which leaves the sky
+  wrong but cannot hang a client on a loading screen.
+  **0.14** gets the chunk resend and nothing else — it has no dimension packet this project has
+  ground-truthed, and it is the client that crashes on a guessed id. The blocks, the biome tint and the
+  spawn are the destination's; the sky is not. The honest half of the feature that era can have.
+  **Everything written against "the world" became "the player's world", and those are correctness fixes.**
+  A chest is a position, and with two worlds loaded the same position names two different blocks; a block
+  edit in the nether would otherwise have dug into the overworld; the edge wall and the void floor belong
+  to the world you are standing in; an avatar relay that skips the world check shows people who aren't
+  there. **Regions gained a world too** (file v2, a v1 file's regions all in the default world), since a
+  spawn-protection box would otherwise have protected the same coordinates in every world.
+  Surfaced by the work, and worth its own line: **`player.teleport()` now does what it says.** It was
+  state-only — it moved the server's idea of a player and never told the client — which nothing noticed
+  while there was one world to be in. The server installs a `Teleporter` on every player it registers, so
+  a teleport from a command, a script and the api are the same teleport, and a cross-world one routes
+  through `WorldTravel`.
+  **The script surface reaches every world without any global growing a world argument.**
+  `worlds.get('hell')` hands back the same `ScriptWorld` the `world` global is; `entities.in('hell')`
+  hands back the same `entities` object pointed elsewhere, sharing the plugin's roster (so a hot reload
+  still clears what a view spawned) while its own `all` / `count` / `near` / `removeAll` see only that
+  world; and regions grew `createIn` / `atIn` / `allowsIn` beside their short forms. A script written
+  before any of this existed behaves exactly as it did, because every short form still means the default
+  world.
+  Also: **`/world`** (list, info, tp, spawn, create, unload, templates), the **`worlds`** script global —
+  which hands back the same `ScriptWorld` the `world` global is, so everything a script knows how to do to
+  one world works on any of them — and **`PlayerWorldChangeEvent`**, cancellable and redirectable, fired
+  after the teleport event so a listener that only cares about "someone entered the nether" needn't
+  compare worlds on every `/tp`.
+  One existing test changed *meaning* and is recorded rather than quietly amended: editing outside a small
+  bake used to succeed, because the finite world's extent was a constant (48) while the test baked 4. The
+  extent is now a property of the world, adopted from the level file on load — so the edge wall is where
+  the terrain actually ends, which is what it always claimed to be.
+  19 new tests (the world registry, the nether's shape, per-world regions, and the two new
+  packets byte for byte — the Java Respawn's big-endian int dimension and Bedrock's own 0/1/2
+  numbering of the same thing); 563 total.
+
 - **Custom item names and lore reach the client — item NBT on all four protocols.** The other half of
   custom items. Until now no item NBT was written anywhere: every serializer explicitly sent "no NBT" (a
   bare `TAG_End` on Java, a zero length on both Bedrock eras), so a custom item was correct server-side and
