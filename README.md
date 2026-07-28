@@ -3,8 +3,9 @@
 **A lightweight, cross-platform Minecraft server core written from scratch in Java.**
 
 Jedrock speaks **two protocols natively at once** — Java Edition and Bedrock (Pocket) Edition —
-and treats them as one world. A player on a PC and a player on a phone join the same server,
-share the same chat, the same player list, and the same terrain. The core never learns which
+and treats them as one server. A player on a PC and a player on a phone join the same world,
+share the same chat, the same player list, and the same terrain — and can walk into a nether
+together. The core never learns which
 protocol a player speaks; that stays behind the network layer.
 
 Target versions:
@@ -116,11 +117,34 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   spawn), and biome-weighted trees (dense in forest, sparse on plains; spruce in taiga, oak elsewhere).
   All position-hashed, so a seed always yields the same world, and all baked into storage — no runtime
   simulation. Features cross chunk borders freely (the whole finite world is in memory at bake time).
-- ✅ **World persistence** — the world (baked terrain + player edits) survives a restart, written to a
-  compact Jedrock level file (`world/level.jdw` — an uncompressed metadata header plus every allocated
+- ✅ **The nether** — the second kind of world, generated the way the overworld is: one enormous cavern
+  between a netherrack floor and a netherrack roof, bedrock-capped top and bottom, with a lava sea in its
+  low ground. It is two height fields rather than one, not a carve — the floor rolls through the lava
+  line, so the same noise that makes hills makes *shores*, and a column whose floor sits under it is a
+  lake. Four bake-time passes dress it (a spawn platform, glowstone clusters under the roof, soul sand on
+  the shore, quartz and gravel in the floor), all position-hashed like the overworld's and sharing its
+  mixer, so a seed always yields the same nether. It is **128 tall**, which is not a style choice: MCPE
+  0.14 has no taller world, so 128 is the one shape every target edition renders identically.
+- ✅ **Several worlds, and travel between them** — a world is a folder (`<name>/level.jdw`), and since the
+  level file records its own dimension the set of worlds is **discovered, not registered**: every folder
+  with a level file comes back at boot, so copying one in is all it takes to add a world. New ones are
+  created from a **template** — a recipe (kind, size, decoration, optionally a fixed seed), not a saved
+  world, so two worlds from one template share its rules and nothing else. Five are built in
+  (`overworld`, `nether`, `overworld_small`, `nether_small`, `bare`) and a script can register more.
+  Travel is `/world tp`, `worlds.send(player, 'hell')` or simply teleporting to a `Location` in another
+  world; the terrain, the avatars, the props and the world's roster all change together. **Java** gets a
+  Respawn packet (with the same-dimension bounce every server has used since 1.8, since the client only
+  rebuilds when the dimension changes); **1.1.5** gets ChangeDimension; **0.14** gets a chunk resend and
+  keeps the overworld sky, which is as much as that era can be told (see [Known limits](#known-limits)).
+  Everything that used to mean "the world" now means "the world this player is in" — blocks, chests, the
+  edge wall, the void floor, damage, avatars, props and regions.
+- ✅ **World persistence** — each world (baked terrain + player edits) survives a restart, written to a
+  compact Jedrock level file (`<world>/level.jdw` — an uncompressed metadata header plus every allocated
   16³ section in one DEFLATE stream; ~420 KB for a 48×48 world). Loaded before any client can join,
   saved on shutdown, and autosaved every `-Djedrock.world.save-seconds` (default 300, `0` = off) — a
-  dirty flag skips rewriting an unchanged world. Saves are atomic (temp + move).
+  dirty flag skips rewriting an unchanged world. Saves are atomic (temp + move). The header carries the
+  world's seed, extent and dimension, so a world folder is self-describing: it can be moved or recovered
+  on its own, and a mismatch is caught instead of quietly serving the wrong terrain.
 - ✅ **File-based config** — `jedrock.properties` (auto-created on first run) sets the bind host and
   ports, server name, world seed, tick rate, view distance and the server-list MOTD / max players;
   any key is overridable with `-Dkey=value`, and bad values fall back to defaults instead of failing.
@@ -151,8 +175,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   ever changes). **In-game commands** work cross-edition — Java sends `/…` straight through as chat, and
   Bedrock is handed an `AvailableCommands` manifest so its client parses the line and sends it back. The
   built-in set: `/help [cmd]`, `/list`, `/tps`, `/say`, `/me`, `/msg`, `/gamemode`, `/tp`, `/tphere`,
-  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/op`, `/deop`, `/perm`, `/region`, `/pick`, `/puppet`,
-  `/hologram`. A deliberately minimal **survival inventory** (36 slots)
+  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/op`, `/deop`, `/perm`, `/region`, `/world`, `/pick`,
+  `/puppet`, `/hologram`. A deliberately minimal **survival inventory** (36 slots)
   tracks only what a survival player mines and places: mining a block drops it into the hotbar, placing
   consumes it, and the changed slot is pushed live so the HUD refreshes. On PE 1.1.5 the player window is
   serialized PMMP-exact (45 slots + a 9-entry hotbar-link array), without which mined items filled storage
@@ -337,8 +361,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   the region demo had to do until this landed.
 
 - ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
-  backend, not the compiled core: a script gets thirteen globals — `server` / `events` / `scheduler` /
-  `commands` / `packets` / `world` / `entities` / `regions` / `items` / `permissions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
+  backend, not the compiled core: a script gets fourteen globals — `server` / `events` / `scheduler` /
+  `commands` / `packets` / `world` / `worlds` / `entities` / `regions` / `items` / `permissions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
   name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
   work (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too
@@ -492,7 +516,8 @@ jedrock
     ├── region/          #   RegionManager: named boxes with rules, enforced through the event bus
     ├── item/            #   ItemRegistry: custom items — a name, lore and behaviour on a vanilla state
     ├── inventory/       #   Container + ContainerService: everything that moves an item between slots
-    └── world/           #   the bake (terrain, biomes, decoration), storage and level persistence
+    └── world/           #   WorldManager (every world, made from templates) + the bake per dimension
+                         #     (OverworldGenerator / NetherGenerator), storage and level persistence
 ```
 
 Dependency direction: `network → api`, `core → api + network + gameloop + utils`. The network
@@ -549,6 +574,20 @@ For the chunk hot path, both editions bulk-read a section through `World.fillSec
 out of the baked matrix) and the biome map through `World.fillBiomes`. Serializers reuse per-thread
 scratch buffers, so encoding a chunk allocates nothing per section.
 
+What a cell *contains* is the one thing an overworld and a nether disagree about, and it is the only
+thing a `WorldGenerator` decides — storage, bounds, edits, chests, weather and persistence are identical
+for both. Its shape is worth a line, because a naive signature would have made the bake unusable: a
+column is evaluated **once** (`column(x, z)`) and packed into a `long` the bake carries down the y-axis,
+so an overworld packs its surface height and the nether packs a floor and a ceiling, and the per-cell
+`blockAt` is then pure arithmetic. Two height fields per *block* instead of per *column* would have
+turned a few seconds of bake into minutes.
+
+Worlds are plural. `WorldManager` owns them, makes them from a `WorldTemplate`, and finds the ones
+already on disk by scanning for folders with a level file — the file records its own dimension, so
+nothing has to be listed anywhere. A player stands in exactly one world; their connection streams chunks
+from that one, and `WorldTravel` is what moves them (and their avatar, and the props they can see) to
+another.
+
 ---
 
 ## Key abstractions
@@ -561,13 +600,17 @@ scratch buffers, so encoding a chunk allocates nothing per section.
 | `PlayerConnection` | api | Protocol-agnostic handle the core talks to (message, tab, close) |
 | `World` / `BlockStorage` | api / core | Flat block matrix; canonical ids; the "illusion" |
 | `World.fillSection` | api / core | Bulk 16³ section read for zero-allocation chunk serialization |
-| `TerrainGenerator` / `BiomeGenerator` / `WorldDecorator` | core | One-time bake: heightmap, biomes, trees / lakes / caves — then frozen |
+| `WorldGenerator` | core | What an overworld and a nether disagree about, and nothing else; a column is evaluated once and packed into a `long` the bake carries down the y-axis |
+| `TerrainGenerator` / `BiomeGenerator` / `WorldDecorator` | core | The overworld's one-time bake: heightmap, biomes, trees / lakes / caves — then frozen |
+| `NetherGenerator` / `NetherDecorator` | core | The nether's: two height fields with a lava sea between them, glowstone / soul sand / ore — 128 tall |
+| `WorldManager` / `WorldTemplate` | core / api | Every world the server has, and the recipe one is made from; worlds are discovered from their folders, not from a list |
+| `WorldTravel` | core | The four things a world switch must do together — membership, avatars, props, terrain |
 | `LevelIO` / `BiomeStorage` | core | Persist the baked world + biome map to a compact `world/level.jdw` |
 | `PlayerRegistry` | core | Thread-safe roster indexed by uuid / name / connection |
 | `EventBus` / `EventPriority` | api | Cancellable, priority-ordered events the core routes decisions through; reflection-free, with a `hasListeners` hot-path gate |
 | `PluginManager` / `ScriptPlugin` | core/plugin | The Rhino host: loads `plugins/*.js`, injects the globals, and owns each script's listeners, tasks, commands, taps and entities so a hot-reload tears them all down |
 | `PuppetEntity` / `CorePuppet` | api / core | The server-driven entity: a mob, an NPC, a hologram line or a decoration prop — moved and dressed, never simulated |
-| `Region` / `RegionManager` | api / core | Named boxes with rules; flags enforced by cancelling the events the core already routes decisions through, and registered only while a region exists |
+| `Region` / `RegionManager` | api / core | Named boxes with rules **in one world**; flags enforced by cancelling the events the core already routes decisions through, and registered only while a region exists |
 | `CustomItem` / `ItemRegistry` | api / core | A name, lore and behaviour on a vanilla item state; a stack carries the **key**, the registry gives that key meaning |
 | `ItemDisplay` | api | The only part of a custom item the client learns — name + lore, legacy-rendered, `null` for an ordinary stack |
 | `SlotEchoGuard` | core/inventory | Tells a Bedrock client's own inventory move from its echo of one the server made — by timing, since the two are identical in content |
@@ -606,6 +649,10 @@ which binds (defaults, configurable in `jedrock.properties`):
 - **Bedrock 1.1.5** on UDP `0.0.0.0:19132`
 - **Bedrock 0.14** on UDP `0.0.0.0:19133` (`server.port.pe014`; disable with `pe014.enabled=false`)
 
+The first run also creates the default world's folder (`world/`), and every later boot picks up any
+other folder holding a `level.jdw` — so a world made with `/world create` (or by a script) is simply
+there again, and one copied in from elsewhere joins the server without being registered anywhere.
+
 The first run writes a `jedrock.properties` next to the process with the bind host/ports, server
 name, MOTD, max players, world seed, tick rate, view distance, the blind-judge limits
 (`judge.enabled`, `judge.max-reach`, `judge.max-move-delta`) and the Bedrock sidebar placement
@@ -613,8 +660,10 @@ name, MOTD, max players, world seed, tick rate, view distance, the blind-judge l
 a single key with `-Dkey=value`. A few knobs are `-D`-only, since they exist to be turned down rather
 than tuned: `-Djedrock.pe.raknetProtocolVersion=N` (default `8` = MCPE 1.1.5, for other client builds),
 `-Djedrock.pe.slotEchoGuardMs=<ms>` (default `750`, `0` = off — how long after the server pushes an
-inventory slot a Bedrock client's report of it is read as a stale echo), and the 1.1.5 block-edit
-debounce windows (`-Djedrock.pe.placeBurstMs`, `placeSameCellMs`, `breakSameCellMs`). The Bedrock
+inventory slot a Bedrock client's report of it is read as a stale echo), the 1.1.5 block-edit
+debounce windows (`-Djedrock.pe.placeBurstMs`, `placeSameCellMs`, `breakSameCellMs`), and
+`-Djedrock.pe.changeDimension=false` (send no ChangeDimension to a 1.1.5 client on a world switch —
+the sky stays wrong, but an unverified packet can't hang it on a loading screen). The Bedrock
 listeners bind best-effort — a busy UDP port (the Minecraft Bedrock client itself holds 19132 for LAN
 discovery) disables just that edition, never the whole server.
 
@@ -684,6 +733,18 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   grows.
 - **Cross-edition skins are approximate.** A signed-texture limit, not a plumbing one: a Bedrock skin
   can't be handed to a Java client verbatim, so avatars are close, not identical.
+- **A nether looks like an overworld on 0.14.** That era has no dimension packet this project has
+  ground-truthed, and it is the client that crashes on a guessed id — so a world switch there is a chunk
+  resend and nothing more. The blocks, the biome tint and the spawn are the destination's; the sky, the
+  fog and the compass are not. On **1.1.5** the ChangeDimension packet *is* sent, and is unverified like
+  everything else new on that wire: `-Djedrock.pe.changeDimension=false` falls back to 0.14's behaviour if
+  it turns out to hang a client on a loading screen.
+- **Travel is API and command only.** `/world tp`, `worlds.send`, or a teleport to a `Location` in another
+  world. There is no portal block: noticing a player standing in a frame means checking positions every
+  tick, which is the shape of simulation this server doesn't do (see the wishlist for what would change
+  that).
+- **A player always joins into the default world**, wherever they logged out. Nothing remembers which
+  world someone was standing in across a restart.
 - **Parts of the PE wire have never met a real client.** Join, movement, chat, edits and inventories
   have; the newer illusions largely haven't. Everything ground-truthed against PocketMine is byte-tested,
   but a byte test only proves the encoder agrees with itself — the item-NBT dialect passed its own tests
@@ -710,6 +771,12 @@ promised; it's the list of what would be worth doing next, roughly in the order 
   **greeting / farewell** message and a **priority** escape hatch for the case deny-wins can't express:
   an allow island inside a deny. And the `/pick` storage list should show the names custom items now
   have, instead of a slot number and a raw state.
+- **What worlds still want.** **Remembering which world a player was in** across a restart — a one-line
+  store, once someone decides whether that is the friendly behaviour or the surprising one. A **portal**:
+  the honest version is a region flag ("standing here sends you to *that* world"), which costs one check
+  on the movement path the region system already runs, rather than a block that has to be recognised. And
+  **deleting** a world, which is deliberately absent — unloading leaves the folder, and removing it is a
+  decision that belongs to whoever can see the filesystem, not to a script.
 - **Polish on what's already there.** Split **head yaw from body yaw** on puppets (the packets exist; a
   puppet just can't glance without turning). A **sharper judge** — per-axis movement limits and a real
   interaction ray-cast, still cheap, still approximate. And the illusion toolkit (sidebar, boss bar,

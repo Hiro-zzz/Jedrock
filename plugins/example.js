@@ -13,7 +13,12 @@
 //                where a storage menu is picked by slot number and /pick put / close — see /menu, /bag).
 //   entities   — …and scenes: group.save(name) freezes an arrangement, and the SERVER stands it back up
 //                at every boot (entities.loadScene / scenes / removeScene). See /scene.
-//   regions    — named boxes with rules: create / get / all / at / of(player) / remove / allows /
+//   worlds     — every world, and the two verbs that matter: create(name, template) makes one from a
+//                recipe (overworld / nether / overworld_small / nether_small / bare, or defineTemplate
+//                your own) and send(player, name) walks somebody into it. get(name) hands back an
+//                ordinary `world` object pointed elsewhere. See /hell.
+//   regions    — named boxes with rules IN ONE WORLD: create / get / all / at / of(player) / remove /
+//                allows /
 //                allowsFor(player,…). A region denies build / interact / pvp / damage / entry; deny wins
 //                where they overlap, and getBypassPermission(flag) names the node that exempts a player
 //                or group. Server-owned and restored at boot; fires PlayerRegionEnter / Leave. See /zone.
@@ -30,7 +35,7 @@
 //                written straight to permissions.txt — a script no longer builds /perm command strings.
 //   storage    — the only thing that survives a restart: get / set / has / remove / keys / size / clear,
 //                plus forPlayer(p) for per-player state. Strings, numbers, booleans, objects and arrays.
-//   events     — events.on(name, fn): subscribe to a built-in event (28 below) OR a custom, script-defined
+//   events     — events.on(name, fn): subscribe to a built-in event (31 of them) OR a custom, script-defined
 //                one (any other name). Built-in handlers get the real Java event (getters/setters, cancel);
 //                custom handlers get {getName, getData, cancel, isCancelled}. events.emit(name, data) fires a
 //                custom event to every listener and returns it (read data / isCancelled back).
@@ -838,6 +843,46 @@ commands.register('teststats', function (player, args) {
     }
     player.sendMessage('{gold}== Packets =={gray} in={white}' + stats.packetsIn
         + '{gray} out={white}' + stats.packetsOut + '{gray} (' + player.getVersion() + ')');
+});
+
+
+// ============================================================================
+//  /hell — the nether, and travel between worlds.
+// ============================================================================
+//
+// Making a world BAKES it, which blocks the thread it runs on for a moment — so it happens on
+// ServerStart (once, when the server is coming up) rather than while this file is being parsed.
+// getOrCreate loads the folder if it is already there and bakes a new world only if it isn't.
+events.on('ServerStart', function () {
+    var hell = worlds.getOrCreate('hell', 'nether_small');
+    console.log('nether ready: ' + hell.getName() + ' (' + worlds.kindOf('hell') + ')');
+
+    // A world you are not standing in is still an ordinary world object: this drops a glowstone marker
+    // at the nether's spawn with nobody there to see it happen.
+    var at = hell.getSpawn();
+    hell.setBlock(Math.round(at.x()) + 2, Math.round(at.y()), Math.round(at.z()), 89, 0);
+});
+
+// /hell — go there and back. worlds.send fires PlayerTeleport and PlayerWorldChange, so either can
+// refuse the journey; the return value says whether it happened.
+commands.register('hell', function (player, args) {
+    var here = worlds.of(player).getName();
+    var target = here === 'hell' ? 'world' : 'hell';
+    if (!worlds.exists(target)) {
+        player.sendMessage('{red}There is no world called ' + target + ' yet.');
+        return;
+    }
+    if (!worlds.send(player, target)) {
+        player.sendMessage('{red}Something refused that journey.');
+        return;
+    }
+    player.sendMessage('{gray}You are in {white}' + target + '{gray} now. /hell to go back.');
+});
+
+// Arriving somewhere is an event like any other — and it is cancellable, so this is also how you keep
+// somebody out of a world.
+events.on('PlayerWorldChange', function (e) {
+    console.log(e.getPlayer().getName() + ' -> ' + e.getToWorld().getName());
 });
 
 // Optional: called when the plugin is unloaded or reloaded. Everything a script registered — listeners,
