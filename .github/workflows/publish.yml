@@ -32,10 +32,19 @@ jobs:
           server-username: MAVEN_USERNAME
           server-password: MAVEN_TOKEN
 
-      - name: Build, test and publish
-        # The tests run here rather than in a separate job on purpose: the artifact that reaches the
-        # registry is the one that passed them, not a rebuild that probably would have.
-        run: mvn -B --no-transfer-progress deploy
+      - name: Build and test
+        # Everything is built and tested BEFORE anything is published, and that split is the whole point.
+        # Maven runs its lifecycle per module, so a single `deploy` publishes each module as it finishes —
+        # which means a test failing in the last module leaves the first five in the registry. GitHub
+        # Packages refuses to overwrite a published version, so that half-release is permanent: the retry
+        # fails with 409 on the artifact the previous attempt already uploaded, and the only way out is
+        # deleting versions by hand.
+        run: mvn -B --no-transfer-progress verify
+
+      - name: Publish to GitHub Packages
+        # Nothing is re-tested here — the artifacts are the ones that just passed, and the repackage is
+        # incremental. This step only ever runs when the whole reactor is already known to be good.
+        run: mvn -B --no-transfer-progress deploy -DskipTests
         env:
           MAVEN_USERNAME: ${{ github.actor }}
           MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
