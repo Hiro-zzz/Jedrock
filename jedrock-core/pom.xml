@@ -47,7 +47,7 @@
 
     <build>
         <plugins>
-            <!-- Удобный запуск: mvn exec:java -->
+            <!-- A convenient way to run it: mvn exec:java -->
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>

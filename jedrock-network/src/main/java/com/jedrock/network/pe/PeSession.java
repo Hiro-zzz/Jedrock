@@ -1167,7 +1167,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         // a block-bound ContainerOpen crashes it (it won't build a chest block-entity from our packets),
         // and an entity-bound (minecart-chest) container doesn't crash but raises no GUI. Stubbed to a
         // note until the wire is cracked; 0.14 and Java chests are unaffected. See the protocol memory.
-        sendMessage("{gray}Сундуки на этой версии (1.1.5) пока недоступны.");
+        sendMessage("{gray}Chests do not work on this version (1.1.5) — use /pick instead.");
     }
 
     @Override

@@ -108,7 +108,7 @@ public final class ScriptWorlds {
     }
 
     /**
-     * Register a template of your own, so {@link #create} can build from it — the "по шаблону" half of
+     * Register a template of your own, so {@link #create} can build from it — the "from a recipe" half of
      * worlds. A template is a recipe, not a saved world: two worlds built from one share its rules and
      * nothing else.
      *

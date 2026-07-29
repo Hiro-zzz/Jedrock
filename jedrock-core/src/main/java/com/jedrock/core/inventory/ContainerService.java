@@ -241,7 +241,7 @@ public final class ContainerService {
 
     /** Draw the list: the title, a line per occupied slot, then the two verbs. */
     private void printStorageList(CorePlayer player, String title, Container container) {
-        player.sendMessage(title == null || title.isEmpty() ? "{gold}Хранилище:" : title);
+        player.sendMessage(title == null || title.isEmpty() ? "{gold}Storage:" : title);
         boolean any = false;
         for (int slot = 0; slot < container.size(); slot++) {
             if (container.isEmpty(slot)) {
@@ -254,10 +254,10 @@ public final class ContainerService {
                     + " {dark_gray}— {gray}#" + container.stateAt(slot) + " ×" + container.countAt(slot));
         }
         if (!any) {
-            player.sendMessage(" {dark_gray}(пусто)");
+            player.sendMessage(" {dark_gray}(empty)");
         }
-        player.sendMessage(" {gray}• {white}/pick " + PUT_LABEL + " {dark_gray}— положить предмет из руки");
-        player.sendMessage(" {gray}• {white}/pick " + CLOSE_LABEL + " {dark_gray}— закрыть");
+        player.sendMessage(" {gray}• {white}/pick " + PUT_LABEL + " {dark_gray}— put the held item in");
+        player.sendMessage(" {gray}• {white}/pick " + CLOSE_LABEL + " {dark_gray}— close");
     }
 
     /**
@@ -268,7 +268,7 @@ public final class ContainerService {
     private void onStorageListPick(CorePlayer player, String title, Container container, int slot) {
         if (slot == CLOSE_SLOT) {
             player.setPendingMenu(null);
-            player.sendMessage("{gray}Закрыто.");
+            player.sendMessage("{gray}Closed.");
             return;
         }
         boolean creative = player.getGameMode() == GameMode.CREATIVE;
@@ -276,21 +276,21 @@ public final class ContainerService {
             int held = player.getHeldItemSlot();
             int have = heldCount(player, held);
             if (have <= 0) {
-                player.sendMessage("{gray}В руке ничего нет");
+                player.sendMessage("{gray}Nothing in hand");
             } else {
                 int moved = putStack(player, container, held, creative);
                 player.sendMessage(moved > 0
-                        ? "{gray}Положено ×" + moved + (moved < have ? " {dark_gray}(хранилище полно)" : "")
-                        : "{gray}Хранилище полно");
+                        ? "{gray}Put in ×" + moved + (moved < have ? " {dark_gray}(storage full)" : "")
+                        : "{gray}Storage full");
             }
         } else if (slot >= 0 && slot < container.size()) {
             int have = container.countAt(slot);
             int moved = takeStack(player, container, slot, creative);
             if (moved > 0) {
-                player.sendMessage("{gray}" + (creative ? "Убрано ×" : "Взято ×") + moved
-                        + (moved < have ? " {dark_gray}(инвентарь полон)" : ""));
+                player.sendMessage("{gray}" + (creative ? "Removed ×" : "Took ×") + moved
+                        + (moved < have ? " {dark_gray}(inventory full)" : ""));
             } else {
-                player.sendMessage("{gray}Инвентарь полон");
+                player.sendMessage("{gray}Inventory full");
             }
         }
         // A menu's contents are transient (never world state), so nothing is marked dirty here.
@@ -366,12 +366,12 @@ public final class ContainerService {
             int moved = takeStack(player, chest, i, creative);
             if (moved > 0) {
                 player.getCoreWorld().markDirty();
-                player.sendMessage("{gray}" + (creative ? "Убрано из сундука ×" : "Взято из сундука ×") + moved
-                        + (moved < have ? " {dark_gray}(инвентарь полон)" : ""));
+                player.sendMessage("{gray}" + (creative ? "Removed from the chest ×" : "Took from the chest ×") + moved
+                        + (moved < have ? " {dark_gray}(inventory full)" : ""));
             }
             return; // one stack per click
         }
-        player.sendMessage("{gray}Сундук пуст");
+        player.sendMessage("{gray}The chest is empty");
     }
 
     /**
@@ -385,17 +385,17 @@ public final class ContainerService {
         int have = heldCount(player, heldSlot);
         if (have <= 0) {
             if (have == 0) {
-                player.sendMessage("{gray}В руке ничего нет");
+                player.sendMessage("{gray}Nothing in hand");
             }
             return;
         }
         int moved = putStack(player, chest, heldSlot, creative);
         if (moved > 0) {
             player.getCoreWorld().markDirty();
-            player.sendMessage("{gray}Положено в сундук ×" + moved
-                    + (moved < have ? " {dark_gray}(сундук полон)" : ""));
+            player.sendMessage("{gray}Put in the chest ×" + moved
+                    + (moved < have ? " {dark_gray}(chest full)" : ""));
         } else {
-            player.sendMessage("{gray}Сундук полон");
+            player.sendMessage("{gray}The chest is full");
         }
     }
 
