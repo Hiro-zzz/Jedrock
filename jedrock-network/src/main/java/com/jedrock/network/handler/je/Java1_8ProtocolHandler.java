@@ -213,7 +213,14 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     // ===== Join sequence =====
 
     private void sendJoinSequence(JedrockConnection c, UUID uuid) {
+        // The world this client joins into: the one it logged out in, if the server remembers. Asked
+        // before anything is sent, so Join Game names the right dimension and the first chunks are
+        // already the right terrain — no Respawn bounce for a world the client was never shown.
+        if (c.getListener() != null) {
+            c.joinWorld(c.getListener().worldFor(uuid));
+        }
         Location spawn = c.getWorld().getSpawnLocation();
+        int dimension = c.getWorld().getDimension().getId();
         int max = Math.min(255, c.getServerProperties().maxPlayers());
         // The mode this client joins in: its remembered choice this run, else the config default.
         GameMode mode = c.getListener() != null
@@ -223,7 +230,7 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
         send(c, CB_JOIN_GAME, b -> {
             b.writeInt(1);                                   // entity id
             b.writeByte(mode.getId());                       // gamemode (from config)
-            b.writeByte(0);                                  // dimension: overworld (signed byte in 1.8)
+            b.writeByte(dimension);                          // dimension of the joined world (signed byte in 1.8)
             b.writeByte(2);                                  // difficulty: normal
             b.writeByte(max);                                // max players (unsigned byte)
             ByteBufUtils.writeString(b, "default");          // level type
@@ -257,7 +264,8 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     @Override
     public void tick(long currentTick, JedrockConnection connection) {
         if (!connection.isOpen() || connection.getState() != ProtocolState.PLAY) return;
-        if (System.currentTimeMillis() - connection.getLastKeepAliveSent() > 15000) {
+        if (System.currentTimeMillis() - connection.getLastKeepAliveSent()
+                > com.jedrock.network.Pipeline.get().java().keepAliveSeconds() * 1000L) {
             sendKeepAlive(connection);
         }
     }

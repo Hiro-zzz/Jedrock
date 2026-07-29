@@ -8,6 +8,127 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **An optional storage layer, so a database is a choice rather than a rewrite.** `DataStore` is a seam,
+  not a migration: whole-table load and save (every store built on it reads once at boot and rewrites on
+  change — these are lists of tens of entries, not a query workload, and a per-key API would invite the
+  write-per-operation pattern that puts a database on the game loop). Two backends. **`flatfile` is the
+  default and writes exactly what the server wrote before**, which is the design decision that matters:
+  adopting the layer costs no migration, no new format, and the files stay the thing an administrator can
+  open in an editor at two in the morning. **`jdbc`** is for anyone who wants the rows in SQLite, MySQL or
+  anything else with a driver.
+  **The driver is never bundled** — that is what keeps the jar 6.9 MB for everyone who doesn't want a
+  database. It is loaded at runtime from the jars in `libs/`, which has one consequence worth writing down
+  because it is the thing that silently doesn't work otherwise: `DriverManager` refuses drivers loaded by a
+  classloader it doesn't own, so the store holds the `Driver` instance and calls `connect` on it directly.
+  Ask DriverManager for the url instead and you get "no suitable driver" with the driver sitting right
+  there in the folder.
+  A backend that can't be opened — driver missing, database down, typo in the url — **falls back to files**
+  with a message naming what to download and where to put it, and the server starts. That is the tested
+  path, because it is the one an operator meets first.
+  Scope is deliberately small: `player-worlds` goes through it now. `ops.txt` and `permissions.txt` stay
+  text files on purpose (those are the two a human edits by hand), and world terrain was never a candidate
+  — a baked level is a 400 KB DEFLATE blob and a table has nothing to offer it.
+
+- **RCON: the console over a socket, and not one command more.** Source RCON is what every Minecraft
+  management tool already speaks, and the console surface it wants was already here — so the work was
+  almost entirely *not* writing a second one. `ConsoleCommands.execute` now takes the `CommandSender` its
+  output goes to instead of logging directly: the terminal's sender prints, RCON's collects the same lines
+  into a reply packet. `status`, `players`, `say`, `kick`, `plugins`, `stop` and every in-game command work
+  remotely because they are the same code, and whatever is added to the console tomorrow works there
+  without being added twice.
+  `stop` needed one idea: `execute` returns a `Runnable` the caller runs **after** delivering the output.
+  On stdin that is nothing special; over a socket, a shutdown that ran inline would take the answer with
+  it, and the administrator who typed `stop` would see a dropped connection instead of "stopping…".
+  **Blocking sockets, one thread per connection, capped at four.** Netty is right there and deliberately
+  unused: this carries an administrator typing, not a packet stream, and a transport tuned for twenty
+  position updates a second buys nothing at that rate while entangling a management port with the pipeline
+  that serves players. It also makes the whole thing testable against a real socket, which is where the
+  things that actually break live — a reply that never gets flushed, a refused password that leaves the
+  connection open, a command answered before the client was allowed to ask. All three are pinned.
+  **What it refuses to do** is the rest of the feature. RCON is plaintext, so: off by default, loopback by
+  default, and it will not start with a blank password however enabled it is — an open RCON port is a
+  remote console for whoever finds it. A wrong password closes the connection (as the protocol requires),
+  which turns a guess into a reconnect; the password compare is constant-time; an unauthenticated client
+  that sends a command is answered with nothing at all rather than a reason. The packet codec is
+  byte-tested — little-endian integers, a length that excludes itself, *two* trailing nulls, and a refusal
+  to allocate on a length field a stranger controls.
+
+### Fixed
+
+- **`ChatText.stripCodes` left half of every colour code behind**, and had done since it was written. A
+  legacy code is two characters; this dropped only the `§`, so the console printed `§aMade §fSteve op` as
+  "aMade fSteve op", and a player calling themselves `§4Admin` was listed as "4Admin". Surfaced by RCON,
+  which renders through the same path — the console had been quietly doing it all along. The letter after
+  a `§` was never part of anything anyone meant to say, so both characters go now; the test that pinned
+  the old behaviour was pinning the bug.
+
+- **A server you can hand to someone: one jar, a folder it lays out itself, and two config files.** The
+  project could be built and run; it could not be *given* to anyone. Four things closed that gap.
+  **One runnable jar.** `maven-shade` packs every module and dependency behind a `Main-Class`, so
+  `java -jar jedrock.jar` in an empty folder is a running server. It takes an optional folder argument, so
+  one jar runs several servers without several copies of it.
+  **A layout, made on first run.** `worlds/` (one folder per world, where they used to sit loose beside the
+  process), `plugins/`, `logs/`, `data/` (ops, permissions, remembered worlds, script storage). Every path
+  now comes from one `ServerLayout` instead of a dozen `Path.of("…")` calls scattered across the core —
+  which is also what made the folder names configurable at all. An **older flat install is migrated**, not
+  abandoned: a folder holding a `level.jdw` is a world and moves to `worlds/`, the known runtime files move
+  to `data/`, and nothing that would have to overwrite something is moved at all, because two files
+  claiming to be the same world is a question for a person.
+  **Logs on disk.** Console output is teed to `logs/latest.log`, the previous run rotated out to its own
+  timestamped file and the history pruned to `logging.keep-files`. This turned up a real flaw in the
+  logging facade: nearly every logger here is a `static final` field, resolved when its class loads — long
+  before the server has read its config and decided there should be a log file — so swapping the backend
+  only affected classes that happened to load later, and the startup lines you most want on disk were
+  exactly the ones that never reached it. `JLogger.getLogger` now returns a handle that resolves the
+  backend per call and caches it until the provider changes, which happens once, at startup.
+  **`jedrock.properties` roughly doubled**, and every new key is one that used to be a constant or a `-D`:
+  the four folder names, `world.default-name` / `default-template` / `load-all` / `autosave-seconds`,
+  `plugins.enabled` / `hot-reload` / `reload-millis`, `logging.to-file` / `keep-files` / `debug` /
+  `status-seconds`. Grouped in the record as nested types rather than another ten flat components, because
+  a record with thirty fields is a record nobody reads.
+- **`pipeline.yml`: the wire's own settings, and a YAML reader that isn't a dependency.** Everything the
+  network layer runs on was a constant compiled in for one machine and one set of clients — Netty threads
+  and socket options, the JE keep-alive interval, each Bedrock era's view-radius cap, sidebar repaint
+  cadence and particle burst, 1.1.5's resync delay and whether the dimension goes on the wire at all, and
+  the `PacketGuard` limits. They are now a file, and a **separate** file from `jedrock.properties` because
+  the two fail differently: get the MOTD wrong and the server list looks silly; get
+  `max-inflated-batch-bytes` wrong and a hostile client decides how much memory the process uses. Values
+  outside a sane range are refused and the default used rather than obeyed, for exactly that reason.
+  It is YAML because the data is nested and writing `bedrock.v1_1_5.max-view-radius=4` in a properties file
+  would be a nested file pretending not to be one. The reader is ~300 lines in `jedrock-utils`: mappings by
+  indentation, block and inline sequences, scalars, comments, and a *named warning* for any line outside
+  that subset — no anchors, no tags, no multi-document, no code-execution surface, and no dependency to
+  read four maps of numbers. Settings are installed once, before the first listener binds, and read through
+  a holder rather than threaded through every static packet helper that has no session to carry them.
+
+- **A player comes back to the world they left.** The smallest thing several worlds were missing: log out in
+  the nether, restart the server, log back in — in the nether. One fact, `uuid=world`, in a
+  `player-worlds.txt` beside `ops.txt`, keyed by **uuid** rather than name because a 0.14 client picks its
+  own username over a plaintext login and "where you were" is not a claim a chosen name may make.
+  **It is written when someone crosses**, not when they quit. That is the cheaper half (a world change is
+  rare; a disconnect is not the only way a session ends) and the more honest one: a client that crashes
+  still comes back where it actually was, and a player who never leaves the default world never gets a line
+  in the file at all.
+  **It is answered during the join, not after it** — a new `ConnectionListener.worldFor(uuid)` beside the
+  `gameModeFor(uuid)` that was already there, queried on the I/O thread before the first chunk is
+  serialized. That ordering is the whole design: re-pointing the connection *before* the join sequence
+  means the client is shown the right terrain from its first packet, where doing it afterwards would be a
+  Respawn or a ChangeDimension sent to a client that had just been given a world it never asked for and
+  would now have to throw away. So `JedrockConnection.joinWorld` is deliberately not `switchWorld`: nothing
+  has been streamed, so there is nothing to tear down.
+  Both Java versions now write the **joined world's dimension** into Join Game rather than a hardcoded
+  overworld, and 1.1.5's StartGame carries it too (a field it was always sending, as `0`) — so a nether
+  rejoin has a nether sky. That last one is new on a wire no real client has been watched through, so it
+  rides the existing `-Djedrock.pe.changeDimension=false` escape hatch: with the flag off the join is
+  announced as the overworld, which is a wrong sky and a join that cannot hang. **0.14** keeps its
+  overworld sky for the same reason it does when travelling — it is the client that crashes on a guessed
+  dimension, and this one is on the login path, where the failure would be a player who cannot get in.
+  Only the world is remembered, never a position: a spot has to answer what happens when the ground under
+  it was dug away, and a world spawn is somewhere the server can always put a person. A remembered world
+  that is no longer loaded is forgotten rather than mourned — they join the default, and the fallback is
+  written down instead of being re-decided on every login. `player.remember-world=false` (new, default
+  **true**) restores the old behaviour: everyone joins the default world, wherever they logged out.
+
 - **Several worlds, a nether to put in them, and a way to walk between the two.** The two halves landed
   together because neither is much use alone: a second kind of world needs somewhere to be, and a second
   world is only interesting if it isn't the same world again.

@@ -81,7 +81,13 @@ class ChatTextTest {
         assertEquals("Steve", ChatText.stripCodes("Steve"));
         assertNull(ChatText.stripCodes(null));
         // Raw legacy codes and control chars go; the surrounding text (and a legitimate '_') stays.
-        assertEquals("4Admin", ChatText.stripCodes(S + "4Admin"));
+        // A code is two characters, so both go: the '4' after the § was never part of the name.
+        assertEquals("Admin", ChatText.stripCodes(S + "4Admin"));
+        assertEquals("redgreen", ChatText.stripCodes(S + "cred" + S + "agreen"));
+        assertEquals("", ChatText.stripCodes(S), "a lone § at the end takes nothing with it");
+        // The console and RCON path: render the markup, then show it where colour can't be shown.
+        assertEquals("Made Steve a server operator.",
+                ChatText.stripCodes(ChatText.toLegacy("{green}Made {white}Steve{green} a server operator.")));
         assertEquals("Steve_123", ChatText.stripCodes("Steve_123"));
         assertEquals("ab", ChatText.stripCodes("a\nb"));
         assertEquals("with space", ChatText.stripCodes("with space")); // real spaces survive

@@ -1,0 +1,70 @@
+# Jedrock pipeline settings — the wire itself.
+#
+# Written automatically on first run; edit and restart to apply. Everything here has a working default,
+# so a key you delete is a key that keeps its built-in value, and a whole section you delete is fine.
+#
+# jedrock.properties is the file you edit to run a server. This is the file you edit when you already know
+# why: every number below used to be a constant compiled into the network layer, chosen for one machine
+# and one set of clients. Values outside a sane range are clamped back with a warning rather than obeyed.
+
+# ===== The transport =====
+netty:
+  # Threads accepting new connections. One is right until you can prove otherwise.
+  boss-threads: 1
+  # Threads doing the actual I/O. 0 = Netty's own default (twice the core count).
+  worker-threads: 0
+  # Disable Nagle's algorithm. On, because a server that waits 40ms to coalesce a movement packet
+  # feels exactly as laggy as it sounds.
+  tcp-nodelay: true
+  # Ask the OS to notice a peer that went away without saying so.
+  so-keepalive: true
+  # Allow binding a port that is still in TIME_WAIT — what makes an immediate restart work.
+  reuse-address: true
+  # Pending-connection queue for the Java listener.
+  backlog: 128
+
+# ===== Java Edition =====
+java:
+  # How often a keep-alive goes out. The vanilla client gives up after 30s of silence, so this is
+  # half of that; there is very little reason to raise it and a good one not to.
+  keep-alive-seconds: 15
+
+# ===== Bedrock =====
+# Two eras, two protocols. They get their own sections rather than sharing one because the numbers
+# genuinely differ: 0.14 streams whole 128-tall columns where 1.1.5 streams sections, so the radius
+# one can afford is not the radius the other can.
+bedrock:
+  v1_1_5:
+    # The largest chunk radius honoured, whatever the client asks for.
+    max-view-radius: 4
+    # Bedrock has no scoreboard, so a sidebar borrows the HUD line above the hotbar — a popup that
+    # fades. This is how often it is repainted to stay on screen (in ticks; 20 = once a second).
+    sidebar-repaint-ticks: 20
+    # The most packets one particle effect may become.
+    max-particle-burst: 32
+    # The trailing-edge delay before a chunk resend after a block edit, in milliseconds. This client
+    # ignores its own UpdateBlock, so the cell has to be re-sent as part of the chunk. Too short and
+    # the resend fires mid-burst carrying a stale world; too long and a ghost block lingers on screen.
+    resync-delay-millis: 180
+    # Whether the dimension is put on this wire at all (StartGame on join, ChangeDimension on travel).
+    # It is the one step here no real client has been watched through: turn it off and a nether has
+    # the right blocks under the wrong sky, which is the failure that cannot hang a client.
+    announce-dimension: true
+  v0_14:
+    max-view-radius: 4
+    sidebar-repaint-ticks: 20
+    max-particle-burst: 32
+    # Note: this era has no dimension packet this project has ground-truthed and no resync problem to
+    # solve, so it has neither of the two keys above — setting them here does nothing.
+
+# ===== Wire-level safety limits =====
+# The blind judge, extended down to the packet layer: a Bedrock batch carries counts read straight off
+# the wire, and a hostile client would happily claim a million of anything. Generous by design — far
+# above what a real client sends — and lowerable by anyone who would rather drop a client than serve it.
+guard:
+  # Most bytes one compressed batch may inflate to. This is the zip-bomb ceiling.
+  max-inflated-batch-bytes: 2097152
+  # Most inner packets in one batch.
+  max-packets-per-batch: 1024
+  # Most entries in any length-prefixed list read off the wire (inventory actions, block lists).
+  max-list-entries: 256

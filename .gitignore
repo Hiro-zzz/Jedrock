@@ -39,13 +39,25 @@ build/
 .DS_Store
 
 ### Jedrock ###
-# Runtime config written on first run (the template lives in jedrock-core resources).
+# The runnable server, built into the project root by `mvn package` so it lands beside the folders a
+# run actually uses (target/ is excluded in the IDE, so a jar in there is a jar you never see).
+/jedrock.jar
+# Runtime config written on first run (the templates live in jedrock-core resources).
 /jedrock.properties
-# Saved world data (level file + future region files), written at runtime.
+/pipeline.yml
+# Saved world data, written at runtime. The default world is generated on first run and never committed;
+# what a run writes on top of any other world (scenes, regions, a half-written save) isn't either.
+/worlds/world/
+/worlds/*/level.jdw.tmp
+/worlds/*/scenes.jdb
+/worlds/*/regions.jdb
+# The log folder, and the server's own bookkeeping (ops, permissions, remembered worlds, script storage).
+/logs/
+/data/
+# The pre-layout locations of the same files, in a working copy that hasn't been migrated yet.
 /world/
-# Server operator list and group permissions, written at runtime.
 /ops.txt
 /permissions.txt
-# What script plugins remembered between restarts, written at runtime.
+/player-worlds.txt
 /plugin-storage.jdb
 /plugin-storage.jdb.tmp

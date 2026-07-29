@@ -142,6 +142,16 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   keeps the overworld sky, which is as much as that era can be told (see [Known limits](#known-limits)).
   Everything that used to mean "the world" now means "the world this player is in" — blocks, chests, the
   edge wall, the void floor, damage, avatars, props and regions.
+- ✅ **You come back where you left** — a player who logs out in the nether rejoins the nether, across a
+  restart of the server. The world is recorded (in `player-worlds.txt`, keyed by uuid) the moment someone
+  *crosses* between worlds, so a player who never leaves the default one has no entry and a crash can't
+  lose what a clean shutdown would have written. It is answered **during the join**, in the same breath as
+  the game mode and before a single chunk is serialized, so the client is shown the right terrain from the
+  first packet rather than being walked across after arriving — Java's Join Game and 1.1.5's StartGame
+  simply name that world's dimension. Only the world is remembered, never a spot in it: they arrive at
+  that world's spawn, which is somewhere the server can always put a person. A world that went away while
+  they were offline is forgotten and they join the default. `player.remember-world=false` turns the whole
+  thing off.
 - ✅ **World persistence** — each world (baked terrain + player edits) survives a restart, written to a
   compact Jedrock level file (`<world>/level.jdw` — an uncompressed metadata header plus every allocated
   16³ section in one DEFLATE stream; ~420 KB for a 48×48 world). Loaded before any client can join,
@@ -149,9 +159,16 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   dirty flag skips rewriting an unchanged world. Saves are atomic (temp + move). The header carries the
   world's seed, extent and dimension, so a world folder is self-describing: it can be moved or recovered
   on its own, and a mismatch is caught instead of quietly serving the wrong terrain.
-- ✅ **File-based config** — `jedrock.properties` (auto-created on first run) sets the bind host and
-  ports, server name, world seed, tick rate, view distance and the server-list MOTD / max players;
-  any key is overridable with `-Dkey=value`, and bad values fall back to defaults instead of failing.
+- ✅ **A jar you can hand to someone** — `java -jar jedrock.jar` in an empty folder is a running server.
+  It lays itself out on first boot (`worlds/`, `plugins/`, `logs/`, `data/`, plus both config files),
+  migrates an older flat install into that layout without overwriting anything, and writes its console
+  output to `logs/latest.log` with the previous runs rotated beside it. One jar runs several servers:
+  `java -jar jedrock.jar ./survival` lays out and runs that folder.
+- ✅ **Two config files, split by who edits them** — `jedrock.properties` for running a server (folders,
+  world, game, plugins, logging, judge, sidebar) and `pipeline.yml` for the wire itself (Netty threads and
+  socket options, keep-alive, per-era Bedrock view radius and repaint cadence, the packet guards). Every
+  key has a default, any key is overridable with `-Dkey=value`, and a bad value falls back with a warning
+  instead of failing to start. See [Configuration](#configuration).
 - ✅ **Server-list ping, both editions** — Java shows the server in its multiplayer list (version,
   MOTD, live player count, and a latency ping); the Bedrock query now reports the real online count
   too. MOTD and max players come from config.
@@ -497,8 +514,10 @@ Concretely, the codebase holds to three rules: **lightweight** (few deps, few al
 
 ```
 jedrock
-├── jedrock-api          # Pure contracts: Server, Player, World, events. No implementation deps.
-├── jedrock-utils        # Lazy<T>, LazyPacket, ByteBufUtils (VarInt/VarLong/zigzag), logging, ticks
+├── jedrock-api          # Pure contracts: Server, Player, World, events, ServerProperties +
+│                        #   PipelineSettings. No implementation deps and no file IO.
+├── jedrock-utils        # Lazy<T>, LazyPacket, ByteBufUtils (VarInt/VarLong/zigzag), ticks,
+│                        #   logging (JLogger + FileLog) and a small YAML reader (yaml/)
 ├── jedrock-network      # Transport + protocol handling for both editions
 │   ├── handler/je/      # JavaProtocol per JE version; JavaHandshakeHandler picks 1.8 / 1.12.2
 │   ├── je/packet/       # Java Edition packets (Serverbound* / Clientbound*)
@@ -513,6 +532,7 @@ jedrock
 ├── jedrock-gameloop     # Dedicated 20 TPS drift-correcting loop + Scheduler (Tickable)
 └── jedrock-core         # The server: JedrockServer + ConnectionBridge (network → core),
     │                    #   PlayerRegistry, CoreWorld/BlockStorage
+    ├── config/          #   ServerLayout (where everything lives) + the two config loaders
     ├── plugin/          #   the Rhino script host (the only non-api dep besides network) + its globals
     ├── entity/          #   CorePuppet / PuppetRegistry: the entity behind mobs, holograms and props
     ├── command/         #   CommandManager + the built-ins, on one CommandSender surface
@@ -638,38 +658,131 @@ server.getEventBus().register(PlayerJoinEvent.class, e -> log(e.getPlayer().getN
 
 ## Building & running
 
-Requires **JDK 21**. Multi-module Maven build:
+Requires **JDK 21** to build; **JDK 21** to run.
 
 ```bash
 mvn clean install      # build + run tests
-mvn -o clean test      # offline (deps are cached after the first resolve)
+mvn -o clean package   # offline (deps are cached after the first resolve)
 ```
 
-The Bedrock RakNet dependency comes from the OpenCollab repository (not Maven Central) — the
-network module declares it. Run the server from your IDE (`com.jedrock.core.JedrockServer#main`),
-which binds (defaults, configurable in `jedrock.properties`):
+That produces **`jedrock.jar`** in the project root — one file with every module and dependency in it.
+(The root, not `target/`: that folder is excluded in the IDE, and a build output you can't see is a build
+output you assume didn't happen.) Put it in an empty folder and start it:
 
-- **Java Edition** on TCP `0.0.0.0:25565`
+```bash
+java -jar jedrock.jar
+```
+
+The first run lays the folder out and tells you it did:
+
+```
+jedrock.jar
+jedrock.properties   the settings
+pipeline.yml         the network's own settings
+worlds/              one folder per world, each with its level.jdw
+plugins/             *.js, hot-reloaded
+logs/                latest.log, and the runs before it
+data/                ops.txt, permissions.txt, player-worlds.txt, plugin-storage.jdb
+```
+
+The four folder names are configurable (`paths.*`); the two config files are not, since they are how you
+say where everything else is. A **flat install from an older build** — worlds and `ops.txt` sitting beside
+the jar — is migrated into the layout on the next boot, moving nothing it would have to overwrite. One jar
+can run several servers: `java -jar jedrock.jar ./survival` lays out and runs that folder instead.
+
+It binds (defaults, configurable):
+
+- **Java Edition** on TCP `0.0.0.0:25565` — 1.8 and 1.12.2 share it
 - **Bedrock 1.1.5** on UDP `0.0.0.0:19132`
 - **Bedrock 0.14** on UDP `0.0.0.0:19133` (`server.port.pe014`; disable with `pe014.enabled=false`)
 
-The first run also creates the default world's folder (`world/`), and every later boot picks up any
-other folder holding a `level.jdw` — so a world made with `/world create` (or by a script) is simply
-there again, and one copied in from elsewhere joins the server without being registered anywhere.
+The Bedrock listeners bind best-effort — a busy UDP port (the Minecraft Bedrock client itself holds 19132
+for LAN discovery) disables just that edition, never the whole server.
 
-The first run writes a `jedrock.properties` next to the process with the bind host/ports, server
-name, MOTD, max players, world seed, tick rate, view distance, the blind-judge limits
-(`judge.enabled`, `judge.max-reach`, `judge.max-move-delta`) and the Bedrock sidebar placement
-(`pe.sidebar.raise`, `pe.sidebar.shift`); edit and restart to apply, or override
-a single key with `-Dkey=value`. A few knobs are `-D`-only, since they exist to be turned down rather
-than tuned: `-Djedrock.pe.raknetProtocolVersion=N` (default `8` = MCPE 1.1.5, for other client builds),
+### Releases and packages
+
+Publishing a release runs [one workflow](.github/workflows/publish.yml) that builds, tests and then ships
+two things from that same build: **`jedrock.jar` attached to the release**, for anyone who just wants to
+run a server, and **the modules published to GitHub Packages**, for anything that wants to build against
+`jedrock-api`. One build, so the two can never disagree about what they are.
+
+To depend on the api, add the repository and the module (GitHub Packages requires authentication even to
+read a public package — that is their policy, not this project's, so you will need a token with
+`read:packages` in your `~/.m2/settings.xml`):
+
+```xml
+<repository>
+    <id>github</id>
+    <url>https://maven.pkg.github.com/Hiro-zzz/Jedrock</url>
+</repository>
+
+<dependency>
+    <groupId>com.jedrock</groupId>
+    <artifactId>jedrock-api</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+</dependency>
+```
+
+Note that a **script plugin needs none of this** — `plugins/*.js` is the extension surface, and it needs
+no build at all. The published modules are for someone writing Java against the api.
+
+### Configuration
+
+Two files, split by who edits them and what it costs to get one wrong.
+
+**`jedrock.properties`** is the file you edit to run a server: name and MOTD, bind host and ports, the four
+folder names, the world (`world.default-name`, `world.default-template`, `world.seed`, `world.load-all`,
+`world.autosave-seconds`), the game (`game.tick-rate`, `game.view-distance`, `game.default-gamemode`),
+whether a player rejoins the world they left (`player.remember-world`), the remote console (`rcon.*`,
+see [Console & diagnostics](#console--diagnostics)), the script layer
+(`plugins.enabled`, `plugins.hot-reload`, `plugins.reload-millis`), logging (`logging.to-file`,
+`logging.keep-files`, `logging.debug`, `logging.status-seconds`), the blind-judge limits (`judge.*`) and the
+Bedrock sidebar placement (`pe.sidebar.*`). Every key has a default, so a key you delete keeps its built-in
+value and a bad value falls back with a warning instead of failing to start. Any key can be overridden at
+launch with `-Dkey=value`.
+
+**`pipeline.yml`** is the file you edit when you already know why: the transport's own numbers, each of
+which used to be a constant compiled into the network module. Netty threads and socket options
+(`netty.boss-threads`, `worker-threads`, `tcp-nodelay`, `so-keepalive`, `reuse-address`, `backlog`), the
+Java keep-alive interval, per-era Bedrock knobs (`bedrock.v1_1_5` / `bedrock.v0_14`: `max-view-radius`,
+`sidebar-repaint-ticks`, `max-particle-burst`, plus 1.1.5's `resync-delay-millis` and
+`announce-dimension`), and the wire-level guards (`guard.max-inflated-batch-bytes`,
+`max-packets-per-batch`, `max-list-entries`) that stop a hostile client deciding how much memory this
+process uses. It is YAML because it is nested — four subsystems, one of them with two eras — and it is read
+by a [deliberately small reader](jedrock-utils/src/main/java/com/jedrock/utils/yaml/Yaml.java) rather than
+a dependency: mappings, sequences, scalars, comments, and a warning for anything else. A value outside its
+sane range is refused and the default used, because an obeyed nonsense value here is a security limit
+someone else chose.
+
+### Storage
+
+The server's small persistent facts — today, which world each player was last in — go through a
+`DataStore` with two backends. **`flatfile`** is the default and writes the same `key=value` files in
+`data/` it always did: a few kilobytes, editable in any text editor, nothing to run. **`jdbc`** is there
+for whoever wants them in a database instead — a network of servers sharing one account of who is where,
+or a host that already has one. Turning it on changes where the rows are, not what they mean.
+
+**No driver is bundled**, which is what keeps this jar 6.9 MB for everyone who doesn't want a database.
+Drop the driver jar in `libs/` beside the server, then:
+
+```properties
+storage.backend=jdbc
+storage.url=jdbc:sqlite:data/jedrock.db
+storage.driver=org.sqlite.JDBC
+```
+
+(For MySQL: `mysql-connector-j`, `storage.driver=com.mysql.cj.jdbc.Driver`, plus `storage.user` /
+`storage.password`.) A backend that can't be opened — driver missing, database down, typo in the url —
+logs what to do about it and **falls back to files**; it never stops the server from starting. Note that
+`ops.txt` and `permissions.txt` deliberately stay text files: those are the two an administrator edits by
+hand, and that is a feature rather than an omission. World terrain has never been in scope here — a baked
+level is a 400 KB DEFLATE blob, and a table has nothing to offer it.
+
+A few knobs stay `-D`-only, since they exist to be turned down rather than tuned:
+`-Djedrock.pe.raknetProtocolVersion=N` (default `8` = MCPE 1.1.5, for other client builds),
 `-Djedrock.pe.slotEchoGuardMs=<ms>` (default `750`, `0` = off — how long after the server pushes an
-inventory slot a Bedrock client's report of it is read as a stale echo), the 1.1.5 block-edit
-debounce windows (`-Djedrock.pe.placeBurstMs`, `placeSameCellMs`, `breakSameCellMs`), and
-`-Djedrock.pe.changeDimension=false` (send no ChangeDimension to a 1.1.5 client on a world switch —
-the sky stays wrong, but an unverified packet can't hang it on a loading screen). The Bedrock
-listeners bind best-effort — a busy UDP port (the Minecraft Bedrock client itself holds 19132 for LAN
-discovery) disables just that edition, never the whole server.
+inventory slot a Bedrock client's report of it is read as a stale echo), and the 1.1.5 block-edit debounce
+windows (`-Djedrock.pe.placeBurstMs`, `placeSameCellMs`, `breakSameCellMs`).
 
 ### Console & diagnostics
 
@@ -686,6 +799,17 @@ Once running, the server reads commands on stdin (headless-safe — it runs fine
 | `debug [all\|off\|<tags>]` | toggle extended debug logging; scope by logger-name tags, e.g. `debug pe,chunk` |
 | `gc` | request a GC, then print status |
 | `stop` | graceful shutdown |
+
+The same surface is available over **RCON** (`rcon.enabled`), the protocol every Minecraft management tool
+already speaks — the table above plus every in-game command, run as an operator. It adds no commands of its
+own: a remote client goes through the same `execute` the terminal does, so anything added to the console
+works there the same day. `stop` replies *before* it shuts down, since a shutdown that ran inline would take
+the answer with it.
+
+> ⚠️ **RCON is plaintext.** The password and everything either side says cross the network in the clear.
+> It is off by default, binds `127.0.0.1` by default (reach it through an SSH tunnel), and **refuses to
+> start with a blank password** no matter what `rcon.enabled` says — an open RCON port is a remote console
+> for whoever finds it. A wrong password closes the connection, so guessing costs a reconnect each time.
 
 Anything the console doesn't recognise is run as an **operator** through the in-game command registry, so
 every `/`-command works from stdin too — e.g. `op alice`, `gamemode creative bob`, `perm user alice add mod`
@@ -744,11 +868,13 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   everything else new on that wire: `-Djedrock.pe.changeDimension=false` falls back to 0.14's behaviour if
   it turns out to hang a client on a loading screen.
 - **Travel is API and command only.** `/world tp`, `worlds.send`, or a teleport to a `Location` in another
-  world. There is no portal block: noticing a player standing in a frame means checking positions every
-  tick, which is the shape of simulation this server doesn't do (see the wishlist for what would change
-  that).
-- **A player always joins into the default world**, wherever they logged out. Nothing remembers which
-  world someone was standing in across a restart.
+  world. There is no portal block, and there isn't going to be one: noticing a player standing in a frame
+  means checking positions every tick, which is the shape of simulation this server doesn't do.
+- **Coming back is to a world, not to a spot.** The world someone logged out in is remembered; where they
+  were standing in it is not, so they arrive at its spawn. A remembered position would have to answer what
+  happens when the ground under it was dug away or the world shrank around it, and this server models no
+  falling. On **0.14** the rejoin has the destination's blocks, spawn and biome tint under an overworld
+  sky, for the same reason travel there does.
 - **Parts of the PE wire have never met a real client.** Join, movement, chat, edits and inventories
   have; the newer illusions largely haven't. Everything ground-truthed against PocketMine is byte-tested,
   but a byte test only proves the encoder agrees with itself — the item-NBT dialect passed its own tests
@@ -775,12 +901,10 @@ promised; it's the list of what would be worth doing next, roughly in the order 
   **greeting / farewell** message and a **priority** escape hatch for the case deny-wins can't express:
   an allow island inside a deny. And the `/pick` storage list should show the names custom items now
   have, instead of a slot number and a raw state.
-- **What worlds still want.** **Remembering which world a player was in** across a restart — a one-line
-  store, once someone decides whether that is the friendly behaviour or the surprising one. A **portal**:
-  the honest version is a region flag ("standing here sends you to *that* world"), which costs one check
-  on the movement path the region system already runs, rather than a block that has to be recognised. And
-  **deleting** a world, which is deliberately absent — unloading leaves the folder, and removing it is a
-  decision that belongs to whoever can see the filesystem, not to a script.
+- **What worlds still want.** **Deleting** one, which is deliberately absent — unloading leaves the folder,
+  and removing it is a decision that belongs to whoever can see the filesystem, not to a script. A
+  **portal** is not on this list: noticing a player standing in a frame is the shape of simulation this
+  server doesn't do, and travel already has a command, an api and a script call.
 - **Polish on what's already there.** Split **head yaw from body yaw** on puppets (the packets exist; a
   puppet just can't glance without turning). A **sharper judge** — per-axis movement limits and a real
   interaction ray-cast, still cheap, still approximate. And the illusion toolkit (sidebar, boss bar,
@@ -788,10 +912,7 @@ promised; it's the list of what would be worth doing next, roughly in the order 
   becomes true.
 - **Authoring tools.** A `/pose` in-game editor that exports a scene as a committable file, so
   decoration is built where it's seen rather than written blind and reloaded.
-- **Packaging.** Right now the server runs from an IDE or a hand-assembled classpath. It deserves a
-  **single runnable jar** and a first-run folder that lays itself out (config, `plugins/`, `world/`) —
-  the difference between a project you can build and a server someone can start. Alongside it: a
-  scripting reference generated from the contract rather than kept in step by hand, since
+- **A scripting reference generated from the contract** rather than kept in step by hand, since
   `plugins/example.js` is currently both the reference and the test.
 - **The parked multiversion framework.** `feature/multiversion-framework` carries a generalized
   version-dispatch layer plus a JE **1.20.4** target, deliberately not merged onto the legacy path — the

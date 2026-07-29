@@ -11,9 +11,9 @@ class PacketGuardTest {
     @Test
     void saneCountBounds() {
         assertTrue(PacketGuard.saneCount(0));
-        assertTrue(PacketGuard.saneCount(PacketGuard.MAX_LIST_ENTRIES));
+        assertTrue(PacketGuard.saneCount(PacketGuard.maxListEntries()));
         assertFalse(PacketGuard.saneCount(-1), "negative count is hostile");
-        assertFalse(PacketGuard.saneCount(PacketGuard.MAX_LIST_ENTRIES + 1), "over the cap");
+        assertFalse(PacketGuard.saneCount(PacketGuard.maxListEntries() + 1), "over the cap");
         assertFalse(PacketGuard.saneCount(Integer.MAX_VALUE), "absurd count");
     }
 }

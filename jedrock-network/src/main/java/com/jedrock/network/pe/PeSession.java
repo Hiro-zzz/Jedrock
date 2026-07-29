@@ -50,7 +50,9 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     private static final JLogger LOGGER = JLogger.getLogger(PeSession.class);
 
     /** Max chunk view radius we honour from the client's RequestChunkRadius (join cost vs. distance). */
-    private static final int MAX_VIEW_RADIUS = 4;
+    private static int maxViewRadius() {
+        return com.jedrock.network.Pipeline.get().bedrock().v1_1_5().maxViewRadius();
+    }
 
     private final RakNetServerSession session;
     private final ConnectionListener listener;
@@ -169,11 +171,9 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
 
     @Override
     public int sidebarRepaintTicks() {
-        return SIDEBAR_REPAINT_TICKS;
+        // Repaint cadence for the popup sidebar: by default once a second, comfortably inside its own fade.
+        return com.jedrock.network.Pipeline.get().bedrock().v1_1_5().sidebarRepaintTicks();
     }
-
-    /** Repaint cadence for the popup sidebar: once a second, comfortably inside its own fade. */
-    private static final int SIDEBAR_REPAINT_TICKS = 20;
 
     /**
      * Join the sidebar rows into the popup's second string, capped at the api's line limit.
@@ -282,14 +282,13 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         }
     }
 
-    /** PE draws one particle per LevelEvent packet — cap a burst so a script can't flood the wire. */
-    private static final int MAX_PARTICLE_BURST = 32;
 
     @Override
     public void spawnParticle(com.jedrock.api.world.Particle particle, double x, double y, double z,
                               int count, double spread) {
         int evid = PeEffects.ADD_PARTICLE_MASK | PeEffects.particle113(particle);
-        int n = Math.min(Math.max(1, count), MAX_PARTICLE_BURST);
+        // PE draws one particle per LevelEvent packet — cap a burst so a script can't flood the wire.
+        int n = Math.min(Math.max(1, count), com.jedrock.network.Pipeline.get().bedrock().v1_1_5().maxParticleBurst());
         java.util.concurrent.ThreadLocalRandom rnd = java.util.concurrent.ThreadLocalRandom.current();
         for (int i = 0; i < n; i++) {
             final double px = x + offset(rnd, spread), py = y + offset(rnd, spread), pz = z + offset(rnd, spread);
@@ -418,8 +417,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             teleport(x, y, z, yaw, pitch); // still mid-join; the join sequence will stream the new world
             return;
         }
-        boolean announce = Boolean.parseBoolean(
-                System.getProperty("jedrock.pe.changeDimension", "true"));
+        boolean announce = com.jedrock.network.Pipeline.get().bedrock().v1_1_5().announceDimension();
         if (announce) {
             sendGameBatch(b -> McpePackets.changeDimension(b, bedrockDimension(target.getDimension()),
                     (float) x, (float) y + EYE_HEIGHT, (float) z, true));
@@ -432,6 +430,24 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             sendGameBatch(b -> McpePackets.playStatus(b, PLAY_STATUS_PLAYER_SPAWN)); // out of the load screen
         }
         teleport(x, y, z, yaw, pitch);
+    }
+
+    /** The world this client serializes chunks from — the join's, then whatever it travelled to. */
+    @Override
+    public World getWorld() {
+        return world;
+    }
+
+    /**
+     * Re-point this session at the world it is about to join into, before StartGame. Deliberately not
+     * {@link #switchWorld}: nothing has been streamed yet, so there is no terrain to make the client drop
+     * and no ChangeDimension to risk — the join sequence simply reads a different world from here on.
+     */
+    private void joinWorld() {
+        World remembered = listener != null ? listener.worldFor(uuid) : null;
+        if (remembered != null) {
+            this.world = remembered;
+        }
     }
 
     /**
@@ -543,8 +559,8 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         try {
             int packetCount = 0;
             while (batch.isReadable()) {
-                if (++packetCount > PacketGuard.MAX_PACKETS_PER_BATCH) {
-                    LOGGER.warn("[PE] batch exceeded " + PacketGuard.MAX_PACKETS_PER_BATCH
+                if (++packetCount > PacketGuard.maxPacketsPerBatch()) {
+                    LOGGER.warn("[PE] batch exceeded " + PacketGuard.maxPacketsPerBatch()
                             + " inner packets — dropping the rest");
                     break;
                 }
@@ -593,7 +609,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
             }
             case ID_REQUEST_CHUNK_RADIUS -> {
                 int requested = ByteBufUtils.readSignedVarInt(pk);
-                int radius = Math.clamp(requested, 2, MAX_VIEW_RADIUS);
+                int radius = Math.clamp(requested, 2, maxViewRadius());
                 LOGGER.info("[PE] chunk radius requested (" + requested + ") → streaming r=" + radius + " + spawn");
                 sendWorld(radius);
                 registerPlayer(); // fully in-game now — hand it to the core like a JE player
@@ -671,7 +687,9 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     // trailing-edge flush. See resyncAround for why a chunk re-send (not an UpdateBlock) and why trailing.
     private final Set<Long> dirtyResyncChunks = new HashSet<>();
     private ScheduledFuture<?> resyncFlush;
-    private static final long RESYNC_DELAY_MS = Long.getLong("jedrock.pe.resyncDelayMs", 180L);
+    private static long resyncDelayMillis() {
+        return com.jedrock.network.Pipeline.get().bedrock().v1_1_5().resyncDelayMillis();
+    }
 
     /**
      * Schedule a correction of any optimistic ghost this editor drew near {@code x,y,z} by re-sending the
@@ -687,7 +705,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
      * <p>Crucially the re-send must be <b>trailing-edge</b>: sending mid-burst carries a world state
      * <em>older</em> than the client's own in-flight optimistic edits (which the server hasn't received
      * yet), so a just-broken block would reappear. Instead we mark the chunk dirty and (re)arm one flush
-     * that fires only after {@code RESYNC_DELAY_MS} of quiet — by then the server has caught up, so the
+     * that fires only after {@code bedrock.v1_1_5.resync-delay-millis} of quiet — by then the server has caught up, so the
      * chunk reflects the final state, and a whole burst costs a single re-send. Runs on the session's
      * event loop (same thread as inbound), so the dirty set needs no locking. (1.1.5 only.)
      */
@@ -700,7 +718,7 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
         if (resyncFlush != null) {
             resyncFlush.cancel(false); // push the flush out to the trailing edge of the burst
         }
-        resyncFlush = session.getEventLoop().schedule(this::flushResync, RESYNC_DELAY_MS, TimeUnit.MILLISECONDS);
+        resyncFlush = session.getEventLoop().schedule(this::flushResync, resyncDelayMillis(), TimeUnit.MILLISECONDS);
     }
 
     /** Re-send every chunk this editor touched since the last flush, now that its edits have settled. */
@@ -1023,9 +1041,17 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
 
     /** Reply to the resource-pack response with the world's StartGame. */
     private void sendStartGame() {
+        // The world this client joins into: the one it logged out in, if the server remembers. It has to
+        // be settled here, before StartGame — that packet names the dimension and every chunk after it is
+        // serialized from this world, so arriving in the right one costs nothing extra on the wire.
+        joinWorld();
         Location spawn = world.getSpawnLocation();
         int mode = joinGameMode().getId();   // the remembered choice this run, else the config default
-        sendGameBatch(b -> McpePackets.startGame(b, SELF_ENTITY_ID, mode,
+        // Announced as the overworld when dimensions are turned off for this wire — the sky is wrong, and
+        // a wrong sky is the failure this era's client survives (see changeDimension).
+        int dimension = com.jedrock.network.Pipeline.get().bedrock().v1_1_5().announceDimension()
+                ? bedrockDimension(world.getDimension()) : 0;
+        sendGameBatch(b -> McpePackets.startGame(b, SELF_ENTITY_ID, mode, dimension,
                 spawn.x(), spawn.y(), spawn.z(),
                 spawn.getBlockX(), spawn.getBlockY(), spawn.getBlockZ()));
         // Only StartGame is sent here; the spawn PlayStatus is sent once, after the chunks.

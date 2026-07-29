@@ -38,9 +38,10 @@ public class NettyNetworkServer implements NetworkServer {
 
     private final JLogger logger = JLogger.getLogger(NettyNetworkServer.class);
 
-    // Shared groups — efficient for multiple binds
-    private final EventLoopGroup bossGroup = new NioEventLoopGroup(1);
-    private final EventLoopGroup workerGroup = new NioEventLoopGroup();
+    // Shared groups — efficient for multiple binds. Built on the first bind rather than at construction,
+    // because that is the first moment pipeline.yml has been read and their sizes are known.
+    private volatile EventLoopGroup bossGroup;
+    private volatile EventLoopGroup workerGroup;
 
     private final ConcurrentHashMap<Channel, Connection> connections = new ConcurrentHashMap<>();
 
@@ -84,14 +85,18 @@ public class NettyNetworkServer implements NetworkServer {
             }
             active = true;
         } else {
-            // Java Edition - TCP
+            // Java Edition - TCP. Threads and socket options come from pipeline.yml; the defaults are the
+            // values that used to be written here.
+            com.jedrock.api.config.PipelineSettings.Netty netty = Pipeline.get().netty();
             new ServerBootstrap()
-                    .group(bossGroup, workerGroup)
+                    .group(bossGroup(netty), workerGroup(netty))
                     .channel(NioServerSocketChannel.class)
                     .childHandler(new JavaEditionChannelInitializer(protocol))
-                    .childOption(ChannelOption.TCP_NODELAY, true)
-                    .childOption(ChannelOption.SO_KEEPALIVE, true)
-                    .childOption(ChannelOption.SO_REUSEADDR, true)
+                    .option(ChannelOption.SO_BACKLOG, netty.backlog())
+                    .option(ChannelOption.SO_REUSEADDR, netty.reuseAddress())
+                    .childOption(ChannelOption.TCP_NODELAY, netty.tcpNoDelay())
+                    .childOption(ChannelOption.SO_KEEPALIVE, netty.soKeepAlive())
+                    .childOption(ChannelOption.SO_REUSEADDR, netty.reuseAddress())
                     .bind(address).sync(); // throws if the bind fails
             active = true;
             logger.info("Listening on " + address + " for " + protocol.getVersionName() + " (Java Edition)");
@@ -121,8 +126,12 @@ public class NettyNetworkServer implements NetworkServer {
             pe014Server = null;
         }
 
-        workerGroup.shutdownGracefully();
-        bossGroup.shutdownGracefully();
+        if (workerGroup != null) {
+            workerGroup.shutdownGracefully();
+        }
+        if (bossGroup != null) {
+            bossGroup.shutdownGracefully();
+        }
         logger.info("Network shutdown complete.");
     }
 
@@ -145,6 +154,21 @@ public class NettyNetworkServer implements NetworkServer {
                 jc.tick(currentTick);
             }
         }
+    }
+
+    /** The accept group, made once. {@code worker-threads: 0} means Netty's own default (2x cores). */
+    private synchronized EventLoopGroup bossGroup(com.jedrock.api.config.PipelineSettings.Netty netty) {
+        if (bossGroup == null) {
+            bossGroup = new NioEventLoopGroup(netty.bossThreads());
+        }
+        return bossGroup;
+    }
+
+    private synchronized EventLoopGroup workerGroup(com.jedrock.api.config.PipelineSettings.Netty netty) {
+        if (workerGroup == null) {
+            workerGroup = new NioEventLoopGroup(netty.workerThreads());
+        }
+        return workerGroup;
     }
 
     // === Connection registry ===

@@ -84,6 +84,23 @@
         </dependencies>
     </dependencyManagement>
 
+    <!-- Published to GitHub Packages by .github/workflows/publish.yml, which authenticates with the
+         workflow's own GITHUB_TOKEN — there is no credential here and none is needed to build. To consume
+         these from another project you need a token too: GitHub Packages requires authentication even for
+         reading a public package, which is its policy and not ours. -->
+    <distributionManagement>
+        <repository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/Hiro-zzz/Jedrock</url>
+        </repository>
+        <snapshotRepository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/Hiro-zzz/Jedrock</url>
+        </snapshotRepository>
+    </distributionManagement>
+
     <build>
         <pluginManagement>
             <plugins>

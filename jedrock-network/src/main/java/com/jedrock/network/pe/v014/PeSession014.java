@@ -40,7 +40,9 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
 
     private static final JLogger LOGGER = JLogger.getLogger(PeSession014.class);
 
-    private static final int MAX_VIEW_RADIUS = 4;
+    private static int maxViewRadius() {
+        return com.jedrock.network.Pipeline.get().bedrock().v0_14().maxViewRadius();
+    }
 
     private final RakNetServerSession session;
     private final ConnectionListener listener;
@@ -121,11 +123,9 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
 
     @Override
     public int sidebarRepaintTicks() {
-        return SIDEBAR_REPAINT_TICKS;
+        return com.jedrock.network.Pipeline.get().bedrock().v0_14().sidebarRepaintTicks();
     }
 
-    /** Repaint cadence for the popup sidebar: once a second, comfortably inside its own fade. */
-    private static final int SIDEBAR_REPAINT_TICKS = 20;
 
     /**
      * Join the sidebar rows into the popup's second string, capped at the api's line limit, padded into
@@ -363,15 +363,14 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         sendWrapped(b -> Mcpe014Packets.levelEvent(b, evid, x, y, z, Math.round(pitch * 1000f)));
     }
 
-    /** PE draws one particle per LevelEvent packet — cap a burst so a script can't flood the wire. */
-    private static final int MAX_PARTICLE_BURST = 32;
 
     @Override
     public void spawnParticle(com.jedrock.api.world.Particle particle, double x, double y, double z,
                               int count, double spread) {
         int evid = com.jedrock.network.pe.PeEffects.ADD_PARTICLE_MASK
                 | com.jedrock.network.pe.PeEffects.particle014(particle);
-        int n = Math.min(Math.max(1, count), MAX_PARTICLE_BURST);
+        int n = Math.min(Math.max(1, count),
+                com.jedrock.network.Pipeline.get().bedrock().v0_14().maxParticleBurst());
         java.util.concurrent.ThreadLocalRandom rnd = java.util.concurrent.ThreadLocalRandom.current();
         for (int i = 0; i < n; i++) {
             final double px = x + offset(rnd, spread), py = y + offset(rnd, spread), pz = z + offset(rnd, spread);
@@ -450,7 +449,7 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
             }
             case ID_REQUEST_CHUNK_RADIUS -> {
                 int requested = in.readableBytes() >= 4 ? in.readInt() : 8;
-                int radius = Math.clamp(requested, 2, MAX_VIEW_RADIUS);
+                int radius = Math.clamp(requested, 2, maxViewRadius());
                 streamWorldAndSpawn(radius);
                 registerPlayer();
             }
@@ -694,7 +693,22 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
 
     // ===== Join sequence =====
 
+    /** The world this client serializes chunks from — the join's, then whatever it travelled to. */
+    @Override
+    public World getWorld() {
+        return world;
+    }
+
     private void sendLoginSequence() {
+        // The world this client joins into: the one it logged out in, if the server remembers. Settled
+        // before StartGame, so the blocks, the spawn and the biome tint are the right world's from the
+        // first packet. The dimension byte below stays 0: this era has no dimension change this project
+        // has ground-truthed, and a nether joined under an overworld sky is the same honest half of the
+        // feature 0.14 gets when travelling (see switchWorld).
+        World remembered = listener != null ? listener.worldFor(uuid) : null;
+        if (remembered != null) {
+            this.world = remembered;
+        }
         Location spawn = world.getSpawnLocation();
         int sx = spawn.getBlockX(), sy = spawn.getBlockY(), sz = spawn.getBlockZ();
         float eyeY = (float) spawn.y() + EYE_HEIGHT;

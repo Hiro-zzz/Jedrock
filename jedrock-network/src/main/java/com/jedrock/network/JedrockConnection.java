@@ -410,8 +410,27 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     /** The world this client serializes chunks from; used by protocol handlers during the join. */
+    @Override
     public World getWorld() {
         return world;
+    }
+
+    /**
+     * Re-point this client at the world it is about to join into, before the join sequence has sent
+     * anything. Deliberately <em>not</em> {@link #switchWorld}: nothing has been streamed yet, so there is
+     * no terrain to make the client throw away and no avatar to hide — the chunks the join is about to
+     * send simply come from here instead. The movement-merge seed moves with it, since it was set to the
+     * old world's spawn when this connection was built and the client is about to be put down in this one.
+     */
+    public void joinWorld(World target) {
+        if (target == null || target == this.world) {
+            return;
+        }
+        this.world = target;
+        Location spawn = target.getSpawnLocation();
+        this.lastX = spawn.x();
+        this.lastY = spawn.y();
+        this.lastZ = spawn.z();
     }
 
     /**
