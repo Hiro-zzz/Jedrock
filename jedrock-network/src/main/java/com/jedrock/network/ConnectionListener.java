@@ -170,6 +170,20 @@ public interface ConnectionListener {
     }
 
     /**
+     * The world a client should join <em>into</em>: the one it was last standing in, if the server
+     * remembers players that way and that world is still loaded. Queried by the join sequence alongside
+     * {@link #gameModeFor}, before a single chunk is serialized, so a returning player's client streams
+     * the right terrain from the start rather than being walked across afterwards — a world switch during
+     * a join is a Respawn or a ChangeDimension the client has no reason to be sent.
+     *
+     * <p>{@code null} (the default) means "the world this connection already points at" — the server's
+     * default world. Called on an I/O thread before {@code onLogin}; must be cheap and thread-safe.
+     */
+    default com.jedrock.api.world.World worldFor(UUID uuid) {
+        return null;
+    }
+
+    /**
      * The current game mode of an in-game player, by connection — lets an edition decide break timing
      * (creative mines instantly; survival breaks only when digging finishes). Defaults to creative
      * (instant) for an unknown connection, matching the pre-survival behaviour.

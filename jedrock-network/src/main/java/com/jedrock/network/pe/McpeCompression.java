@@ -38,7 +38,8 @@ public final class McpeCompression {
         Inflater inflater = new Inflater(raw);
         inflater.setInput(input);
         // Cap the initial guess (guarding int overflow for a large input) at the hard limit.
-        int initial = (int) Math.max(64, Math.min((long) input.length * 4, PacketGuard.MAX_INFLATED_BATCH));
+        int ceiling = PacketGuard.maxInflatedBatch();
+        int initial = (int) Math.max(64, Math.min((long) input.length * 4, ceiling));
         ByteArrayOutputStream out = new ByteArrayOutputStream(initial);
         byte[] chunk = new byte[8192];
         try {
@@ -48,9 +49,9 @@ public final class McpeCompression {
                     if (inflater.needsInput() || inflater.needsDictionary()) break;
                 }
                 out.write(chunk, 0, n);
-                if (out.size() > PacketGuard.MAX_INFLATED_BATCH) {
+                if (out.size() > ceiling) {
                     // Refuse to keep inflating — a small input ballooning past the cap is a zip bomb.
-                    LOGGER.warn("[PE] batch inflated past " + PacketGuard.MAX_INFLATED_BATCH
+                    LOGGER.warn("[PE] batch inflated past " + ceiling
                             + " bytes from " + input.length + " compressed — rejecting (possible packet bomb)");
                     return null;
                 }

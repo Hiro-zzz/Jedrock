@@ -54,7 +54,51 @@ public interface JLogger {
     }
 
     static JLogger getLogger(String name) {
-        return PROVIDER.get().get(name);
+        return new Handle(name);
+    }
+
+    /**
+     * What {@link #getLogger} actually hands out: a name, and whichever backend is installed <em>at the
+     * moment something is logged</em>.
+     *
+     * <p>Almost every logger in this codebase is a {@code static final} field, so it is created when its
+     * class loads — which is long before the server has read its config and decided whether there should
+     * be a log file at all. Resolving the backend once, there and then, meant that swapping in the file
+     * logger only affected classes that happened to load afterwards, and the startup lines you most want
+     * on disk were exactly the ones that never reached it.
+     *
+     * <p>So the backend is resolved per call, and cached until the provider is replaced — which happens
+     * once, at startup. The steady-state cost is a volatile read and a delegation; the debug paths that
+     * care about cost are gated by {@link #isDebugEnabled()} before they get here.
+     */
+    final class Handle implements JLogger {
+
+        private final String name;
+        private volatile LoggerProvider resolvedFrom;
+        private volatile JLogger target;
+
+        Handle(String name) {
+            this.name = name;
+        }
+
+        private JLogger target() {
+            LoggerProvider provider = PROVIDER.get();
+            JLogger current = target;
+            if (current == null || provider != resolvedFrom) {
+                current = provider.get(name);
+                target = current;
+                resolvedFrom = provider;
+            }
+            return current;
+        }
+
+        @Override public boolean isDebugEnabled() { return target().isDebugEnabled(); }
+        @Override public void debug(String message) { target().debug(message); }
+        @Override public void debug(Supplier<String> messageSupplier) { target().debug(messageSupplier); }
+        @Override public void info(String message) { target().info(message); }
+        @Override public void warn(String message) { target().warn(message); }
+        @Override public void error(String message) { target().error(message); }
+        @Override public void error(String message, Throwable throwable) { target().error(message, throwable); }
     }
 
     static JLogger getLogger(Class<?> clazz) {

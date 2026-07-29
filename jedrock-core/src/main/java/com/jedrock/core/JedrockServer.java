@@ -44,6 +44,8 @@ import com.jedrock.core.command.TpsCommand;
 import com.jedrock.core.command.HologramCommand;
 import com.jedrock.core.command.PuppetCommand;
 import com.jedrock.core.config.JedrockConfig;
+import com.jedrock.core.config.PipelineConfig;
+import com.jedrock.core.config.ServerLayout;
 import com.jedrock.core.entity.CoreHologram;
 import com.jedrock.core.entity.EntityDirector;
 import com.jedrock.core.entity.PuppetRegistry;
@@ -100,23 +102,26 @@ public class JedrockServer implements Server {
     private final GameLoop gameLoop = new GameLoop();
     private final Scheduler scheduler = new Scheduler();
     private final CommandManager commandManager = new CommandManager(this);
-    /** Server operators (name-based), persisted to {@code ops.txt}; an op holds every permission. */
-    private final OpList opList = new OpList(Path.of("ops.txt"));
-    /** Group-based permissions (wildcards, deny, inheritance, prefixes), persisted to {@code permissions.txt}. */
-    private final PermissionManager permissions = new PermissionManager(Path.of("permissions.txt"));
+    /** Where everything this server writes lives — made once, asked for by name from then on. */
+    private final ServerLayout layout;
+    /** Server operators (name-based), persisted to {@code data/ops.txt}; an op holds every permission. */
+    private final OpList opList;
+    /** Group-based permissions (wildcards, deny, inheritance, prefixes), in {@code data/permissions.txt}. */
+    private final PermissionManager permissions;
     /** Raw packet taps (the {@code packets} scripting hook); consulted by the network layer via this listener. */
     private final PacketTapRegistry packetTaps = new PacketTapRegistry();
     private final NetworkServer networkServer;
     /** Network → core: every inbound decision, kept out of this class (see {@link ConnectionBridge}). */
     private final ConnectionBridge bridge;
+    /** The console over a socket, if {@code rcon.enabled} and it managed to bind. Null otherwise. */
+    private volatile RconServer rcon;
+    /** Where the small persistent facts go — files by default, a database if one was asked for. */
+    private final com.jedrock.core.data.DataStore storage;
 
     /** The scripting layer: JS plugins in {@code plugins/} that subscribe to events and register commands. */
-    private final PluginManager plugins =
-            new PluginManager(eventBus, this, scheduler, commandManager, packetTaps, Path.of("plugins"));
-    /** How often (ms) the background watcher polls the plugins folder for changed files to hot-reload. */
-    private static final long PLUGIN_RELOAD_MILLIS = 1000L;
+    private final PluginManager plugins;
     /** Where script state lives between restarts — a runtime file, next to ops.txt and permissions.txt. */
-    private static final Path PLUGIN_STORAGE_FILE = Path.of("plugin-storage.jdb");
+    private final Path pluginStorageFile;
 
     // In-memory state layer
     private final PlayerRegistry playerRegistry = new PlayerRegistry();
@@ -141,18 +146,58 @@ public class JedrockServer implements Server {
     private final BlindJudge judge;
     /** Remembers each player's last chosen game mode this run, so it survives a reconnect. */
     private final java.util.Map<UUID, GameMode> gameModes = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Which world each player was last in — the same idea as {@link #gameModes}, but across restarts. */
+    private final com.jedrock.core.player.PlayerWorlds playerWorlds;
 
     private final AtomicLong tickCounter = new AtomicLong(0);
 
     public JedrockServer() {
+        this(Path.of(System.getProperty("jedrock.home", ".")));
+    }
+
+    /**
+     * Bring the server up under {@code home} — the folder it lays itself out in. Everything it will ever
+     * write is decided here, in this order and no other: the config says where the folders are, the layout
+     * makes them, and only then is there anywhere for a world, a log or a script's storage to go.
+     */
+    public JedrockServer(Path home) {
+        // Absolute from here on: every path this server ever prints or writes is derived from this one,
+        // and "./worlds/./world" in a log is a small thing that makes a server look unfinished.
+        Path root = home.toAbsolutePath().normalize();
         // Load configuration first — everything below is parameterized by it.
-        this.config = JedrockConfig.load();
+        this.config = JedrockConfig.load(root);
         this.name = config.name();
+        // The folders, made (and an older flat install migrated into them) before anything writes.
+        this.layout = ServerLayout.prepare(root, config);
+        // The log file, opened before the first thing worth recording happens.
+        if (config.logging().toFile()) {
+            com.jedrock.utils.FileLog.install(layout.logs(), config.logging().keepFiles());
+        }
+        // Verbose subsystems — unless -Djedrock.debug already said so on the command line, which wins.
+        if (System.getProperty("jedrock.debug") == null) {
+            com.jedrock.utils.Debug.configure(config.logging().debug());
+        }
+        // The wire's own settings, installed before any listener exists: the transport reads them when it
+        // builds its thread groups, which is the first thing binding does.
+        com.jedrock.network.Pipeline.install(PipelineConfig.load(layout.pipelineFile()));
+
+        // Where the server's small persistent facts live: the data/ folder, or a database if one was
+        // configured and could be opened (it falls back to files and says so if not).
+        this.storage = com.jedrock.core.data.DataStores.open(root, layout.data(), config.storage());
+
+        this.opList = new OpList(layout.dataFile("ops.txt"));
+        this.permissions = new PermissionManager(layout.dataFile("permissions.txt"));
+        this.playerWorlds = new com.jedrock.core.player.PlayerWorlds(storage);
+        this.pluginStorageFile = layout.dataFile("plugin-storage.jdb");
+        this.plugins = new PluginManager(eventBus, this, scheduler, commandManager, packetTaps,
+                layout.plugins());
+
         // Worlds come up here rather than in start(): every collaborator below is handed the default
         // one, and the bake has to have happened before any of them can read a block. The manager also
         // owns the per-world block relay, so an edit only reaches the clients standing in that world.
-        this.levels = new WorldManager(eventBus, playerRegistry, Path.of("."));
-        this.defaultWorld = levels.openDefault("world", config.seed());
+        this.levels = new WorldManager(eventBus, playerRegistry, layout.worlds());
+        this.defaultWorld = levels.openDefault(config.worlds().defaultName(),
+                defaultWorldTemplate().withSeed(config.seed()));
         this.judge = new BlindJudge(config.judgeEnabled(), config.maxReach(), config.maxMoveDelta());
         this.entities = new EntityDirector(playerRegistry, defaultWorld);
         this.scenes = new com.jedrock.core.entity.SceneManager(entities, defaultWorld);
@@ -181,6 +226,22 @@ public class JedrockServer implements Server {
         this.networkServer.setWorld(defaultWorld); // clients serialize chunks from this shared world
 
         registerCommands();
+    }
+
+    /**
+     * The recipe the default world is created from — the very first time only, since a world that exists
+     * is loaded from its own file and its terrain is the file's, not the config's. An unknown template
+     * name falls back to the overworld rather than refusing to start: the alternative is a server that
+     * won't come up because of a typo in a key that stopped mattering after the first boot.
+     */
+    private com.jedrock.api.world.WorldTemplate defaultWorldTemplate() {
+        String wanted = config.worlds().defaultTemplate();
+        return levels.template(wanted).orElseGet(() -> {
+            LOGGER.warn("world.default-template names '" + wanted + "', which isn't a registered template "
+                    + levels.templates().stream().map(com.jedrock.api.world.WorldTemplate::name).toList()
+                    + "; using 'overworld'");
+            return com.jedrock.api.world.WorldTemplate.overworld();
+        });
     }
 
     /** Wire up the built-in in-game commands. */
@@ -250,6 +311,33 @@ public class JedrockServer implements Server {
     }
 
     /**
+     * The world this uuid should join into — the one they were last standing in — or {@code null} for the
+     * default world, which is what "no opinion" means to a join sequence. Asked on an I/O thread, before
+     * the client is shown any terrain, so the answer has to be here rather than after the join.
+     *
+     * <p>A remembered world that is no longer loaded (its folder went away, or a script unloaded it while
+     * that player was offline) is forgotten rather than mourned: they join the default world, and the
+     * fallback is written down so it isn't re-decided on every login.
+     */
+    CoreWorld rememberedWorld(UUID uuid) {
+        if (!config.rememberWorld() || uuid == null) {
+            return null;
+        }
+        String name = playerWorlds.worldOf(uuid);
+        if (name == null) {
+            return null; // never left the default world
+        }
+        CoreWorld world = levels.get(name).orElse(null);
+        if (world == null) {
+            LOGGER.info("Player " + uuid + " was last in world '" + name
+                    + "', which is not loaded — joining them into '" + defaultWorld.getName() + "'");
+            playerWorlds.forget(uuid);
+            return null;
+        }
+        return world == defaultWorld ? null : world;
+    }
+
+    /**
      * Change a player's game mode: remember it (so a reconnect keeps it — the only way MCPE 0.14
      * ever changes mode) and push the live switch to the client where the edition supports it.
      */
@@ -292,7 +380,17 @@ public class JedrockServer implements Server {
         // the coordinates. Routed here rather than at every call site, so /tp, /spawn, a script and the api
         // all cross worlds for free and none of them has to know they did.
         if (WorldTravel.isCrossWorld(player, to)) {
-            return travel.travel(player, to);
+            if (!travel.travel(player, to)) {
+                return false;
+            }
+            // Crossing is the only moment the answer changes, so it is the only moment worth a write —
+            // and writing it here rather than at quit means a client that crashes still comes back to the
+            // world it was actually in. The player's own world, not the destination asked for: a listener
+            // may have redirected the journey somewhere else entirely.
+            if (config.rememberWorld()) {
+                playerWorlds.remember(player.getUniqueId(), player.getWorld().getName());
+            }
+            return true;
         }
         broadcast.teleport(player, to);
         return true;
@@ -339,11 +437,13 @@ public class JedrockServer implements Server {
         }
 
         LOGGER.info("Starting " + getVersion());
+        LOGGER.info("Server folder: " + layout.summary());
+        LOGGER.info("Storage: " + storage.describe());
 
         // The default world came up with the constructor; every OTHER world folder is picked up here,
         // before any listener accepts logins, so a world that existed last run is back before the first
         // player can be sent to it.
-        int others = levels.discover();
+        int others = config.worlds().loadAll() ? levels.discover() : 0;
         if (others > 0) {
             LOGGER.info("Loaded " + others + " additional world(s): " + levels.all().stream()
                     .filter(w -> w != defaultWorld)
@@ -394,24 +494,34 @@ public class JedrockServer implements Server {
         gameLoop.start();
 
         // Interactive console (status / players / debug / stop). Daemon thread; headless-safe.
-        new ConsoleCommands(this).start();
+        ConsoleCommands console = new ConsoleCommands(this);
+        console.start();
+
+        // The same console over a socket, for the tools that speak RCON. Off unless asked for, and it
+        // refuses to start without a password — see RconServer.
+        if (config.rcon().enabled()) {
+            RconServer remote = new RconServer(console::execute, config.rcon().password());
+            if (remote.start(config.rcon().bind(), config.rcon().port())) {
+                this.rcon = remote;
+            }
+        }
 
         // Periodic world autosave (edits are otherwise only in memory). Off with 0; the save runs on
         // a background thread so it never stalls a tick, guarded so two saves can't overlap.
-        long saveSeconds = Long.getLong("jedrock.world.save-seconds", 300L);
+        long saveSeconds = config.worlds().autosaveSeconds();
         if (saveSeconds > 0) {
             long periodTicks = saveSeconds * TickUtil.TPS;
             scheduler.runTaskTimer(levels::autosaveAll, periodTicks, periodTicks);
             // Script state rides the same cadence — it is small, and a dirty flag skips an idle store.
-            scheduler.runTaskTimer(() -> plugins.storage().saveIfDirty(PLUGIN_STORAGE_FILE),
+            scheduler.runTaskTimer(() -> plugins.storage().saveIfDirty(pluginStorageFile),
                     periodTicks, periodTicks);
             scheduler.runTaskTimer(() -> scenes.saveIfDirty(sceneFile()), periodTicks, periodTicks);
             scheduler.runTaskTimer(() -> regions.saveIfDirty(regionFile()), periodTicks, periodTicks);
             LOGGER.info("World autosave enabled (every " + saveSeconds + "s)");
         }
 
-        // Optional periodic status line, e.g. -Djedrock.status.seconds=30 (0 = off).
-        long statusSeconds = Long.getLong("jedrock.status.seconds", 0L);
+        // Optional periodic status line — logging.status-seconds (0 = off).
+        long statusSeconds = config.logging().statusSeconds();
         if (statusSeconds > 0) {
             long periodTicks = statusSeconds * TickUtil.TPS;
             scheduler.runTaskTimer(() -> LOGGER.info(getStatus().summary()), periodTicks, periodTicks);
@@ -422,21 +532,28 @@ public class JedrockServer implements Server {
 
         // What plugins remembered last run, read before any script can ask for it.
         try {
-            plugins.storage().load(PLUGIN_STORAGE_FILE);
+            plugins.storage().load(pluginStorageFile);
             if (plugins.storage().totalKeys() > 0) {
-                LOGGER.info("Loaded plugin storage from " + PLUGIN_STORAGE_FILE.toAbsolutePath()
+                LOGGER.info("Loaded plugin storage from " + pluginStorageFile.toAbsolutePath()
                         + " (" + plugins.storage().buckets().size() + " bucket(s), "
                         + plugins.storage().totalKeys() + " key(s))");
             }
         } catch (java.io.IOException e) {
-            LOGGER.error("Failed to load plugin storage from " + PLUGIN_STORAGE_FILE.toAbsolutePath()
+            LOGGER.error("Failed to load plugin storage from " + pluginStorageFile.toAbsolutePath()
                     + " — scripts start with empty storage and the file is left untouched", e);
         }
 
         // Load script plugins before ServerStartEvent, so a plugin can subscribe to it. A background
         // watcher (off the game-loop thread — the poll blocks on disk I/O) hot-reloads a saved edit.
-        plugins.loadAll();
-        plugins.startWatching(PLUGIN_RELOAD_MILLIS);
+        if (config.plugins().enabled()) {
+            plugins.loadAll();
+            if (config.plugins().hotReload()) {
+                plugins.startWatching(config.plugins().reloadMillis());
+            }
+        } else {
+            LOGGER.info("Script plugins are disabled (plugins.enabled=false); "
+                    + layout.plugins().toAbsolutePath() + " is not read");
+        }
 
         // Everything is up — let plugins do their one-time setup.
         eventBus.post(new ServerStartEvent());
@@ -478,17 +595,23 @@ public class JedrockServer implements Server {
         eventBus.post(new ServerStopEvent());
         plugins.unloadAll();
         // After onDisable, so a script's last-moment write is included.
-        plugins.storage().saveIfDirty(PLUGIN_STORAGE_FILE);
+        plugins.storage().saveIfDirty(pluginStorageFile);
         scenes.saveIfDirty(sceneFile());
         regions.saveIfDirty(regionFile());
 
+        if (rcon != null) {
+            rcon.stop(); // before the loop, so a remote command can't arrive into a half-stopped server
+        }
         gameLoop.stop();
         networkServer.shutdown();
 
         // Save last, with the loop stopped and listeners closed, so no edit races the snapshot.
         levels.saveAllIfDirty();
 
+        storage.close(); // after every store that writes through it has had its last say
+
         LOGGER.info("Shutdown complete.");
+        com.jedrock.utils.FileLog.close(); // after the last line worth writing down
     }
 
     @Override
@@ -594,7 +717,7 @@ public class JedrockServer implements Server {
 
     /** Where scenes live — next to the level file, since they decorate that world. */
     private Path sceneFile() {
-        return Path.of(defaultWorld.getName(), "scenes.jdb");
+        return layout.worldFolder(defaultWorld.getName()).resolve("scenes.jdb");
     }
 
     /** Custom items: a name, lore and behaviour hung on a vanilla item state, declared by scripts. */
@@ -609,7 +732,7 @@ public class JedrockServer implements Server {
 
     /** Where regions live — next to the level file, since they are rules about that world. */
     private Path regionFile() {
-        return Path.of(defaultWorld.getName(), "regions.jdb");
+        return layout.worldFolder(defaultWorld.getName()).resolve("regions.jdb");
     }
 
     /** The puppeteer — puppets, holograms, and every relay that shows them cross-edition. */
@@ -717,8 +840,14 @@ public class JedrockServer implements Server {
         return networkServer;
     }
 
+    /**
+     * Run a server in the current folder — or in the one named as the first argument, which is how one jar
+     * runs two servers without two copies of it ({@code java -jar jedrock.jar ./survival}).
+     */
     public static void main(String[] args) {
-        JedrockServer server = new JedrockServer();
+        Path home = args.length > 0 && !args[0].startsWith("-") ? Path.of(args[0])
+                : Path.of(System.getProperty("jedrock.home", "."));
+        JedrockServer server = new JedrockServer(home);
         Runtime.getRuntime().addShutdownHook(new Thread(server::shutdown));
 
         server.start();

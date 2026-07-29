@@ -113,6 +113,13 @@ final class ConnectionBridge implements ConnectionListener {
     }
 
     @Override
+    public com.jedrock.api.world.World worldFor(UUID uuid) {
+        // And this, in the same breath, to pick the world it spawns in: where they logged out, or null
+        // for the default. Answered before the first chunk, so nobody has to be walked anywhere after.
+        return server.rememberedWorld(uuid);
+    }
+
+    @Override
     public GameMode gameModeOf(PlayerConnection connection) {
         CorePlayer p = playerRegistry.getByConnectionOrNull(connection);
         return p != null ? p.getGameMode() : server.defaultGameMode();
@@ -154,10 +161,15 @@ final class ConnectionBridge implements ConnectionListener {
             LOGGER.info("Evicted stale session for " + username + " on re-login");
         }
 
-        Location spawn = defaultWorld.getSpawnLocation();
+        // The world the client was actually joined into — the one it logged out in, if the server
+        // remembers players that way, else the default. Read back off the connection rather than decided
+        // again here: that client has already been shown this world's terrain, and a second opinion at
+        // this point would put the player in a world their own screen disagrees with.
+        CoreWorld world = connection.getWorld() instanceof CoreWorld joined ? joined : defaultWorld;
+        Location spawn = world.getSpawnLocation();
         // Match the mode the client actually joined in (the same value the join packets used): the
         // remembered choice from earlier this run, or the config default for a first join.
-        CorePlayer player = new CorePlayer(uuid, username, connection, defaultWorld, spawn,
+        CorePlayer player = new CorePlayer(uuid, username, connection, world, spawn,
                 gameModeFor(uuid), eventBus);
         player.setPermissions(opList, permissions); // isOp/hasPermission/getPrefix resolve against these
         player.setItems(server.getItems());          // turns a stack's custom-item key into a shown name
@@ -178,7 +190,7 @@ final class ConnectionBridge implements ConnectionListener {
         // Every teleport a command, script or the api asks for goes through the server from here on —
         // which is what makes player.teleport() move the client, and cross worlds when it has to.
         player.setTeleporter(server::teleport);
-        defaultWorld.addPlayer(player);
+        world.addPlayer(player);
 
         PlayerJoinEvent event = new PlayerJoinEvent(player);
         // Seed the default announcement so a listener sees it and can restyle, replace or suppress it
@@ -188,7 +200,7 @@ final class ConnectionBridge implements ConnectionListener {
 
         if (event.isCancelled()) {
             // A listener refused the join — undo the state we just added and drop the client.
-            defaultWorld.removePlayer(player);
+            world.removePlayer(player);
             playerRegistry.removeByConnection(connection);
             player.kick("Connection refused");
             return;

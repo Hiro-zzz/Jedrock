@@ -12,24 +12,32 @@ package com.jedrock.network.pe;
  *   <li>an item or transaction claiming a huge list length → a spinning parse loop.</li>
  * </ul>
  *
- * <p>These constants bound each of those so a malformed batch is rejected instead of taking the
- * server down. They are generous — far above anything a legitimate 1.1.5 client sends.
+ * <p>These limits bound each of those so a malformed batch is rejected instead of taking the
+ * server down. They are generous — far above anything a legitimate 1.1.5 client sends — and they come
+ * from {@code pipeline.yml} rather than from here, so an operator who would rather drop a suspicious
+ * client than serve it can say so without a rebuild.
  */
 final class PacketGuard {
 
     private PacketGuard() {}
 
     /** Max bytes one {@code 0xFE} batch may inflate to — stops a "zip bomb" from OOMing the server. */
-    static final int MAX_INFLATED_BATCH = 2 * 1024 * 1024; // 2 MiB
+    static int maxInflatedBatch() {
+        return com.jedrock.network.Pipeline.get().guard().maxInflatedBatchBytes();
+    }
 
     /** Max inner packets in one batch — a flood of empty packets can't spin the dispatch loop. */
-    static final int MAX_PACKETS_PER_BATCH = 1024;
+    static int maxPacketsPerBatch() {
+        return com.jedrock.network.Pipeline.get().guard().maxPacketsPerBatch();
+    }
 
     /** Max entries for a wire-driven loop (inventory actions, can-place-on / can-destroy string lists). */
-    static final int MAX_LIST_ENTRIES = 256;
+    static int maxListEntries() {
+        return com.jedrock.network.Pipeline.get().guard().maxListEntries();
+    }
 
     /** @return whether a list length read off the wire is sane (non-negative and not hostile). */
     static boolean saneCount(int count) {
-        return count >= 0 && count <= MAX_LIST_ENTRIES;
+        return count >= 0 && count <= maxListEntries();
     }
 }

@@ -50,7 +50,7 @@ class McpeCompressionTest {
     @Test
     void rejectsAZipBombThatInflatesPastTheCap() {
         // A few MiB of zeros compresses to a few KB — the classic tiny-in, huge-out crash packet.
-        byte[] huge = new byte[(PacketGuard.MAX_INFLATED_BATCH) + (1 << 20)]; // cap + 1 MiB
+        byte[] huge = new byte[PacketGuard.maxInflatedBatch() + (1 << 20)]; // cap + 1 MiB
         byte[] compressed = McpeCompression.deflate(huge, false);
         assertTrue(compressed.length < huge.length / 100, "the bomb is tiny compressed");
         assertNull(McpeCompression.inflate(compressed), "inflating past the cap must be rejected");

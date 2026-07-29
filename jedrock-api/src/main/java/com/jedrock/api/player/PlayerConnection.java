@@ -160,6 +160,17 @@ public interface PlayerConnection {
     }
 
     /**
+     * The world this connection is streaming — the one the join sequence put the client in (which is not
+     * always the default: a returning player joins into the world they logged out in), re-pointed since by
+     * {@link #switchWorld}. The core reads it once, at login, to put the new player in the same world their
+     * client has just been shown; after that the player's own world is the authority and this only follows
+     * it. {@code null} for a connection that was never given one.
+     */
+    default com.jedrock.api.world.World getWorld() {
+        return null;
+    }
+
+    /**
      * Change <em>this</em> client's own game mode live (survival ↔ creative …), so the client flips its
      * HUD and abilities (flight allowed only in creative / spectator). Each edition encodes it in its
      * own way; a connection that can't switch mode on the wire (e.g. MCPE 0.14) applies it on next join.

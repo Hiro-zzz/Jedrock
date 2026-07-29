@@ -558,8 +558,14 @@ final class McpePackets {
      * to see. The long tail of generation / feature flags is written exactly as PMMP orders it at
      * protocol 113 — the client reads the whole body positionally, so a missing field shifts every one
      * after it and the join dies with no error.
+     *
+     * <p>{@code bedrockDimension} is in Bedrock's own numbering (0/1/2, see
+     * {@code PeSession.bedrockDimension}) and is how a player who logged out in the nether joins under a
+     * nether sky rather than being switched into one after arriving. It rides the same
+     * {@code -Djedrock.pe.changeDimension=false} escape hatch as {@link #changeDimension}: with that flag
+     * off the join is announced as the overworld, which is the wrong sky and a join that cannot hang.
      */
-    static void startGame(ByteBuf b, long selfEntityId, int gameModeId,
+    static void startGame(ByteBuf b, long selfEntityId, int gameModeId, int bedrockDimension,
                           double spawnX, double spawnY, double spawnZ,
                           int spawnBlockX, int spawnBlockY, int spawnBlockZ) {
         ByteBufUtils.writeVarInt(b, ID_START_GAME);
@@ -576,9 +582,9 @@ final class McpePackets {
         b.writeFloatLE(0.0f);
         b.writeFloatLE(0.0f);
 
-        // World generation basics
+        // World generation basics: seed, dimension, generator, …
         ByteBufUtils.writeSignedVarInt(b, 12345);
-        ByteBufUtils.writeSignedVarInt(b, 0);
+        ByteBufUtils.writeSignedVarInt(b, bedrockDimension);
         ByteBufUtils.writeSignedVarInt(b, 1);
         ByteBufUtils.writeSignedVarInt(b, 1);
         ByteBufUtils.writeSignedVarInt(b, 1);

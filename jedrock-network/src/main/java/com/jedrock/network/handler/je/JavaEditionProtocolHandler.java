@@ -222,13 +222,22 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
 
     /** Sends the mandatory packets right after Login Success so the client actually spawns. */
     private void sendInitialJoinSequence(JedrockConnection connection, UUID uuid) {
+        // The world this client joins into: the one it logged out in, if the server remembers. Asked
+        // before anything is sent, so Join Game names the right dimension and the first chunks are
+        // already the right terrain — nothing below has to know this wasn't the default world.
+        if (connection.getListener() != null) {
+            connection.joinWorld(connection.getListener().worldFor(uuid));
+        }
         Location spawn = connection.getWorld().getSpawnLocation();
         // The mode this client joins in: its remembered choice this run, else the config default.
         GameMode mode = connection.getListener() != null
                 ? connection.getListener().gameModeFor(uuid)
                 : connection.getServerProperties().defaultGameMode();
 
-        connection.send(new ClientboundJoinGame(connection.getServerProperties().maxPlayers(), mode.getId()));
+        ClientboundJoinGame joinGame = new ClientboundJoinGame(
+                connection.getServerProperties().maxPlayers(), mode.getId());
+        joinGame.dimension = connection.getWorld().getDimension().getId();
+        connection.send(joinGame);
         connection.send(new ClientboundServerDifficulty());
         connection.send(new ClientboundSpawnPosition(spawn.getBlockX(), spawn.getBlockY(), spawn.getBlockZ()));
         connection.send(new ClientboundPlayerAbilities(mode));
@@ -252,7 +261,8 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
             return;
         }
         long now = System.currentTimeMillis();
-        if (now - connection.getLastKeepAliveSent() > 15000) {
+        if (now - connection.getLastKeepAliveSent()
+                > com.jedrock.network.Pipeline.get().java().keepAliveSeconds() * 1000L) {
             connection.send(new ClientboundKeepAlive(now));
             connection.setLastKeepAliveSent(now);
         }

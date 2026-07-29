@@ -116,8 +116,16 @@ public final class ChatText {
         StringBuilder sb = new StringBuilder(input.length());
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
-            if (c == SECTION || c < ' ') {
-                continue; // drop legacy colour/style codes and control chars (newlines, tabs, …)
+            if (c == SECTION) {
+                // A legacy code is TWO characters, so both go. Dropping only the § leaves the code letter
+                // behind as text — "§aMade §fSteve op" reads back as "aMade fSteve op" on the console, and
+                // a player calling themselves "§4Admin" would be listed as "4Admin". The letter after a §
+                // was never part of anything anyone meant to say.
+                i++;
+                continue;
+            }
+            if (c < ' ') {
+                continue; // control chars (newlines, tabs, …) — a nametag is one line
             }
             sb.append(c);
         }
