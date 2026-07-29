@@ -17,7 +17,9 @@ import com.jedrock.core.permission.PermissionManager;
 import com.jedrock.core.world.CoreWorld;
 import com.jedrock.utils.text.ChatText;
 
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * In-memory player state. A thin wrapper over the abstract {@link PlayerConnection};
@@ -66,6 +68,36 @@ public final class CorePlayer implements Player {
     @Override
     public long getEntityId() {
         return entityId;
+    }
+
+    // ===== Who this player can see =====
+    //
+    // Maintained by PlayerTracker, which is also the only thing allowed to change it. Because the
+    // visibility rule is symmetric, this one set answers both "whose avatars is this client holding"
+    // and "who is holding this one" — so a relay about this player iterates it directly instead of the
+    // whole roster. Concurrent because the relay reads it from other players' network threads while the
+    // tracker edits it from this one.
+
+    private final Set<CorePlayer> visible = ConcurrentHashMap.newKeySet();
+
+    /** The players whose avatars this client holds — and, symmetrically, who holds this one. */
+    public Set<CorePlayer> getVisible() {
+        return visible;
+    }
+
+    /** Whether this client currently holds {@code other}'s avatar. */
+    public boolean sees(CorePlayer other) {
+        return visible.contains(other);
+    }
+
+    /** Start tracking {@code other}; {@code true} if this call is the one that added them. */
+    boolean see(CorePlayer other) {
+        return visible.add(other);
+    }
+
+    /** Stop tracking {@code other}; {@code true} if this call is the one that removed them. */
+    boolean unsee(CorePlayer other) {
+        return visible.remove(other);
     }
 
     // ===== Survival inventory =====

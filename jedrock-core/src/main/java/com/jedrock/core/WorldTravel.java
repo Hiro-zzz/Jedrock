@@ -2,13 +2,11 @@ package com.jedrock.core;
 
 import com.jedrock.api.event.EventBus;
 import com.jedrock.api.event.player.PlayerWorldChangeEvent;
-import com.jedrock.api.player.ArmorSlot;
 import com.jedrock.api.player.Player;
-import com.jedrock.api.world.Blocks;
 import com.jedrock.api.world.Location;
 import com.jedrock.core.entity.EntityDirector;
 import com.jedrock.core.player.CorePlayer;
-import com.jedrock.core.player.PlayerRegistry;
+import com.jedrock.core.player.PlayerTracker;
 import com.jedrock.core.world.CoreWorld;
 import com.jedrock.utils.JLogger;
 
@@ -23,9 +21,11 @@ import com.jedrock.utils.JLogger;
  * <ul>
  *   <li><b>Membership</b> — the player leaves the old world's roster and joins the new one's, which is
  *       what the block-change relay and the weather use to decide who hears about them.</li>
- *   <li><b>Avatars</b> — they vanish from every client still in the old world, and appear on every
- *       client in the new one; and their own client is told to forget the first set and shown the
- *       second. Skip the "forget" half and the departed stand around as ghosts forever.</li>
+ *   <li><b>Avatars</b> — they vanish from every client that was holding them, and appear on the clients
+ *       near enough to want them over there; and their own client is told to forget the first set and
+ *       shown the second. Both halves are one call to {@link PlayerTracker} each, because a pair in its
+ *       interest set is symmetric — skip the "forget" half and the departed stand around as ghosts
+ *       forever.</li>
  *   <li><b>Props</b> — puppets, holograms and scenes belong to a world too, so the traveller's client
  *       drops the old world's and is caught up on the new one's.</li>
  *   <li><b>Terrain</b> — the connection re-points at the new world and re-streams it, which is the
@@ -40,12 +40,12 @@ final class WorldTravel {
 
     private static final JLogger LOGGER = JLogger.getLogger(WorldTravel.class);
 
-    private final PlayerRegistry players;
+    private final PlayerTracker tracker;
     private final EntityDirector entities;
     private final EventBus events;
 
-    WorldTravel(PlayerRegistry players, EntityDirector entities, EventBus events) {
-        this.players = players;
+    WorldTravel(PlayerTracker tracker, EntityDirector entities, EventBus events) {
+        this.tracker = tracker;
         this.entities = entities;
         this.events = events;
     }
@@ -76,14 +76,10 @@ final class WorldTravel {
         }
 
         // ===== Leave =====
-        long entityId = player.getEntityId();
-        for (CorePlayer other : players.online()) {
-            if (other == player || other.getWorld() != from) {
-                continue;
-            }
-            other.getConnection().hidePlayer(player.getUniqueId(), entityId); // they can't see us any more
-            player.getConnection().hidePlayer(other.getUniqueId(), other.getEntityId()); // nor we them
-        }
+        // Both directions at once: forget() breaks every pair this player was in, which hides their avatar
+        // on each watcher and each watcher's on theirs. Skip the "forget" half and the departed stand
+        // around as ghosts forever.
+        tracker.forget(player);
         entities.hideAllFrom(player.getConnection(), from);
         from.removePlayer(player);
 
@@ -97,18 +93,9 @@ final class WorldTravel {
                 player.getGameMode());
 
         // ===== Arrive =====
-        for (CorePlayer other : players.online()) {
-            if (other == player || other.getWorld() != target) {
-                continue;
-            }
-            Location at = other.getLocation();
-            player.getConnection().showPlayer(other.getUniqueId(), other.getName(), other.getEntityId(),
-                    at.x(), at.y(), at.z(), at.yaw(), at.pitch());
-            dress(player, other);
-            other.getConnection().showPlayer(player.getUniqueId(), player.getName(), entityId,
-                    to.x(), to.y(), to.z(), to.yaw(), to.pitch());
-            dress(other, player);
-        }
+        // enterWorld above put the player's own state at the destination, so the tracker is reading the
+        // right position when it decides who over there is close enough to see, and to see them.
+        tracker.refresh(player);
         entities.showAllTo(player.getConnection(), target);
 
         // The sky the new world is under — a late arrival walks into the weather everyone else sees.
@@ -119,23 +106,6 @@ final class WorldTravel {
         LOGGER.info(player.getName() + " travelled from '" + from.getName() + "' to '" + target.getName()
                 + "' (" + target.getDimension() + ")");
         return true;
-    }
-
-    /** Show {@code viewer} what {@code shown} is holding, wearing and doing — a freshly spawned avatar is bare. */
-    private static void dress(CorePlayer viewer, CorePlayer shown) {
-        if (shown.isSneaking() || shown.isSprinting() || shown.isUsingItem()) {
-            viewer.getConnection().setPose(shown.getEntityId(),
-                    shown.isSneaking(), shown.isSprinting(), shown.isUsingItem());
-        }
-        int held = shown.getHeldItem();
-        if (held != Blocks.AIR) {
-            viewer.getConnection().showHeldItem(shown.getEntityId(), held);
-        }
-        if (shown.hasArmor()) {
-            viewer.getConnection().showArmor(shown.getEntityId(),
-                    shown.getArmor(ArmorSlot.HELMET), shown.getArmor(ArmorSlot.CHESTPLATE),
-                    shown.getArmor(ArmorSlot.LEGGINGS), shown.getArmor(ArmorSlot.BOOTS));
-        }
     }
 
     /** Whether {@code to} is in a different world than {@code player} — what makes a teleport a journey. */

@@ -13,7 +13,6 @@ import com.jedrock.api.event.player.PlayerQuitEvent;
 import com.jedrock.api.event.player.PlayerToggleSneakEvent;
 import com.jedrock.api.event.player.PlayerToggleSprintEvent;
 import com.jedrock.api.event.player.PlayerUseItemEvent;
-import com.jedrock.api.player.ArmorSlot;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.player.PlayerConnection;
@@ -31,6 +30,7 @@ import com.jedrock.core.permission.PermissionManager;
 import com.jedrock.core.player.CorePlayer;
 import com.jedrock.core.player.PlayerBroadcast;
 import com.jedrock.core.player.PlayerRegistry;
+import com.jedrock.core.player.PlayerTracker;
 import com.jedrock.core.world.CoreWorld;
 import com.jedrock.network.ConnectionListener;
 import com.jedrock.utils.JLogger;
@@ -66,6 +66,7 @@ final class ConnectionBridge implements ConnectionListener {
     private final EventBus eventBus;
     private final PlayerRegistry playerRegistry;
     private final PlayerBroadcast broadcast;
+    private final PlayerTracker tracker;
     private final CoreWorld defaultWorld;
     private final BlindJudge judge;
     private final CombatService combat;
@@ -78,7 +79,8 @@ final class ConnectionBridge implements ConnectionListener {
     private final com.jedrock.core.region.RegionManager regions;
 
     ConnectionBridge(JedrockServer server, EventBus eventBus, PlayerRegistry playerRegistry,
-                     PlayerBroadcast broadcast, CoreWorld defaultWorld, BlindJudge judge,
+                     PlayerBroadcast broadcast, PlayerTracker tracker, CoreWorld defaultWorld,
+                     BlindJudge judge,
                      CombatService combat, ContainerService containers, EntityDirector entities,
                      CommandManager commandManager, PacketTapRegistry packetTaps,
                      OpList opList, PermissionManager permissions,
@@ -87,6 +89,7 @@ final class ConnectionBridge implements ConnectionListener {
         this.eventBus = eventBus;
         this.playerRegistry = playerRegistry;
         this.broadcast = broadcast;
+        this.tracker = tracker;
         this.defaultWorld = defaultWorld;
         this.judge = judge;
         this.combat = combat;
@@ -229,31 +232,10 @@ final class ConnectionBridge implements ConnectionListener {
             }
         }
 
-        // Avatars: show the existing roster to the newcomer, and the newcomer to everyone else — but only
-        // those standing in the same world. The tab list above stays server-wide (it is a roster, not a
-        // view); an avatar is a thing in a place, and a player in the nether is not in this place.
-        for (Player other : playerRegistry.all()) {
-            if (other == player || other.getWorld() != player.getWorld()) continue;
-            Location loc = other.getLocation();
-            connection.showPlayer(other.getUniqueId(), other.getName(), other.getEntityId(),
-                    loc.x(), loc.y(), loc.z(), loc.yaw(), loc.pitch());
-            // Sync a currently posed player (crouch / sprint / item-use) so the newcomer sees it.
-            if (other instanceof CorePlayer oc && (oc.isSneaking() || oc.isSprinting() || oc.isUsingItem())) {
-                connection.setPose(other.getEntityId(), oc.isSneaking(), oc.isSprinting(), oc.isUsingItem());
-            }
-            // …and whatever they're holding and wearing, so a spawned avatar isn't bare until it changes.
-            int otherHeld = other.getHeldItem();
-            if (otherHeld != Blocks.AIR) {
-                connection.showHeldItem(other.getEntityId(), otherHeld);
-            }
-            if (other instanceof CorePlayer oc && oc.hasArmor()) {
-                connection.showArmor(other.getEntityId(),
-                        oc.getArmor(ArmorSlot.HELMET), oc.getArmor(ArmorSlot.CHESTPLATE),
-                        oc.getArmor(ArmorSlot.LEGGINGS), oc.getArmor(ArmorSlot.BOOTS));
-            }
-            other.getConnection().showPlayer(uuid, username, player.getEntityId(),
-                    spawn.x(), spawn.y(), spawn.z(), spawn.yaw(), spawn.pitch());
-        }
+        // Avatars: the tab list above stays server-wide (it is a roster, not a view), but an avatar is a
+        // thing in a place — so the tracker decides who is close enough in this world to be worth showing,
+        // in both directions, and dresses each one it spawns.
+        tracker.refresh(player);
 
         // Show every existing puppet and hologram to the newcomer (existing players already see them).
         entities.showAllTo(connection, player.getWorld());
@@ -287,10 +269,11 @@ final class ConnectionBridge implements ConnectionListener {
     private void evictPlayer(CorePlayer player) {
         playerRegistry.removeByConnection(player.getConnection());
         player.getCoreWorld().removePlayer(player); // whichever world they were standing in, not the default
+        // The roster entry leaves every client; the avatar only leaves the ones that had it.
         for (Player other : playerRegistry.all()) {
             other.getConnection().removeFromTab(player.getUniqueId());
-            other.getConnection().hidePlayer(player.getUniqueId(), player.getEntityId());
         }
+        tracker.forget(player);
     }
 
     // ===== Movement and the world =====
@@ -349,6 +332,14 @@ final class ConnectionBridge implements ConnectionListener {
             return;
         }
         player.setLocation(new Location(player.getWorld(), x, y, z, yaw, pitch));
+
+        // Who is close enough to be worth an avatar can only have changed if this step crossed a chunk
+        // line — the same condition the chunk stream itself no-ops on. Standing still cannot change it,
+        // and if the other party is the one who moved, their own crossing updates the pair from their side.
+        if ((from.getBlockX() >> 4) != (((int) Math.floor(x)) >> 4)
+                || (from.getBlockZ() >> 4) != (((int) Math.floor(z)) >> 4)) {
+            tracker.refresh(player);
+        }
 
         // Fall damage for editions with no client fall-report packet: watch the descent server-side and
         // apply damage on landing. This is Java (no such packet at all) and Bedrock 0.14 (its client never

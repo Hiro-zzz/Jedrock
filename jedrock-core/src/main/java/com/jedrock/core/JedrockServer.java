@@ -57,6 +57,7 @@ import com.jedrock.core.player.CorePlayer;
 import com.jedrock.core.player.PlayerBroadcast;
 import com.jedrock.core.net.PacketTapRegistry;
 import com.jedrock.core.player.PlayerRegistry;
+import com.jedrock.core.player.PlayerTracker;
 import com.jedrock.core.world.CoreWorld;
 import com.jedrock.core.world.WorldManager;
 import com.jedrock.gameloop.GameLoop;
@@ -127,6 +128,8 @@ public class JedrockServer implements Server {
     private final PlayerRegistry playerRegistry = new PlayerRegistry();
     /** The one place that walks the roster and pushes something to every connection. */
     private final PlayerBroadcast broadcast = new PlayerBroadcast(playerRegistry);
+    /** Who can see whom — the interest set the avatar relays iterate instead of the roster. */
+    private final PlayerTracker tracker;
     /** Puppets and holograms: everything shown that is neither a player nor a block. */
     private final EntityDirector entities;
     /** Named arrangements of props that outlive the script that built them, and the process. */
@@ -208,10 +211,13 @@ public class JedrockServer implements Server {
         this.containers = new ContainerService(playerRegistry, defaultWorld, eventBus, broadcast);
         this.combat = new CombatService(playerRegistry, defaultWorld, eventBus, broadcast, entities, judge);
         this.combat.setItems(items);
-        this.travel = new WorldTravel(playerRegistry, entities, eventBus);
+        // An avatar is only worth showing to a client that has the terrain to stand it on, so the tracker
+        // draws its range from the same view distance the chunk stream uses.
+        this.tracker = new PlayerTracker(playerRegistry, config.viewDistance());
+        this.travel = new WorldTravel(tracker, entities, eventBus);
         // Everything the protocol layer reports lands here, not on the server itself.
-        this.bridge = new ConnectionBridge(this, eventBus, playerRegistry, broadcast, defaultWorld, judge,
-                combat, containers, entities, commandManager, packetTaps, opList, permissions,
+        this.bridge = new ConnectionBridge(this, eventBus, playerRegistry, broadcast, tracker, defaultWorld,
+                judge, combat, containers, entities, commandManager, packetTaps, opList, permissions,
                 regions);
 
         // Attach scheduler + core tick to game loop

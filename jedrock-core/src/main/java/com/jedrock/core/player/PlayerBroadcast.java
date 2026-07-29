@@ -16,6 +16,14 @@ import com.jedrock.api.world.Location;
  *
  * <p>Presentation only. Nothing here decides anything — callers have already applied the state change
  * to the core; this just tells everyone about it.
+ *
+ * <p><b>Roster or interest set?</b> Two kinds of relay live here and they iterate different things. What a
+ * player is <em>told</em> — a chat line, a join announcement — goes to the whole roster, because a message
+ * is not a thing in a place. What a player is <em>shown</em> — a move, a pose, a swing, an item in a hand —
+ * goes to {@link CorePlayer#getVisible()}, the set {@link PlayerTracker} maintains: only clients actually
+ * holding that avatar have anything to apply it to. That set is already world-scoped and range-scoped, so
+ * these loops carry no world check of their own — and the two relays below that never had one (a swing and
+ * a hurt flash both used to reach every client in every world) are correct now for the first time.
  */
 public final class PlayerBroadcast {
 
@@ -40,17 +48,14 @@ public final class PlayerBroadcast {
     }
 
     /**
-     * Relay a player's move to every other player's copy of their avatar — in the same world only. A
-     * player in the nether has no avatar on an overworld client to move, and telling one to move it
-     * anyway is how a ghost appears at the coordinates of someone who isn't there.
+     * Relay a player's move to every client holding their avatar. A player in the nether has no avatar on
+     * an overworld client to move, and neither has one four hundred blocks away in this world — telling
+     * either to move it anyway is how a ghost appears at the coordinates of someone who isn't there.
      */
     public void move(CorePlayer player, double x, double y, double z, float yaw, float pitch) {
         long entityId = player.getEntityId();
-        com.jedrock.api.world.World world = player.getWorld();
-        for (CorePlayer other : players.online()) {
-            if (other != player && other.getWorld() == world) {
-                other.getConnection().moveAvatar(entityId, x, y, z, yaw, pitch);
-            }
+        for (CorePlayer other : player.getVisible()) {
+            other.getConnection().moveAvatar(entityId, x, y, z, yaw, pitch);
         }
     }
 
@@ -73,11 +78,8 @@ public final class PlayerBroadcast {
         boolean sneaking = player.isSneaking();
         boolean sprinting = player.isSprinting();
         boolean usingItem = player.isUsingItem();
-        com.jedrock.api.world.World world = player.getWorld();
-        for (CorePlayer other : players.online()) {
-            if (other != player && other.getWorld() == world) {
-                other.getConnection().setPose(entityId, sneaking, sprinting, usingItem);
-            }
+        for (CorePlayer other : player.getVisible()) {
+            other.getConnection().setPose(entityId, sneaking, sprinting, usingItem);
         }
     }
 
@@ -89,11 +91,8 @@ public final class PlayerBroadcast {
     public void heldItem(CorePlayer holder) {
         int state = holder.getHeldItem();
         long entityId = holder.getEntityId();
-        com.jedrock.api.world.World world = holder.getWorld();
-        for (CorePlayer other : players.online()) {
-            if (other != holder && other.getWorld() == world) {
-                other.getConnection().showHeldItem(entityId, state);
-            }
+        for (CorePlayer other : holder.getVisible()) {
+            other.getConnection().showHeldItem(entityId, state);
         }
     }
 
@@ -109,11 +108,8 @@ public final class PlayerBroadcast {
         int leggings = wearer.getArmor(ArmorSlot.LEGGINGS);
         int boots = wearer.getArmor(ArmorSlot.BOOTS);
         long entityId = wearer.getEntityId();
-        com.jedrock.api.world.World world = wearer.getWorld();
-        for (CorePlayer other : players.online()) {
-            if (other != wearer && other.getWorld() == world) {
-                other.getConnection().showArmor(entityId, helmet, chestplate, leggings, boots);
-            }
+        for (CorePlayer other : wearer.getVisible()) {
+            other.getConnection().showArmor(entityId, helmet, chestplate, leggings, boots);
         }
         wearer.getConnection().sendOwnArmor(helmet, chestplate, leggings, boots);
     }
@@ -142,26 +138,22 @@ public final class PlayerBroadcast {
         }
     }
 
-    /** Relay a player's arm swing to every other client (their own already drew it). */
+    /** Relay a player's arm swing to every client holding their avatar (their own already drew it). */
     public void swing(CorePlayer player) {
         long entityId = player.getEntityId();
-        for (CorePlayer other : players.online()) {
-            if (other != player) {
-                other.getConnection().swingArm(entityId);
-            }
+        for (CorePlayer other : player.getVisible()) {
+            other.getConnection().swingArm(entityId);
         }
     }
 
     /**
-     * Flash the victim's avatar red on every other client. The victim's own client shows the hit from its
-     * dropping health bar, so it doesn't need this. Covers every damage source — PvP, fall, void.
+     * Flash the victim's avatar red on every client holding it. The victim's own client shows the hit from
+     * its dropping health bar, so it doesn't need this. Covers every damage source — PvP, fall, void.
      */
     public void hurtAnimation(CorePlayer victim) {
         long entityId = victim.getEntityId();
-        for (CorePlayer other : players.online()) {
-            if (other != victim) {
-                other.getConnection().playHurtAnimation(entityId);
-            }
+        for (CorePlayer other : victim.getVisible()) {
+            other.getConnection().playHurtAnimation(entityId);
         }
     }
 }
