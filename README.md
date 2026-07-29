@@ -699,6 +699,33 @@ It binds (defaults, configurable):
 The Bedrock listeners bind best-effort — a busy UDP port (the Minecraft Bedrock client itself holds 19132
 for LAN discovery) disables just that edition, never the whole server.
 
+### Releases and packages
+
+Publishing a release runs [one workflow](.github/workflows/publish.yml) that builds, tests and then ships
+two things from that same build: **`jedrock.jar` attached to the release**, for anyone who just wants to
+run a server, and **the modules published to GitHub Packages**, for anything that wants to build against
+`jedrock-api`. One build, so the two can never disagree about what they are.
+
+To depend on the api, add the repository and the module (GitHub Packages requires authentication even to
+read a public package — that is their policy, not this project's, so you will need a token with
+`read:packages` in your `~/.m2/settings.xml`):
+
+```xml
+<repository>
+    <id>github</id>
+    <url>https://maven.pkg.github.com/Hiro-zzz/Jedrock</url>
+</repository>
+
+<dependency>
+    <groupId>com.jedrock</groupId>
+    <artifactId>jedrock-api</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+</dependency>
+```
+
+Note that a **script plugin needs none of this** — `plugins/*.js` is the extension surface, and it needs
+no build at all. The published modules are for someone writing Java against the api.
+
 ### Configuration
 
 Two files, split by who edits them and what it costs to get one wrong.
