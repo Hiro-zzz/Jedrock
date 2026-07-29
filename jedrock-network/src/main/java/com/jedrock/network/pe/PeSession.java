@@ -708,6 +708,11 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
      * that fires only after {@code bedrock.v1_1_5.resync-delay-millis} of quiet — by then the server has caught up, so the
      * chunk reflects the final state, and a whole burst costs a single re-send. Runs on the session's
      * event loop (same thread as inbound), so the dirty set needs no locking. (1.1.5 only.)
+     *
+     * <p>Deferring a targeted {@code UpdateBlock} to this same trailing edge, rather than re-sending the
+     * column, was tried and made no difference — so the client's claim on a cell it edited does not expire
+     * with the burst, and the chunk really is the only correction it honours. See the note in
+     * {@code README.md}'s known limits before reaching for that idea again.
      */
     private void resyncAround(int x, int y, int z) {
         int cx = x >> 4, cz = z >> 4;

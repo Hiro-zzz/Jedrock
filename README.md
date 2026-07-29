@@ -850,6 +850,13 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   menus trade through click-transfer and a `/pick` list instead. The same client also double-fires
   place / break, mitigated server-side by a per-cell debounce but not eliminated. This is specific to
   the protocol-113 client across platforms — not the input method, and not the core.
+- **The ghost correction costs a whole chunk column, and cannot be made cheaper.** That client ignores a
+  standalone `UpdateBlock` contradicting a cell it edited itself (even with `FLAG_PRIORITY`), so a ghost is
+  erased by re-sending the column. The obvious saving — send the targeted `UpdateBlock`s on the same
+  *trailing edge* that made the chunk re-send work, rather than immediately as the original test did — was
+  built and tried on a real client, and changed nothing. So the claim that client stakes on a cell it edited
+  does not expire when the burst does, and the column is not a workaround for bad timing but the only
+  correction it honours. Recorded so the idea isn't rebuilt a third time.
 - **The `/pick` storage list still addresses stacks by slot number** and prints a raw block state. That
   was the only honest option before items had names; now that they do, it's simply not wired up yet.
 - **Forms are out on both PE eras** — the legacy clients predate them, so a menu is a window (Java) or a
