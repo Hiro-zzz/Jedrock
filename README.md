@@ -719,7 +719,7 @@ read a public package — that is their policy, not this project's, so you will 
 <dependency>
     <groupId>com.jedrock</groupId>
     <artifactId>jedrock-api</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
 </dependency>
 ```
 
