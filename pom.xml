@@ -10,6 +10,16 @@
     <packaging>pom</packaging>
 
     <name>Jedrock</name>
+    <url>https://github.com/Hiro-zzz/Jedrock</url>
+
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://github.com/Hiro-zzz/Jedrock/blob/main/LICENSE</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
     <description>Lightweight, highly abstract Minecraft server core with lazy packet parsing. Supports MCPE 1.1.5 and JE 1.12.2.</description>
 
     <modules>

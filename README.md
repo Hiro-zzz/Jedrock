@@ -382,7 +382,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   the region demo had to do until this landed.
 
 - ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
-  backend, not the compiled core: a script gets fourteen globals — `server` / `events` / `scheduler` /
+  backend, not the compiled core — see the **[scripting reference](docs/SCRIPTING.md)**. A script gets
+  fourteen globals — `server` / `events` / `scheduler` /
   `commands` / `packets` / `world` / `worlds` / `entities` / `regions` / `items` / `permissions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
   name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
@@ -918,6 +919,18 @@ promised; it's the list of what would be worth doing next, roughly in the order 
   version-dispatch layer plus a JE **1.20.4** target, deliberately not merged onto the legacy path — the
   1.13+ flattening it implies is a non-goal for the world model as it stands. It stays on the branch
   until there's a reason strong enough to pay for it.
+
+---
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first — it is mostly about which opinions this codebase holds and
+what is permanently out of scope, which is the fastest way to know whether a change will land.
+
+## License
+
+[MIT](LICENSE). Minecraft is a trademark of Mojang Studios; this project is not affiliated with or
+endorsed by Mojang or Microsoft, and ships no Mojang code or assets.
 
 ---
 
