@@ -45,12 +45,9 @@ build/
 # Runtime config written on first run (the templates live in jedrock-core resources).
 /jedrock.properties
 /pipeline.yml
-# Saved world data, written at runtime. The default world is generated on first run and never committed;
-# what a run writes on top of any other world (scenes, regions, a half-written save) isn't either.
-/worlds/world/
-/worlds/*/level.jdw.tmp
-/worlds/*/scenes.jdb
-/worlds/*/regions.jdb
+# Saved world data, written at runtime. No world is committed: a world is generated (or created from a
+# template) on first run, and a baked level file is a few hundred KB of output, not source.
+/worlds/
 # The log folder, and the server's own bookkeeping (ops, permissions, remembered worlds, script storage).
 /logs/
 /data/
