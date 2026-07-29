@@ -382,10 +382,10 @@ public final class CoreWorld implements World {
                 fillBiomes(cx, cz, bio);
                 biomes.putChunk(cx, cz, bio);
                 for (int sy = 0; sy < sections; sy++) {
-                    // fillSection resolves terrain + any loaded edits; store a private copy so the
-                    // reused scratch buffer doesn't alias the section.
+                    // fillSection resolves terrain + any loaded edits; putSection compresses out of the
+                    // buffer without retaining it, so one scratch array serves the whole bake.
                     if (fillSection(cx, sy, cz, scratch)) {
-                        storage.putSection(cx, sy, cz, scratch.clone());
+                        storage.putSection(cx, sy, cz, scratch);
                     }
                 }
             }
@@ -393,6 +393,10 @@ public final class CoreWorld implements World {
         generated = true; // storage is now the world; decoration reads/writes it in generated mode
         if (decorate) {
             generator.decorate(this, seed, lo, hi);
+            // Decoration edits blocks, and an edit expands its section to the mutable 8 KB array — caves and
+            // trees reach most of the world, so the bake would otherwise finish holding two thirds of it
+            // expanded for nothing. Nothing else can touch the world here, and decoration is the last write.
+            storage.compact();
         }
         dirty = true;
     }

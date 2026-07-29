@@ -19,6 +19,8 @@ public final class TickMetrics {
     private final long[] durationNanos = new long[WINDOW];
     private int count;
     private int head;
+    /** Running sum of {@link #durationNanos} over the live window — maintained, not re-summed. */
+    private long sumDurationNanos;
     private long totalTicks;
     private final long startMillis = System.currentTimeMillis();
 
@@ -28,24 +30,24 @@ public final class TickMetrics {
 
     /** Record one completed tick (loop thread only). {@code start}/{@code duration} are in nanoseconds. */
     void record(long tickStartNanos, long tickDurationNanos) {
+        // Slide the window rather than re-walk it: drop the entry about to be overwritten, add the new one.
+        if (count == WINDOW) {
+            sumDurationNanos -= durationNanos[head];
+        }
         startNanos[head] = tickStartNanos;
         durationNanos[head] = tickDurationNanos;
+        sumDurationNanos += tickDurationNanos;
         head = (head + 1) % WINDOW;
         if (count < WINDOW) {
             count++;
         }
         totalTicks++;
 
-        long sum = 0;
-        long oldest = Long.MAX_VALUE;
-        long newest = 0;
-        for (int i = 0; i < count; i++) {
-            sum += durationNanos[i];
-            long s = startNanos[i];
-            if (s < oldest) oldest = s;
-            if (s > newest) newest = s;
-        }
-        mspt = (sum / (double) count) / 1_000_000.0;
+        // nanoTime is monotonic, so the extremes need no scan: the newest start is the one just recorded,
+        // and the oldest is the entry head now points at (the next to be evicted) once the window is full.
+        long oldest = count == WINDOW ? startNanos[head] : startNanos[0];
+        long newest = tickStartNanos;
+        mspt = (sumDurationNanos / (double) count) / 1_000_000.0;
 
         double thisMs = tickDurationNanos / 1_000_000.0;
         if (thisMs > peakMspt) {

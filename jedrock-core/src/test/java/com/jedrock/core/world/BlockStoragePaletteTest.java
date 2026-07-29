@@ -116,6 +116,47 @@ class BlockStoragePaletteTest {
         assertEquals(STONE, s.getId(6, 6, 7), "neighbours keep stone");
     }
 
+    /**
+     * The bake's closing move. Every edit expands its whole section to the mutable 8 KB array, and the
+     * decoration passes edit most of the world — so without this a fresh 48×48 overworld finishes holding
+     * roughly two thirds of its sections expanded, for a world that is never going to change again.
+     * Compacting must give the memory back without moving a single block.
+     */
+    @Test
+    void compactRepacksSectionsPromotedByEditing() {
+        BlockStorage s = new BlockStorage();
+        s.putSection(0, 0, 0, filled(STONE));
+        s.putSection(1, 0, 0, filled(STONE));
+        s.setId(5, 6, 7, DIRT);   // promotes section (0,0,0)
+        s.setId(21, 6, 7, DIRT);  // promotes section (1,0,0)
+        assertEquals(0, s.compressedSections(), "both sections were promoted by the edits");
+
+        assertEquals(2, s.compact(), "both promoted sections were repacked");
+
+        assertEquals(2, s.compressedSections(), "and are compact again");
+        assertEquals(2, s.loadedSections(), "with nothing lost");
+        assertEquals(DIRT, s.getId(5, 6, 7), "the edited cell survived the repack");
+        assertEquals(DIRT, s.getId(21, 6, 7));
+        assertEquals(STONE, s.getId(6, 6, 7), "and so did its neighbours");
+        assertEquals(STONE, s.getId(0, 0, 0));
+    }
+
+    /** A section edited down to nothing is dropped by the repack, not kept as an empty 8 KB array. */
+    @Test
+    void compactDropsASectionEditedToAllAir() {
+        BlockStorage s = new BlockStorage();
+        short[] oneBlock = new short[4096];
+        oneBlock[0] = STONE; // cell (0,0,0) — the section's first index, and its only solid block
+        s.putSection(0, 0, 0, oneBlock);
+        s.setId(0, 0, 0, BlockStorage.AIR); // the only solid cell — the section is now all air
+        assertEquals(1, s.loadedSections(), "still allocated, as a promoted full array");
+
+        s.compact();
+
+        assertEquals(0, s.loadedSections(), "an all-air section is dropped, not repacked");
+        assertEquals(BlockStorage.AIR, s.getId(0, 0, 0));
+    }
+
     @Test
     void snapshotExpandsToFullSectionForPersistence() {
         // A save materializes each section to 4096 cells via SectionEntry.expandInto — verify that round-

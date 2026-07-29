@@ -222,16 +222,18 @@ public final class LevelIO {
                     throw new IOException("Corrupt level: negative section count " + sectionCount);
                 }
                 byte[] buf = new byte[SECTION_BYTES];
+                // One scratch buffer for every section: putSection compresses out of it and never keeps it,
+                // so a load no longer allocates an 8 KB array per section on the way in.
+                short[] scratch = new short[SECTION_SHORTS];
                 for (int s = 0; s < sectionCount; s++) {
                     int chunkX = body.readInt();
                     int chunkZ = body.readInt();
                     int sectionY = body.readUnsignedByte();
                     body.readFully(buf);
-                    short[] d = new short[SECTION_SHORTS];
                     for (int i = 0, j = 0; i < SECTION_SHORTS; i++) {
-                        d[i] = (short) (((buf[j++] & 0xFF) << 8) | (buf[j++] & 0xFF));
+                        scratch[i] = (short) (((buf[j++] & 0xFF) << 8) | (buf[j++] & 0xFF));
                     }
-                    storage.putSection(chunkX, sectionY, chunkZ, d);
+                    storage.putSection(chunkX, sectionY, chunkZ, scratch);
                 }
 
                 int biomeChunkCount = body.readInt();
