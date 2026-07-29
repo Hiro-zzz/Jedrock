@@ -8,9 +8,19 @@ import java.util.concurrent.ConcurrentHashMap;
  * moves. Recentering loads the chunks newly in range (nearest ring first, for gentler pop-in) and
  * unloads those that fell out of range — so a client only ever holds a square window around itself.
  *
- * <p>Recentering (load/unload) only ever runs on the connection's own inbound-movement thread. The
- * loaded set is concurrent so a foreign thread — a block edit relayed from another player — can safely
- * ask {@link #isLoaded} whether to push a targeted chunk refresh (e.g. a placed chest's block-entity).
+ * <p>Recentering is <em>almost</em> always the connection's own inbound-movement thread — but not quite: a
+ * world switch recenters too, and that arrives from whichever thread asked for it (the console, an RCON
+ * session, a script timer on the game loop, another player's {@code /tpall}) while the player may still be
+ * walking. The pass reads the center out of its fields as it walks, so two of them interleaving can walk
+ * one set of rings around two different centers and finish claiming a window it never finished sending —
+ * terrain the client is simply missing until the player crosses another chunk boundary and the next pass
+ * repairs it. Hence the monitor around the pass, and a {@code volatile} center so the no-op check that
+ * fronts it stays lock-free.
+ *
+ * <p>The loaded set is concurrent for the same reason plus one more — a foreign thread (a block edit
+ * relayed from another player) can safely ask {@link #isLoaded} whether to push a targeted chunk refresh.
+ * Being per-chunk atomic, it is also what keeps the damage above to that one transient window rather than
+ * a view that permanently disagrees with the client.
  */
 public final class ChunkView {
 
@@ -22,9 +32,9 @@ public final class ChunkView {
 
     private final int radius;
     private final Set<Long> loaded = ConcurrentHashMap.newKeySet();
-    private int centerX;
-    private int centerZ;
-    private boolean initialized;
+    private volatile int centerX;
+    private volatile int centerZ;
+    private volatile boolean initialized;
 
     public ChunkView(int radius) {
         this.radius = radius;
@@ -35,9 +45,21 @@ public final class ChunkView {
      * every movement packet; the sink only fires for chunks that actually enter or leave the window.
      */
     public void recenter(int chunkX, int chunkZ, Sink sink) {
+        // Lock-free fast path: the overwhelmingly common call is a movement packet that didn't cross a
+        // chunk boundary, and three volatile reads on x86 are three plain loads.
         if (initialized && chunkX == centerX && chunkZ == centerZ) {
             return;
         }
+        synchronized (this) {
+            if (initialized && chunkX == centerX && chunkZ == centerZ) {
+                return; // a concurrent recenter (a world switch, a teleport) already landed here
+            }
+            recenterLocked(chunkX, chunkZ, sink);
+        }
+    }
+
+    /** The actual load/unload pass; the caller holds this view's monitor. */
+    private void recenterLocked(int chunkX, int chunkZ, Sink sink) {
         this.centerX = chunkX;
         this.centerZ = chunkZ;
         this.initialized = true;
@@ -79,7 +101,7 @@ public final class ChunkView {
      * cases an unload packet per chunk would be wasted bytes, and in the second it would make the world
      * blink. The next {@link #recenter} therefore re-sends the whole window.
      */
-    public void forgetAll() {
+    public synchronized void forgetAll() {
         loaded.clear();
         initialized = false;
     }

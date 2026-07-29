@@ -3,7 +3,9 @@ package com.jedrock.api.event;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -138,6 +140,93 @@ class EventBusTest {
         sub.remove();
         sub.remove(); // must not throw
         assertFalse(bus.hasListeners(Ping.class));
+    }
+
+    /**
+     * The hot-path gate caches "nobody is listening for this". A registration landing between the cache
+     * miss's scan and its write must not leave that verdict behind: it would be believed for the rest of
+     * the run, and the listener — a script's {@code PlayerMoveEvent} handler, registered by the hot-reload
+     * watcher while players are walking — would never fire again, with nothing to see in any log.
+     *
+     * <p>Not a theoretical race: against the clear-the-cache invalidation this replaced, this test loses
+     * around one run in two, somewhere past the fiftieth round. The rounds are cheap, so there are enough
+     * of them to make that reliable; with the version stamp in place it cannot fail at all.
+     */
+    @Test
+    void aRegistrationRacingTheGateIsNeverCachedAway() throws InterruptedException {
+        for (int round = 0; round < 300; round++) {
+            EventBus bus = new EventBus();
+            AtomicInteger received = new AtomicInteger();
+            CountDownLatch go = new CountDownLatch(1);
+
+            // One thread fills the cache with misses; the other registers into the middle of that.
+            Thread gate = new Thread(() -> {
+                awaitQuietly(go);
+                for (int i = 0; i < 500; i++) {
+                    bus.hasListeners(Ping.class);
+                }
+            });
+            Thread register = new Thread(() -> {
+                awaitQuietly(go);
+                bus.register(Ping.class, e -> received.incrementAndGet());
+            });
+            gate.start();
+            register.start();
+            go.countDown();
+            gate.join();
+            register.join();
+
+            assertTrue(bus.hasListeners(Ping.class), "round " + round + ": the gate must see the listener");
+            bus.post(new Ping());
+            assertEquals(1, received.get(), "round " + round + ": the listener must actually run");
+        }
+    }
+
+    /**
+     * Registration is not confined to startup — a script reload and a {@code /region create} on a network
+     * thread both land here — and finding the insertion point then inserting there is a read-modify-write
+     * the listener list's own atomicity does not cover. Concurrent registrations must still come out in
+     * priority order, and must not index off the end of a list another thread just shortened.
+     */
+    @Test
+    void concurrentRegistrationKeepsPriorityOrder() throws InterruptedException {
+        EventBus bus = new EventBus();
+        List<Integer> order = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch go = new CountDownLatch(1);
+
+        List<Thread> threads = new ArrayList<>();
+        for (int t = 0; t < 4; t++) {
+            threads.add(new Thread(() -> {
+                awaitQuietly(go);
+                for (int i = 0; i < 25; i++) {
+                    // Interleave the extremes, so an insertion computed against a stale list shows up as
+                    // a HIGH running before a LOW.
+                    bus.register(Ping.class, EventPriority.LOW, e -> order.add(EventPriority.LOW.ordinal()));
+                    bus.register(Ping.class, EventPriority.HIGH, e -> order.add(EventPriority.HIGH.ordinal()));
+                }
+            }));
+        }
+        threads.forEach(Thread::start);
+        go.countDown();
+        for (Thread t : threads) {
+            t.join();
+        }
+
+        bus.post(new Ping());
+
+        assertEquals(200, order.size(), "every registered listener ran");
+        for (int i = 1; i < order.size(); i++) {
+            assertTrue(order.get(i - 1) <= order.get(i),
+                    "listeners ran out of priority order at index " + i + ": " + order);
+        }
+    }
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Test

@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -95,6 +96,78 @@ class ChunkViewTest {
             for (int z = -2; z <= 2; z++) {
                 assertTrue(sink.held.contains(RecordingSink.key(x, z)), "holds " + x + "," + z);
             }
+        }
+    }
+
+    /**
+     * Recentering is not single-threaded after all: a world switch (a {@code /world tp} from the console or
+     * RCON, a script timer on the game loop, another player's {@code /tpall}) recenters from its own thread
+     * while the player may still be walking on theirs.
+     *
+     * <p>A guard, not a reproduction — it is honest to say so. The per-chunk atomicity of the loaded set
+     * means the next clean recenter repairs whatever an interleaving left behind, so this passed against
+     * the unsynchronized version too; what it pins is the property that survives being hammered from two
+     * threads, so a future change that makes the damage permanent has something to fail.
+     */
+    @Test
+    void concurrentRecenteringLeavesTheViewConsistent() throws InterruptedException {
+        for (int round = 0; round < 50; round++) {
+            ChunkView view = new ChunkView(2);
+            // The sink is shared across both threads, so it has to be safe to call from either.
+            ChunkView.Sink sink = new ChunkView.Sink() {
+                @Override public void load(int cx, int cz) {}
+                @Override public void unload(int cx, int cz) {}
+            };
+            view.recenter(0, 0, sink);
+
+            CountDownLatch go = new CountDownLatch(1);
+            Thread walking = new Thread(() -> {
+                awaitQuietly(go);
+                for (int i = 1; i <= 20; i++) {
+                    view.recenter(i, 0, sink);
+                }
+            });
+            Thread travelling = new Thread(() -> {
+                awaitQuietly(go);
+                view.forgetAll();
+                view.recenter(100, 100, sink);
+            });
+            walking.start();
+            travelling.start();
+            go.countDown();
+            walking.join();
+            travelling.join();
+
+            // Settle on a center neither thread used, then the held set must be exactly that window.
+            RecordingSink after = new RecordingSink();
+            view.recenter(50, -50, after);
+            for (int x = 48; x <= 52; x++) {
+                for (int z = -52; z <= -48; z++) {
+                    assertTrue(view.isLoaded(x, z), "round " + round + ": holds " + x + "," + z);
+                }
+            }
+            assertEquals(25, loadedCount(view), "round " + round + ": exactly one 5x5 window is held");
+        }
+    }
+
+    /** How many chunks the view currently holds, probed through its public {@link ChunkView#isLoaded}. */
+    private static int loadedCount(ChunkView view) {
+        int held = 0;
+        for (int x = -60; x <= 110; x++) {
+            for (int z = -60; z <= 110; z++) {
+                if (view.isLoaded(x, z)) {
+                    held++;
+                }
+            }
+        }
+        return held;
+    }
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }

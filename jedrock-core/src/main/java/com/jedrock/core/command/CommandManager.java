@@ -13,21 +13,28 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Registers in-game slash commands and dispatches a chat line that starts with {@code /} to the right
  * one. Registration order is preserved (a {@link LinkedHashMap}) so {@code /help} lists commands in a
  * stable order. Labels (name + aliases) are matched case-insensitively.
+ *
+ * <p><b>Threading.</b> Registration is not confined to startup: the plugin watcher hot-reloads a script on
+ * its own daemon thread and re-registers that script's commands, while players dispatch and tab-complete
+ * from their network threads and the console from its own. So the lookup index is concurrent, and the
+ * ordered set is guarded and only ever handed out as a snapshot — iterating the live map for {@code /help}
+ * while a reload rewrote it is exactly the kind of concurrent modification that fails on the rare tick.
  */
 public final class CommandManager {
 
     private static final JLogger LOGGER = JLogger.getLogger(CommandManager.class);
 
     private final JedrockServer server;
-    /** Registration-ordered set of distinct commands (for /help). */
+    /** Registration-ordered set of distinct commands (for /help). Guarded by itself; see {@link #commands()}. */
     private final Map<String, Command> commands = new LinkedHashMap<>();
-    /** Every label (name + aliases) → its command, for lookup. */
-    private final Map<String, Command> byLabel = new LinkedHashMap<>();
+    /** Every label (name + aliases) → its command, for lookup. Read from every dispatching thread. */
+    private final Map<String, Command> byLabel = new ConcurrentHashMap<>();
 
     public CommandManager(JedrockServer server) {
         this.server = server;
@@ -35,8 +42,11 @@ public final class CommandManager {
 
     /** Register a command under its name and every alias. A later registration overrides a clash. */
     public void register(Command command) {
-        commands.put(command.name().toLowerCase(Locale.ROOT), command);
-        byLabel.put(command.name().toLowerCase(Locale.ROOT), command);
+        String name = command.name().toLowerCase(Locale.ROOT);
+        synchronized (commands) {
+            commands.put(name, command);
+        }
+        byLabel.put(name, command);
         for (String alias : command.aliases()) {
             byLabel.put(alias.toLowerCase(Locale.ROOT), command);
         }
@@ -49,16 +59,24 @@ public final class CommandManager {
      */
     public void unregister(Command command) {
         String name = command.name().toLowerCase(Locale.ROOT);
-        commands.remove(name, command);
+        synchronized (commands) {
+            commands.remove(name, command);
+        }
         byLabel.remove(name, command);
         for (String alias : command.aliases()) {
             byLabel.remove(alias.toLowerCase(Locale.ROOT), command);
         }
     }
 
-    /** The distinct registered commands, in registration order (for {@code /help}). */
+    /**
+     * The distinct registered commands, in registration order (for {@code /help}). A snapshot, not the live
+     * view: a hot-reload can rewrite the set from another thread mid-iteration, and {@code /help} is cold
+     * enough that a copy costs nothing worth counting.
+     */
     public Collection<Command> commands() {
-        return commands.values();
+        synchronized (commands) {
+            return List.copyOf(commands.values());
+        }
     }
 
     /** Look up a command by any of its labels (case-insensitive), or {@code null}. */
@@ -127,7 +145,7 @@ public final class CommandManager {
             // Completing the command name itself. Suggest labels the sender may run, each with its slash.
             String partial = tokens.length == 0 ? "" : tokens[0].toLowerCase(Locale.ROOT);
             List<String> out = new ArrayList<>();
-            for (Command command : commands.values()) {
+            for (Command command : commands()) {
                 if (!canUse(sender, command)) {
                     continue;
                 }

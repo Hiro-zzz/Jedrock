@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
@@ -28,7 +29,10 @@ import java.util.function.Consumer;
  *
  * <p>Thread-safety: registration and dispatch are safe to interleave (a {@link CopyOnWriteArrayList}
  * backs the listener list). Listeners run on whatever thread calls {@link #post} — often a network I/O
- * thread — so a listener must be quick and not block.
+ * thread — so a listener must be quick and not block. Registration and removal come from several threads
+ * too (a script hot-reload, a {@code /region create} on a network thread), so the ordered insertion is
+ * serialized on {@link #mutationLock} — a read-modify-write over the list, which the list's own atomicity
+ * does not cover.
  */
 public final class EventBus {
 
@@ -37,10 +41,32 @@ public final class EventBus {
     private final List<Registration<?>> listeners = new CopyOnWriteArrayList<>();
 
     /**
-     * Cache of "does any registered listener match this concrete event class?", so the hot path pays the
-     * assignability scan once per event type, not once per post. Cleared whenever the listener set changes.
+     * Guards the ordered insertion in {@link #register} and the version bump: finding the insertion point
+     * and inserting there is a read-modify-write, so two concurrent registrations could otherwise compute
+     * indices against a list that has since moved — landing a listener at the wrong priority, or throwing
+     * out of bounds against a list a concurrent removal shrank.
      */
-    private final Map<Class<?>, Boolean> interestCache = new ConcurrentHashMap<>();
+    private final Object mutationLock = new Object();
+
+    /**
+     * Bumped on every change to the listener set. It is what makes {@link #interestCache} safe to fill
+     * without a lock: an entry records the version it was computed under, so a verdict reached while the
+     * set was moving is simply ignored rather than trusted. Invalidating by clearing the cache instead
+     * would leave the window that matters — a scan that finds nothing, a registration that clears, then
+     * the scan's stale {@code false} written after the clear and cached forever, silently gating the
+     * listener out of the hot path for the rest of the run.
+     */
+    private final AtomicLong listenerVersion = new AtomicLong();
+
+    /**
+     * Cache of "does any registered listener match this concrete event class?", so the hot path pays the
+     * assignability scan once per event type, not once per post. Each entry carries the
+     * {@link #listenerVersion} it was computed under; a stale one is re-scanned rather than believed.
+     */
+    private final Map<Class<?>, Interest> interestCache = new ConcurrentHashMap<>();
+
+    /** A cached {@link #hasListeners} verdict, stamped with the listener-set version it was computed under. */
+    private record Interest(long version, boolean any) {}
 
     /** Register a {@link EventPriority#NORMAL} listener that runs even for an already-cancelled event. */
     public <E extends Event> Subscription register(Class<E> eventType, Consumer<E> handler) {
@@ -66,12 +92,16 @@ public final class EventBus {
                                                    boolean ignoreCancelled, Consumer<E> handler) {
         Registration<E> registration = new Registration<>(eventType, priority, ignoreCancelled, handler);
         // Keep the list sorted by priority so post() is a straight walk. Insertion is rare; posting is hot.
-        int i = 0;
-        while (i < listeners.size() && listeners.get(i).priority.ordinal() <= priority.ordinal()) {
-            i++;
+        // Under the lock: the scan and the insert are one operation, and the version bump follows the
+        // change so a hasListeners racing it can tell its answer came from the older set.
+        synchronized (mutationLock) {
+            int i = 0;
+            while (i < listeners.size() && listeners.get(i).priority.ordinal() <= priority.ordinal()) {
+                i++;
+            }
+            listeners.add(i, registration);
+            listenerVersion.incrementAndGet();
         }
-        listeners.add(i, registration);
-        interestCache.clear();
         return registration;
     }
 
@@ -107,9 +137,12 @@ public final class EventBus {
      * first call for that type.
      */
     public boolean hasListeners(Class<? extends Event> eventType) {
-        Boolean cached = interestCache.get(eventType);
-        if (cached != null) {
-            return cached;
+        // Read the version first: a cached verdict is only trusted if the set hasn't moved since, and a
+        // fresh scan is only cached against the version it actually saw.
+        long version = listenerVersion.get();
+        Interest cached = interestCache.get(eventType);
+        if (cached != null && cached.version() == version) {
+            return cached.any();
         }
         boolean any = false;
         for (Registration<?> registration : listeners) {
@@ -118,14 +151,18 @@ public final class EventBus {
                 break;
             }
         }
-        interestCache.put(eventType, any);
+        // Racing a registration can only cache the answer under the older version, which the next call
+        // discards — never a stale verdict that outlives the change that invalidated it.
+        interestCache.put(eventType, new Interest(version, any));
         return any;
     }
 
     /** Remove every listener registered with the given handler instance (all priorities). */
     public void unregister(Consumer<?> handler) {
-        if (listeners.removeIf(registration -> registration.handler == handler)) {
-            interestCache.clear();
+        synchronized (mutationLock) {
+            if (listeners.removeIf(registration -> registration.handler == handler)) {
+                listenerVersion.incrementAndGet();
+            }
         }
     }
 
@@ -150,8 +187,10 @@ public final class EventBus {
 
         @Override
         public void remove() {
-            if (listeners.remove(this)) {
-                interestCache.clear();
+            synchronized (mutationLock) {
+                if (listeners.remove(this)) {
+                    listenerVersion.incrementAndGet();
+                }
             }
         }
     }
