@@ -4,7 +4,90 @@ All notable changes to Jedrock are recorded here. This is an internal project lo
 loosely follows [Keep a Changelog](https://keepachangelog.com/). The project is pre-1.0 and
 unstable — anything may change between entries.
 
-## [Unreleased]
+## [0.2.0] — 2026-07-29
+
+### Fixed
+
+- **A script's event listener could stop firing after a hot reload, permanently and silently.** The event
+  bus caches "nobody is listening for this" so the movement hot path can skip building an event, and it
+  invalidated that cache by clearing it. A gate that scanned, found nothing, and wrote its verdict *after*
+  a concurrent registration had already cleared, left a stale `false` behind for the rest of the run — so a
+  `PlayerMoveEvent` listener registered by the hot-reload watcher while players were walking would never
+  fire again, with nothing to see in any log. It reproduces: against the old code the new test loses about
+  one run in two, somewhere past the fiftieth round. Each cache entry now carries the listener-set version
+  it was computed under, so a verdict reached while the set was moving is discarded rather than believed,
+  and clearing is gone. Registration also takes a lock — finding the insertion point and inserting there is
+  a read-modify-write the list's own atomicity does not cover, and it is not confined to startup: a script
+  reload and a `/region create` on a network thread both land in it.
+
+- **A whole 16³ block of the world could be read as air.** Promoting a compact section to its mutable form
+  filled a fresh array and then published it with a plain array store, which does not publish the fill. A
+  reader on another thread could legally observe the new array still zeroed — a chunk that renders as a
+  hole, not a cell that flickers. Section slots are written with a release store and read with an acquire
+  load now, which on x86 costs nothing beyond forbidding the reordering.
+
+- **Two shared tables were read while the plugin watcher rewrote them.** `CommandManager` held plain
+  `LinkedHashMap`s while a reloaded script's commands are re-registered from the watcher's own daemon
+  thread and players dispatch and tab-complete from theirs. The lookup index is concurrent; the ordered set
+  is guarded and only handed out as a snapshot, since iterating it live for `/help` was the concurrent
+  modification waiting to happen.
+
+- **The chunk view assumed recentering was one thread.** A world switch recenters too, from whichever
+  thread asked for it — the console, an RCON session, a script timer — while the player may still be
+  walking. Two passes interleaving can walk one set of rings around two different centres and finish
+  claiming a window they never finished sending. The pass is serialised; the centre is `volatile` so the
+  no-op check that fronts it stays lock-free.
+
+- **Publishing left half a release in the registry when a late test failed.** Maven runs its lifecycle per
+  module, so one `deploy` published each module as it finished — and GitHub Packages refuses to overwrite a
+  published version, making that half-release permanent. The workflow verifies everything first, then
+  deploys with tests skipped.
+
+- **The RCON deferral test raced, and only lost the race on CI.**
+
+### Changed
+
+- **A freshly baked world stops holding two thirds of itself expanded.** Found in a log line rather than a
+  profiler: `Baked 11434 sections (3900 compressed)`. The bake stores compact paletted sections, but the
+  decoration passes that follow edit blocks, and an edit promotes its whole section to the mutable 8 KB
+  array — caves and trees reach most of the world. `BlockStorage.compact()` repacks them once, at the end
+  of the bake, where nothing else can touch the world. Measured on a real boot with a full GC before each
+  reading: **live heap 68.3 MB → 15.4 MB, committed heap 237 MB → 57 MB.** Only the first boot ever paid
+  it, since the world is saved straight after and a load installs compact sections. It lowers the resting
+  cost, not the peak: a fresh world still needs about 128 MB of heap to bake, where an existing one now
+  boots in 24 MB with all three listeners up. Deliberately not run on a timer — a compact section costs a
+  promotion on the next edit. `putSection` no longer retains the array it is handed either, so the bake and
+  the level load each run on one scratch buffer instead of an 8 KB copy per section.
+
+- **An avatar goes only to the clients that could actually see it.** Every player held an avatar of every
+  other player in their world, and every relay walked the whole roster: n players walking cost n² writes a
+  tick, most of them moving an avatar in terrain the receiving client was never sent. `PlayerTracker` keeps
+  a symmetric interest set — chunk-square distance against the same radius the chunk stream uses, refreshed
+  only when a player crosses a chunk boundary, with one chunk of hysteresis so an edge does not chatter.
+  Two things fell out of it: a pair refreshed from both sides at once no longer sends a client a second
+  spawn for an avatar it already holds (not cosmetic on 1.1.5), and `swing` / `hurtAnimation`, which never
+  checked the world at all, stopped animating stray entity ids across dimensions. A scaling change rather
+  than a saving — with a handful of players it does what the roster loop did — and a visible one: players
+  stop rendering at about 96 blocks with the default view distance of 6.
+
+- **The player-facing text is all one language.** Twenty strings were Russian while the README, the docs and
+  every other message were English — and the ones that mattered were in the `/pick` storage list and the
+  1.1.5 chest transfer, which is the path a Bedrock player uses most. Only the words changed.
+
+- **A closed avenue on 1.1.5 is written down.** That client ignores a standalone `UpdateBlock` contradicting
+  a cell it edited itself, so a ghost is erased by re-sending the chunk column. The obvious saving — send
+  the targeted packets on the same *trailing edge* that made the chunk re-send work, rather than immediately
+  as the original test did — was built, tested on a real client, and changed nothing. The claim that client
+  stakes on an edited cell does not expire when the burst does. Recorded in the README's known limits and in
+  `resyncAround`'s javadoc, which is cheaper than building it a third time.
+
+### Added
+
+- **A scripting reference, a contributing guide, and a licence.** `docs/SCRIPTING.md` is written from the
+  code rather than from memory, down to which parts of the JavaScript dialect Rhino actually supports and
+  where a Java collection stops behaving like a JS array. `CONTRIBUTING.md` is mostly about what is
+  permanently out of scope, because that is the fastest way to know whether a change can land. MIT, with the
+  trademark note a Minecraft project owes Mojang, declared in the pom so it travels with the packages.
 
 ### Added
 
