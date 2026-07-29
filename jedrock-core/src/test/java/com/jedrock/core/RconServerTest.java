@@ -10,7 +10,8 @@ import java.io.OutputStream;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -54,6 +55,7 @@ class RconServerTest {
     void aCorrectPasswordIsAcceptedAndCommandsRun() throws IOException {
         int port = start(null);
         try (Socket client = new Socket("127.0.0.1", port)) {
+            client.setSoTimeout(5_000);
             InputStream in = client.getInputStream();
             OutputStream out = client.getOutputStream();
 
@@ -76,6 +78,7 @@ class RconServerTest {
     void aWrongPasswordIsRefusedAndTheConnectionEnds() throws IOException {
         int port = start(null);
         try (Socket client = new Socket("127.0.0.1", port)) {
+            client.setSoTimeout(5_000);
             InputStream in = client.getInputStream();
             send(client.getOutputStream(), new RconPacket(5, RconPacket.TYPE_AUTH, "not-the-password"));
 
@@ -94,6 +97,7 @@ class RconServerTest {
     void aCommandBeforeAuthenticatingRunsNothing() throws IOException {
         int port = start(null);
         try (Socket client = new Socket("127.0.0.1", port)) {
+            client.setSoTimeout(5_000);
             InputStream in = client.getInputStream();
             send(client.getOutputStream(), new RconPacket(1, RconPacket.TYPE_EXEC_COMMAND, "stop"));
 
@@ -105,21 +109,37 @@ class RconServerTest {
     }
 
     @Test
-    void deferredWorkRunsOnlyAfterTheReplyIsSent() throws IOException {
-        AtomicBoolean shutdownRan = new AtomicBoolean();
-        int port = start(() -> shutdownRan.set(true));
+    void theReplyIsSentBeforeTheDeferredWorkRuns() throws IOException, InterruptedException {
+        // Asking "has it run yet?" the moment the reply arrives would be a race, not a test: the server
+        // writes and then defers, so a client can legitimately read the answer before the other thread
+        // gets to the Runnable. Instead the deferred work BLOCKS, and the question becomes one the
+        // implementation can only pass one way — can the reply get out while it is stuck?
+        CountDownLatch deferredStarted = new CountDownLatch(1);
+        CountDownLatch releaseDeferred = new CountDownLatch(1);
+        int port = start(() -> {
+            deferredStarted.countDown();
+            try {
+                releaseDeferred.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
         try (Socket client = new Socket("127.0.0.1", port)) {
+            client.setSoTimeout(5_000); // a regression must fail here, not hang the build
             InputStream in = client.getInputStream();
             OutputStream out = client.getOutputStream();
             authenticate(in, out);
 
             send(out, new RconPacket(9, RconPacket.TYPE_EXEC_COMMAND, "stop"));
-            RconPacket reply = RconPacket.read(in);
 
-            // The point of the deferral: over a socket, a shutdown that ran inline would take the answer
-            // with it, and the administrator who typed 'stop' would see a dropped connection instead.
+            // If `stop` ran inline — the bug the deferral exists to prevent — the answer would be stuck
+            // behind it and this read would time out instead of returning. Over a socket that is what an
+            // administrator sees as a dropped connection instead of "stopping…".
+            RconPacket reply = RconPacket.read(in);
             assertEquals("ran: stop", reply.body());
-            assertTrue(shutdownRan.get(), "…and only then does the deferred work run");
+            assertTrue(deferredStarted.await(5, TimeUnit.SECONDS), "and the deferred work does run");
+        } finally {
+            releaseDeferred.countDown(); // let the session thread finish however the test ended
         }
     }
 
