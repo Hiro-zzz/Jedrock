@@ -37,6 +37,11 @@ public final class SayCommand implements Command {
             sender.sendMessage("{red}Usage: " + usage());
             return;
         }
+        // Checked after the usage line, not before: a muted player who mistyped the command
+        // should be told they mistyped it, and a caller with no server yet still gets that far.
+        if (server.getModeration().silence(sender)) {
+            return;
+        }
         String message = String.join(" ", args);
         server.broadcast("{light_purple}[Server] {reset}" + message);
     }

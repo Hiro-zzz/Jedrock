@@ -619,6 +619,17 @@ final class ConnectionBridge implements ConnectionListener {
             commandManager.dispatch(sender, "/" + command);
             return;
         }
+        // Muted: the line stops here and only the speaker is told, since a broadcast saying somebody was
+        // silenced is a worse punishment than the silence. Checked before the chat event so a listener
+        // sees only lines that were actually going somewhere.
+        if (server != null && server.getModeration() != null) {
+            com.jedrock.core.moderation.Punishment mute =
+                    server.getModeration().muteFor(sender.getName());
+            if (mute != null) {
+                sender.sendMessage(server.getModeration().muteNotice(mute));
+                return;
+            }
+        }
         // Let listeners edit or veto the line before it goes out (cancel suppresses it). Only built when a
         // listener wants it — with none, the default format applies and no event is allocated.
         String format = PlayerChatEvent.DEFAULT_FORMAT;

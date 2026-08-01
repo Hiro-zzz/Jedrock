@@ -19,6 +19,15 @@ import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Dimension;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
+import com.jedrock.core.command.BanCommand;
+import com.jedrock.core.command.BanIpCommand;
+import com.jedrock.core.command.BanListCommand;
+import com.jedrock.core.command.KickCommand;
+import com.jedrock.core.command.MuteCommand;
+import com.jedrock.core.command.PardonCommand;
+import com.jedrock.core.command.PlayerInfoCommand;
+import com.jedrock.core.command.SeenCommand;
+import com.jedrock.core.command.WhitelistCommand;
 import com.jedrock.core.command.ClearCommand;
 import com.jedrock.core.command.CommandManager;
 import com.jedrock.core.command.GameModeCommand;
@@ -118,6 +127,8 @@ public class JedrockServer implements Server {
     private volatile RconServer rcon;
     /** Where the small persistent facts go — files by default, a database if one was asked for. */
     private final com.jedrock.core.data.DataStore storage;
+    /** Who may be here and who may speak: bans, ip-bans, mutes, the whitelist, and when people were last on. */
+    private final com.jedrock.core.moderation.Moderation moderation;
 
     /** The scripting layer: JS plugins in {@code plugins/} that subscribe to events and register commands. */
     private final PluginManager plugins;
@@ -190,6 +201,9 @@ public class JedrockServer implements Server {
 
         this.opList = new OpList(layout.dataFile("ops.txt"));
         this.permissions = new PermissionManager(layout.dataFile("permissions.txt"));
+        // Built here, before anything can connect: it registers the login gate, and a ban that only
+        // starts applying once the server is fully up is not a ban.
+        this.moderation = new com.jedrock.core.moderation.Moderation(storage, eventBus, opList);
         this.playerWorlds = new com.jedrock.core.player.PlayerWorlds(storage);
         this.pluginStorageFile = layout.dataFile("plugin-storage.jdb");
         this.plugins = new PluginManager(eventBus, this, scheduler, commandManager, packetTaps,
@@ -271,6 +285,15 @@ public class JedrockServer implements Server {
         commandManager.register(new HologramCommand());
         commandManager.register(new OpCommand());
         commandManager.register(new DeopCommand());
+        commandManager.register(new BanCommand());
+        commandManager.register(new BanIpCommand());
+        commandManager.register(new KickCommand());
+        commandManager.register(new MuteCommand());
+        commandManager.register(new PardonCommand());
+        commandManager.register(new BanListCommand());
+        commandManager.register(new WhitelistCommand());
+        commandManager.register(new SeenCommand());
+        commandManager.register(new PlayerInfoCommand());
         commandManager.register(new PermCommand());
         commandManager.register(new PickCommand());
         commandManager.register(new RegionCommand());
@@ -290,6 +313,11 @@ public class JedrockServer implements Server {
     /** The group-based permission system — used by {@code /perm} and by permission checks. */
     public PermissionManager getPermissions() {
         return permissions;
+    }
+
+    /** Bans, ip-bans, mutes, the whitelist and last-seen — used by the moderation commands and scripts. */
+    public com.jedrock.core.moderation.Moderation getModeration() {
+        return moderation;
     }
 
     /**

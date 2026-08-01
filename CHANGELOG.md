@@ -6,6 +6,41 @@ unstable — anything may change between entries.
 
 ## [Unreleased]
 
+### Added
+
+- **Moderation: bans, ip-bans, mutes, a whitelist, and the commands to run them.** `/ban`, `/ban-ip`,
+  `/kick`, `/mute`, `/pardon`, `/banlist`, `/whitelist`, `/seen` and `/playerinfo`. `/kick` is the one that
+  was simply missing — the console has had it since it existed, so an operator standing next to the problem
+  had to go and find a terminal.
+
+  Almost none of this needed new machinery. A ban **is** a cancelled `PlayerLoginEvent`, which is what that
+  event was built for and says so in its own documentation, and a mute is a suppressed chat line — so the
+  two decisions sit at points the core already routed through, and a script can watch or overrule either at
+  a higher priority like any other rule here. A punishment carries an expiry, which is why there is no
+  `/tempban`: `/ban alice 2d spam` is the same command. Expiry is lazy — a lapsed entry reads as absent and
+  is dropped the next time the file is written, because a punishment running out is not an event anybody is
+  waiting for.
+
+  Two decisions worth stating. **Targets are names**, matching `ops.txt`: this server has no Mojang
+  authentication at all, a 0.14 client picks whatever name it likes, and a ban has to work on somebody who
+  has never connected — so a uuid would be a weaker identity here, not a stronger one. The cost is that a
+  rename walks around a ban, which is what `/ban-ip` is for and why it exists despite being the blunter
+  instrument. And this goes through **`DataStore`** rather than into its own text file, unlike `ops.txt` and
+  `permissions.txt`: those two stay text because an administrator edits them by hand, while a ban list is
+  written by commands and read by the gate — and it is the one piece of server state whose obvious next want
+  is sharing, which is the case that storage layer exists for. It inherits the jdbc backend for nothing.
+
+  A mute covers `/me`, `/msg` and `/say` as well as plain chat, because a rule anybody steps around in one
+  keystroke is not a rule. The whitelist waives itself for operators — one that can lock the administrator
+  out of their own server the moment they enable it is a foot-gun — but a ban is not waived, since a ban is
+  a decision somebody made and the console can always lift it.
+
+- **The `punishments` script global.** `ban` / `banIp` / `mute` / `kick` / `pardon` / `isBanned` /
+  `isMuted` / `info` / `list`, plus the whitelist and `lastSeen`. Here for the reason the `permissions`
+  global was: without it a script had to build a `'/ban ' + name + ' ' + reason` string for
+  `dispatchCommand`, which breaks the moment a reason contains a space and cannot answer a question at all —
+  an anti-spam script wants to *ask* whether somebody is already muted.
+
 ### Fixed
 
 - **A script could not overrule a region, though the docs said it could.** The README has always described

@@ -267,6 +267,12 @@ public final class PluginManager {
                         ScriptableObject.putProperty(scope, "permissions",
                                 Context.javaToJS(new ScriptPermissions(js.getPermissions(), js.getOpList()),
                                         scope));
+                        // Server state too, and for the same reason permissions is: without it a script
+                        // that wants to ban somebody has to build a command string, and one that wants to
+                        // ASK whether they are banned cannot.
+                        ScriptableObject.putProperty(scope, "punishments",
+                                Context.javaToJS(
+                                        new ScriptPunishments(js.getModeration(), server, name), scope));
                     }
                 }
                 // menus needs no server to be built (only open() does, which guards for one), so it is

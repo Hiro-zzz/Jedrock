@@ -22,7 +22,7 @@ That is a complete plugin.
 ## Contents
 
 - [The basics](#the-basics) · [The JavaScript dialect](#the-javascript-dialect) · [Blocks and items are numbers](#blocks-and-items-are-numbers) · [Text markup](#text-markup)
-- Globals: [`events`](#events) · [`commands`](#commands) · [`server`](#server) · [`world`](#world) · [`worlds`](#worlds) · [`entities`](#entities) · [`scheduler`](#scheduler) · [`storage`](#storage) · [`regions`](#regions) · [`permissions`](#permissions) · [`items`](#items) · [`menus`](#menus) · [`packets`](#packets) · [`console`](#console)
+- Globals: [`events`](#events) · [`commands`](#commands) · [`server`](#server) · [`world`](#world) · [`worlds`](#worlds) · [`entities`](#entities) · [`scheduler`](#scheduler) · [`storage`](#storage) · [`regions`](#regions) · [`permissions`](#permissions) · [`punishments`](#punishments) · [`items`](#items) · [`menus`](#menus) · [`packets`](#packets) · [`console`](#console)
 - [Every event](#every-event) · [Custom events](#custom-events) · [Limits worth knowing](#limits-worth-knowing)
 
 ---
@@ -454,6 +454,52 @@ permissions.reload()
 
 Nodes support wildcards (`myserver.*`), explicit denial, group inheritance and a chat prefix. An operator
 holds every node.
+
+---
+
+## `punishments`
+
+Bans, ip-bans, mutes and the whitelist — the same state `/ban` and `/whitelist` write, so a script and an
+operator are editing one list.
+
+```js
+punishments.ban(player, 'Broke spawn', '3d');   // '3d', 30000 (ms), or nothing for permanent
+punishments.banIp(player, 'Evading');
+punishments.mute('loud', 'Caps', '30m');
+punishments.kick(player, 'Take five');          // records nothing — a kick is not a ban
+
+punishments.pardon('griefer');                  // every kind at once
+punishments.pardon('griefer', 'mute');          // …or one
+
+if (punishments.isMuted(player)) { … }
+punishments.info('griefer', 'ban').getRemaining();     // ms left, -1 if permanent
+punishments.list('ban');                               // everything in force
+punishments.lastSeen('griefer');                       // ms since the epoch, 0 if never
+
+punishments.whitelist().add('alice');
+punishments.whitelist().setEnabled(true);
+```
+
+**This is server state**, like regions and permissions: written immediately and *not* torn down when your
+plugin reloads. A script that bans somebody on Tuesday has banned them.
+
+Targets are **names** (an ip ban's is an address), because there is no authentication on this server and a
+ban has to work on somebody who has never connected. A player object works anywhere a name does.
+
+An anti-spam script is the shape this exists for — it needs to *ask* whether somebody is already muted,
+which building a `/mute …` string for `dispatchCommand` could never do:
+
+```js
+const recent = {};
+events.on('PlayerChat', function (e) {
+    const name = e.getPlayer().getName();
+    const now = Date.now();
+    recent[name] = (recent[name] || []).filter(t => now - t < 5000).concat(now);
+    if (recent[name].length > 5 && !punishments.isMuted(e.getPlayer())) {
+        punishments.mute(e.getPlayer(), 'Flooding chat', '10m');
+    }
+});
+```
 
 ---
 

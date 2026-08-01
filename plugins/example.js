@@ -37,6 +37,9 @@
 //   permissions— groups and rights: createGroup(n) → .add(node) / .inherit(g) / .setPrefix(s);
 //                forPlayer(p or 'Name') → .addGroup / .add(node) / .has / .isOp / .setOp. Server state,
 //                written straight to permissions.txt — a script no longer builds /perm command strings.
+//   punishments— ban / banIp / mute / kick / pardon, and isBanned / isMuted / info / list to ASK. Plus
+//                whitelist() and lastSeen(). Durations are '2d', a number of ms, or nothing for permanent.
+//                Server state, like permissions: not undone by a reload. See /antispam.
 //   storage    — the only thing that survives a restart: get / set / has / remove / keys / size / clear,
 //                plus forPlayer(p) for per-player state. Strings, numbers, booleans, objects and arrays.
 //   events     — events.on(name, fn): subscribe to a built-in event (40 of them; events.names() lists them)
@@ -513,6 +516,51 @@ commands.register('zone', function (player, args) {
     permissions.forPlayer(player).add(zone.getBypassPermission('build'));
     player.sendMessage('{gray}You are exempt from its build rule; others are not.');
     player.sendMessage('{gray}Try breaking a block inside it. {white}/region info demo{gray} lists the nodes.');
+});
+
+// /antispam — the shape the `punishments` global exists for. Note what a command string could not do:
+// ASK whether somebody is already muted. Building '/mute ' + name + ' ...' for dispatchCommand can hand
+// out a punishment but can never answer a question, and it breaks the moment a name has a space in it.
+//
+// These are SERVER state: the mute below outlives this script, a hot reload and a restart, exactly like a
+// region or a permission. That is deliberate — a punishment that a plugin edit quietly undid would be
+// worse than no punishment at all.
+var chatTimes = {};
+var antispam = false;
+
+commands.register('antispam', function (player, args) {
+    antispam = !antispam;
+    player.sendMessage(antispam ? '{green}Anti-spam on {gray}(6 lines in 5s = a 10m mute)'
+                                : '{gray}Anti-spam off.');
+});
+
+events.on('PlayerChat', function (e) {
+    if (!antispam) return;
+    var name = e.getPlayer().getName();
+    var now = Date.now();
+    chatTimes[name] = (chatTimes[name] || []).filter(function (t) { return now - t < 5000; });
+    chatTimes[name].push(now);
+    if (chatTimes[name].length > 5 && !punishments.isMuted(e.getPlayer())) {
+        punishments.mute(e.getPlayer(), 'Flooding chat', '10m');
+        console.warn('muted ' + name + ' for flooding');
+    }
+});
+
+// /rapsheet — reading the same lists /banlist and /playerinfo read.
+commands.register('rapsheet', function (player, args) {
+    var who = args.length > 0 ? args[0] : player.getName();
+    ['ban', 'ip', 'mute'].forEach(function (kind) {
+        var found = punishments.info(who, kind);
+        if (found) {
+            player.sendMessage('{red}' + kind + '{gray}: ' + found.getReason()
+                + ' {dark_gray}(by ' + found.getIssuer()
+                + ', ' + (found.isPermanent() ? 'permanent'
+                        : Math.round(found.getRemaining() / 60000) + 'm left') + ')');
+        }
+    });
+    player.sendMessage('{gray}Banned: {white}' + punishments.isBanned(who)
+        + '{gray}, muted: {white}' + punishments.isMuted(who)
+        + '{gray}, bans in force: {white}' + punishments.list('ban').length);
 });
 
 // /override — the other way to beat a region, and the reason event PRIORITY is worth knowing about.

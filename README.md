@@ -197,11 +197,27 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   Bedrock is handed an `AvailableCommands` manifest so its client parses the line and sends it back. The
   built-in set: `/help [cmd]`, `/list`, `/tps`, `/say`, `/me`, `/msg`, `/gamemode`, `/tp`, `/tphere`,
   `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/op`, `/deop`, `/perm`, `/region`, `/world`, `/pick`,
-  `/puppet`, `/hologram`. A deliberately minimal **survival inventory** (36 slots)
+  `/puppet`, `/hologram`, plus the [moderation set](#moderation). A deliberately minimal **survival inventory** (36 slots)
   tracks only what a survival player mines and places: mining a block drops it into the hotbar, placing
   consumes it, and the changed slot is pushed live so the HUD refreshes. On PE 1.1.5 the player window is
   serialized PMMP-exact (45 slots + a 9-entry hotbar-link array), without which mined items filled storage
   but the on-screen hotbar stayed empty.
+- ✅ <a id="moderation"></a>**Moderation — bans, ip-bans, mutes and a whitelist.** `/ban`, `/ban-ip`,
+  `/kick`, `/mute`, `/pardon` (every kind at once, or one named), `/banlist`, `/whitelist`, `/seen` and
+  `/playerinfo`. Almost none of it is new machinery: a ban **is** a cancelled `PlayerLoginEvent`, which is
+  what that event was built for, and a mute is a suppressed chat line — so both decisions are made at
+  points the core already routes through, and a script can watch or overrule either at a higher priority
+  like any other rule here. A punishment carries an **expiry**, so there is no `/tempban`:
+  `/ban alice 2d spam` is the same command, and a duration needs a unit precisely so
+  `/ban alice 30 spam` cannot silently mean thirty of something. Expiry is lazy — a lapsed entry reads as
+  absent and is dropped on the next write, with nothing ticking.
+  **Targets are names**, like `ops.txt`: there is no Mojang authentication here (a 0.14 client picks its
+  own name), and a ban has to work on somebody who has never connected, so a uuid would be the weaker
+  identity. The cost is that a rename walks around one — which is what `/ban-ip` is for, and why it exists
+  despite catching whole households. State goes through the [storage layer](#storage) rather than into its
+  own text file, so a network of servers can share one ban list; `ops.txt` and `permissions.txt` stay text
+  because those two are the ones edited by hand. A mute covers `/me`, `/msg` and `/say` as well as chat,
+  and the whitelist waives itself for operators (a ban does not).
 - ✅ **One command surface, unified console and permissions.** A command is written against a
   `CommandSender` — a player *or* the server console — so the same command runs from chat and from stdin:
   type `op alice` or `gamemode creative bob` straight into the console (it acts as an operator), and a
@@ -777,7 +793,8 @@ someone else chose.
 
 ### Storage
 
-The server's small persistent facts — today, which world each player was last in — go through a
+The server's small persistent facts — which world each player was last in, the ban / ip-ban / mute lists,
+the whitelist, and when each player was last seen — go through a
 `DataStore` with two backends. **`flatfile`** is the default and writes the same `key=value` files in
 `data/` it always did: a few kilobytes, editable in any text editor, nothing to run. **`jdbc`** is there
 for whoever wants them in a database instead — a network of servers sharing one account of who is where,
