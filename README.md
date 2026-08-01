@@ -918,11 +918,15 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   happens when the ground under it was dug away or the world shrank around it, and this server models no
   falling. On **0.14** the rejoin has the destination's blocks, spawn and biome tint under an overworld
   sky, for the same reason travel there does.
-- **Parts of the PE wire have never met a real client.** Join, movement, chat, edits and inventories
-  have; the newer illusions largely haven't. Everything ground-truthed against PocketMine is byte-tested,
-  but a byte test only proves the encoder agrees with itself — the item-NBT dialect passed its own tests
-  and still failed on a real client. Where a client is the only other judge, read "tested" as "not yet
-  disproven".
+- **On the PE wire, a byte test is not the last word.** The surface itself has been walked through with
+  real clients on both eras and works — join, movement, chat, edits, inventories, the illusion toolkit —
+  apart from the 1.1.5 client bugs listed above, which are the client's and not this server's. What
+  stays true is the epistemics: everything ground-truthed against PocketMine is byte-tested, and a byte
+  test only proves the encoder agrees with itself. The item-NBT dialect passed its own tests and still
+  showed the vanilla name on a real client. So anything *newly* added to that wire is unverified until
+  somebody logs in — which right now means the head/body yaw split (0.14's field order is the
+  serializer's own note rather than a fresh reading of PocketMine) and carrying a custom item's identity
+  through a drag inside a Bedrock client's own window.
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
   runtime world simulation or physics, no 1.13+ flattening. Knockback is excluded for the same reason —
   the server simulates no physics. Custom logic that wants any of these lives in a script as an
