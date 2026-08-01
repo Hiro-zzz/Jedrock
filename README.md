@@ -383,7 +383,7 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   is *network* NBT (varint lengths, zigzag ints), an item's is not. Getting that backwards cost one client
   test: the 1.1.5 client neither crashed nor complained, it just kept showing the vanilla name. An ordinary
   item still writes the exact bytes it always did, so nothing changed for a server that defines no items.
-  **Confirmed on a real 1.1.5 client**; Java is still unverified.
+  **Confirmed on a real client on every one of the four**, which is what it took to trust either dialect.
 
 - ✅ **Permissions from a script.** A script could always *read* rights (`player.hasPermission`); now it can
   set them. The **`permissions`** global builds groups (`createGroup(n).inherit('default').add(node)
@@ -907,9 +907,9 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
 - **A nether looks like an overworld on 0.14.** That era has no dimension packet this project has
   ground-truthed, and it is the client that crashes on a guessed id — so a world switch there is a chunk
   resend and nothing more. The blocks, the biome tint and the spawn are the destination's; the sky, the
-  fog and the compass are not. On **1.1.5** the ChangeDimension packet *is* sent, and is unverified like
-  everything else new on that wire: `-Djedrock.pe.changeDimension=false` falls back to 0.14's behaviour if
-  it turns out to hang a client on a loading screen.
+  fog and the compass are not. On **1.1.5** the ChangeDimension packet *is* sent and does work on a real
+  client; `-Djedrock.pe.changeDimension=false` stays as an escape hatch back to 0.14's behaviour, since a
+  packet that can hang a client on a loading screen is worth a switch even once it is known good.
 - **Travel is API and command only.** `/world tp`, `worlds.send`, or a teleport to a `Location` in another
   world. There is no portal block, and there isn't going to be one: noticing a player standing in a frame
   means checking positions every tick, which is the shape of simulation this server doesn't do.
