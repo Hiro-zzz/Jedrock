@@ -72,6 +72,27 @@ unstable — anything may change between entries.
   wand. The per-player bookkeeping is forgotten when they leave, through a listener registered only while
   some item actually cools, so a server with no cooldowns pays nothing for them.
 
+- **`PlayerHealthChange`, the three world-lifecycle events, and `ServerListPing`.**
+  **Health** had an event for damage and nothing at all for healing, so anything reacting to the number
+  itself — a regeneration system, a bar over a name tag — had to poll. Every route to a player's health now
+  passes through one point that announces the change and lets a listener rewrite or refuse it. Writing
+  health from inside that event is the obvious way for somebody to spell "keep them alive", so it works:
+  the nested write is applied without announcing itself, and wins, because it is a later decision than the
+  change being settled. (It didn't, at first. The test caught it.)
+
+  **`WorldCreate` / `WorldLoad` / `WorldUnload`** split the two things a world arriving can mean. Created
+  fires once in a world's life, right after the bake — the only safe moment to carve an arena in, since
+  doing it on load would re-cut it over whatever players had built there since. Loaded fires every boot and
+  carries `isCreated()` for anyone who wants both. Unload is cancellable, which is the reason to announce
+  it: the server already refuses to unload the default world or one with somebody standing in it, and this
+  is the same veto offered to whoever else has a stake.
+
+  **`ServerListPing`** is answered from one listener for all three sockets. The network assembles what it
+  was going to say, hands the `ServerPing` round, and serializes whatever it reads back — so a rotating
+  MOTD, a maintenance notice or a count that hides staff is one line. No player, no connection, and an I/O
+  thread: it is the one event here with nobody on the other end, because a ping is answered and the socket
+  closes before anyone has said who they are.
+
 - **Four more events, all of them things the server already knew and wasn't saying.**
   **`PlayerSwingArm`** is the nearest thing here to "left-clicked": every edition reports the swing and the
   server has always relayed it as an animation, but it was never offered as an input, which left scripts

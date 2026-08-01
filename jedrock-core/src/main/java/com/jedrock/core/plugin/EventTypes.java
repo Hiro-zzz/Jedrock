@@ -31,11 +31,16 @@ import com.jedrock.api.event.player.PlayerWorldChangeEvent;
 import com.jedrock.api.event.player.PlayerToggleSneakEvent;
 import com.jedrock.api.event.player.PlayerToggleSprintEvent;
 import com.jedrock.api.event.player.PlayerUseItemEvent;
+import com.jedrock.api.event.player.PlayerHealthChangeEvent;
+import com.jedrock.api.event.server.ServerListPingEvent;
 import com.jedrock.api.event.server.ServerStartEvent;
 import com.jedrock.api.event.server.ServerStopEvent;
 import com.jedrock.api.event.server.ServerTickEvent;
 import com.jedrock.api.event.world.WeatherChangeEvent;
+import com.jedrock.api.event.world.WorldCreateEvent;
+import com.jedrock.api.event.world.WorldLoadEvent;
 import com.jedrock.api.event.world.WorldSaveEvent;
+import com.jedrock.api.event.world.WorldUnloadEvent;
 
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -89,11 +94,16 @@ public final class EventTypes {
         register("PlayerInteractBlock", PlayerInteractBlockEvent.class);
         register("PlayerArmorChange", PlayerArmorChangeEvent.class);
         register("PlayerHeldItemChange", PlayerHeldItemChangeEvent.class);
+        register("PlayerHealthChange", PlayerHealthChangeEvent.class);
         register("ServerStart", ServerStartEvent.class);
         register("ServerStop", ServerStopEvent.class);
         register("ServerTick", ServerTickEvent.class);
+        register("ServerListPing", ServerListPingEvent.class);
         register("WeatherChange", WeatherChangeEvent.class);
         register("WorldSave", WorldSaveEvent.class);
+        register("WorldCreate", WorldCreateEvent.class);
+        register("WorldLoad", WorldLoadEvent.class);
+        register("WorldUnload", WorldUnloadEvent.class);
     }
 
     private static void register(String name, Class<? extends Event> type) {

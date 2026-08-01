@@ -46,6 +46,16 @@ public interface ConnectionListener {
         return 0;
     }
 
+    /**
+     * Let the core have a say in what a server-list ping answers. The caller fills {@code ping} in from
+     * the config and the live count, calls this, and serializes whatever it reads back — so a listener
+     * changes the answer simply by mutating it.
+     *
+     * <p>Called on an I/O thread, once per client per list refresh, with no player and no connection
+     * state behind it. The default leaves the answer exactly as the config wrote it.
+     */
+    default void onPing(com.jedrock.api.ServerPing ping) {}
+
     // ===== Packet taps (the raw-packet escape hatch) =====
 
     /**

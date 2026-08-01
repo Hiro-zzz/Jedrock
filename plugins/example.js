@@ -39,7 +39,7 @@
 //                written straight to permissions.txt — a script no longer builds /perm command strings.
 //   storage    — the only thing that survives a restart: get / set / has / remove / keys / size / clear,
 //                plus forPlayer(p) for per-player state. Strings, numbers, booleans, objects and arrays.
-//   events     — events.on(name, fn): subscribe to a built-in event (35 of them; events.names() lists them)
+//   events     — events.on(name, fn): subscribe to a built-in event (40 of them; events.names() lists them)
 //                OR a custom, script-defined one (any other name). Built-in handlers get the real Java event
 //                (getters/setters, cancel); custom handlers get {getName, getData, cancel, isCancelled}.
 //                events.emit(name, data) fires a custom event to every listener and returns it (read data /
@@ -100,7 +100,7 @@ commands.register('forget', function (player, args) {
 function bump(name) { stats.events[name] = (stats.events[name] || 0) + 1; }
 
 // ============================================================================
-//  EVENTS — all 23. Each bumps a counter; most also log or act.
+//  EVENTS — events.names() has the current list. Each bumps a counter; most also log or act.
 // ============================================================================
 
 // --- Connection lifecycle ---
@@ -119,6 +119,26 @@ events.on('PlayerJoin', function (e) {                  // joinMessage is the br
 events.on('PlayerQuit', function (e) {                  // quitMessage is the broadcast announcement
     bump('PlayerQuit');
     e.setQuitMessage('{gray}- ' + e.getPlayer().getName());
+});
+
+// The one event with no player on it at all: a client refreshing its multiplayer list. Answered on a
+// network thread before anyone has said who they are, and for BOTH editions from this one listener.
+// Everything changeable is on the ping object, which the network reads back after we are done with it.
+events.on('ServerListPing', function (e) {
+    bump('ServerListPing');
+    var ping = e.getPing();
+    ping.setMotd(ping.isBedrock() ? '{aqua}Jedrock {gray}(pocket)' : '{aqua}Jedrock {gray}(desktop)');
+    // Keep the work here tiny — a busy server answers this once per client per list refresh.
+});
+
+// Health, in both directions and from every source: damage, healing, /heal, a script's setHealth.
+// PlayerDamage still comes first on a hit and is where a hit is vetoed; this is the number settling.
+events.on('PlayerHealthChange', function (e) {
+    bump('PlayerHealthChange');
+    if (e.isDamage() && e.getNewHealth() <= 4) {
+        e.getPlayer().sendActionBar('{red}You are badly hurt');
+    }
+    // e.setNewHealth(e.getOldHealth());   // …would make them unkillable. Both a feature and a footgun.
 });
 
 // --- Chat & commands ---
@@ -228,6 +248,27 @@ events.on('ServerStart', function (e) { bump('ServerStart'); console.log('server
 events.on('ServerStop',  function (e) { bump('ServerStop');  console.log('server stopping'); });
 events.on('ServerTick',  function (e) { bump('ServerTick'); });   // e.getTick(); fires 20×/sec — counted only
 events.on('WorldSave',   function (e) { bump('WorldSave'); console.log('world saved:', e.getWorld().getName()); });
+
+// WorldCreate fires ONCE in a world's life, right after its terrain is baked — the only safe place to
+// carve something permanent in. WorldLoad fires every boot, so doing it there would re-cut whatever
+// players had built over it since. That distinction is the whole reason these are two events.
+events.on('WorldCreate', function (e) {
+    bump('WorldCreate');
+    console.log('a brand-new world:', e.getWorld().getName(), 'from template', e.getTemplate());
+    // e.getWorld().fill(...) — an arena, a spawn platform, a starting structure.
+});
+
+events.on('WorldLoad', function (e) {
+    bump('WorldLoad');
+    console.log('world available:', e.getWorld().getName(), e.isCreated() ? '(just made)' : '(from disk)');
+});
+
+// Unloading is not deleting — the folder stays and the world comes back on the next request. Cancelling
+// keeps it in memory, which is what to do if you have state tied to it that isn't ready to be dropped.
+events.on('WorldUnload', function (e) {
+    bump('WorldUnload');
+    console.log('world unloading:', e.getWorld().getName());
+});
 
 var Weather = Packages.com.jedrock.api.world.Weather;   // the enum itself, for reading and redirecting
 

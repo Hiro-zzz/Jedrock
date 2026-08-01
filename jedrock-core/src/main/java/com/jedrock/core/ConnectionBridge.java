@@ -10,10 +10,11 @@ import com.jedrock.api.event.player.PlayerLoginEvent;
 import com.jedrock.api.event.player.PlayerMoveEvent;
 import com.jedrock.api.event.player.PlayerPickupItemEvent;
 import com.jedrock.api.event.player.PlayerQuitEvent;
+import com.jedrock.api.event.player.PlayerSwingArmEvent;
 import com.jedrock.api.event.player.PlayerToggleSneakEvent;
 import com.jedrock.api.event.player.PlayerToggleSprintEvent;
-import com.jedrock.api.event.player.PlayerSwingArmEvent;
 import com.jedrock.api.event.player.PlayerUseItemEvent;
+import com.jedrock.api.event.server.ServerListPingEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.player.PlayerConnection;
@@ -132,6 +133,16 @@ final class ConnectionBridge implements ConnectionListener {
     @Override
     public int getOnlinePlayerCount() {
         return playerRegistry.size();
+    }
+
+    @Override
+    public void onPing(com.jedrock.api.ServerPing ping) {
+        // The network has already written the honest answer into `ping`; this only offers it around.
+        // Gated, because a popular server answers this often and an unlistened one should allocate
+        // nothing beyond the ping object the network needed anyway.
+        if (eventBus.hasListeners(ServerListPingEvent.class)) {
+            eventBus.post(new ServerListPingEvent(ping));
+        }
     }
 
     // ===== Lifecycle =====

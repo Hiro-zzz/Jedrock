@@ -1,6 +1,9 @@
 package com.jedrock.core.world;
 
 import com.jedrock.api.event.EventBus;
+import com.jedrock.api.event.world.WorldCreateEvent;
+import com.jedrock.api.event.world.WorldLoadEvent;
+import com.jedrock.api.event.world.WorldUnloadEvent;
 import com.jedrock.api.world.Dimension;
 import com.jedrock.api.world.World;
 import com.jedrock.api.world.WorldTemplate;
@@ -188,7 +191,7 @@ public final class WorldManager {
         LOGGER.info("Creating world '" + name + "' (" + template.dimension() + ", seed " + actualSeed
                 + ", " + template.sizeChunks() + "x" + template.sizeChunks() + " chunks, template '"
                 + template.name() + "')");
-        register(world, template.decorate());
+        register(world, template.decorate(), template.name());
         return world;
     }
 
@@ -203,7 +206,7 @@ public final class WorldManager {
         Dimension dimension = dimensionOf(meta.dimensionId());
         int bounds = meta.boundsChunksX() > 0 ? meta.boundsChunksX() : CoreWorld.BOUNDS_CHUNKS;
         CoreWorld world = new CoreWorld(name, dimension, meta.seed(), bounds);
-        register(world, true);
+        register(world, true, null); // not created: this folder already had a world in it
         return world;
     }
 
@@ -241,6 +244,12 @@ public final class WorldManager {
                 return false; // someone is standing in it
             }
         }
+        // The same veto the two checks above are, offered to whoever else has a stake in this world.
+        // Before anything is torn down, so a listener refusing it leaves the world exactly as it was.
+        if (events.hasListeners(WorldUnloadEvent.class)
+                && events.post(new WorldUnloadEvent(world)).isCancelled()) {
+            return false;
+        }
         LevelManager level = levels.remove(key);
         if (level != null) {
             level.saveIfDirty();
@@ -270,7 +279,13 @@ public final class WorldManager {
     // ===== Wiring =====
 
     /** Load-or-bake the world, then give it the two things a live world needs. */
-    private void register(CoreWorld world, boolean decorate) {
+    /**
+     * Put a prepared world into service and announce it.
+     *
+     * @param createdFromTemplate the template it was just baked from, or {@code null} if this world was
+     *                            read off disk — which is the whole difference between the two events
+     */
+    private void register(CoreWorld world, boolean decorate, String createdFromTemplate) {
         String key = world.getName().toLowerCase(Locale.ROOT);
         world.setEventBus(events); // so a weather change can be vetoed wherever it came from
         LevelManager level = new LevelManager(world, events, root);
@@ -287,6 +302,16 @@ public final class WorldManager {
                 }
             }
         });
+        // Announced only here, and in this order, so both callers say the same thing: a world was made
+        // (once, ever), and then a world became available (every time). Both fire after the bake and after
+        // the relay is wired, so a listener that carves an arena into a new world is editing real terrain
+        // and players see the result.
+        if (createdFromTemplate != null && events.hasListeners(WorldCreateEvent.class)) {
+            events.post(new WorldCreateEvent(world, createdFromTemplate));
+        }
+        if (events.hasListeners(WorldLoadEvent.class)) {
+            events.post(new WorldLoadEvent(world, createdFromTemplate != null));
+        }
     }
 
     private Path levelFile(String name) {

@@ -75,9 +75,16 @@ public final class Pe014RakNetServer {
         public byte[] onQuery(InetSocketAddress address) {
             int port = Pe014RakNetServer.this.address.getPort();
             int online = listener != null ? listener.getOnlinePlayerCount() : 0;
+            // Same as 1.1.5's: assembled, offered to the core, then joined — so one listener answers for
+            // every socket this server is listening on.
+            com.jedrock.api.ServerPing ping = new com.jedrock.api.ServerPing(
+                    String.valueOf(address), 45, true, properties.motd(), online, properties.maxPlayers());
+            if (listener != null) {
+                listener.onPing(ping);
+            }
             String motd = String.join(";",
-                    "MCPE", properties.motd(), "45", "0.14.0",
-                    Integer.toString(online), Integer.toString(properties.maxPlayers()),
+                    "MCPE", ping.getMotd(), "45", "0.14.0",
+                    Integer.toString(ping.getOnlinePlayers()), Integer.toString(ping.getMaxPlayers()),
                     Long.toString(raknet.getGuid()), properties.name(), "Survival", "1",
                     Integer.toString(port), Integer.toString(port)) + ";";
             return motd.getBytes(StandardCharsets.UTF_8);

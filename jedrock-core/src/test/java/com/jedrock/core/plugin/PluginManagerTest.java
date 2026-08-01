@@ -334,6 +334,30 @@ class PluginManagerTest {
         assertEquals(EventTypes.names().size() + " true", conn.lastMessage);
     }
 
+    /**
+     * The ping is answered on an I/O thread with no player anywhere, and everything a listener may change
+     * lives on a mutable object the network reads back afterwards — an arrangement that works or doesn't
+     * depending on whether the object really is shared, which is what this checks.
+     */
+    @Test
+    void aScriptRewritesWhatTheServerListShows(@TempDir Path dir) {
+        EventBus bus = new EventBus();
+        PluginManager plugins = manager(bus, dir);
+        plugins.loadSource("motd.js",
+                "events.on('ServerListPing', function (e) {\n"
+              + "  var p = e.getPing();\n"
+              + "  p.setMotd(p.isBedrock() ? 'pocket' : 'desktop');\n"
+              + "  p.setOnlinePlayers(p.getOnlinePlayers() + 100);\n"
+              + "});", 1L);
+
+        com.jedrock.api.ServerPing ping =
+                new com.jedrock.api.ServerPing("1.2.3.4:5", 340, false, "config says this", 2, 20);
+        bus.post(new com.jedrock.api.event.server.ServerListPingEvent(ping));
+
+        assertEquals("desktop", ping.getMotd(), "the script wrote into the object the network will read");
+        assertEquals(102, ping.getOnlinePlayers());
+    }
+
     @Test
     void aScriptListenerRunsWhenTheEventIsPosted(@TempDir Path dir) {
         EventBus bus = new EventBus();

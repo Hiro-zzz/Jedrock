@@ -590,7 +590,22 @@ Prefixed with your file name, and written to `logs/latest.log` like everything e
 
 ## Every event
 
-Subscribe by name. **Cancellable** means `event.cancel()` prevents it.
+Subscribe by name. **Cancellable** means `event.cancel()` prevents it. `events.names()` returns this list
+at runtime, which is the copy that cannot go stale.
+
+Three of these have no player at all: the two `World*` lifecycle ones and `ServerListPing`. The last is
+also the only one that runs on a network I/O thread, before any player state exists:
+
+```js
+events.on('ServerListPing', function (e) {
+    const ping = e.getPing();
+    ping.setMotd(maintenance ? '{red}Down for maintenance' : '{green}Open — come in');
+    ping.setOnlinePlayers(server.getOnlinePlayers().length);   // hide staff, inflate, whatever you like
+});
+```
+
+It answers for **both editions** from one listener. Keep the work in it tiny: a popular server answers
+this once per client per list refresh.
 
 | Event | Cancellable | Carries |
 |-------|:-----------:|---------|
@@ -605,7 +620,8 @@ Subscribe by name. **Cancellable** means `event.cancel()` prevents it.
 | `PlayerWorldChange` | ✅ | `player`, from world, destination |
 | `PlayerRespawn` | — | `player` |
 | `PlayerDeath` | — | `player`; `setDeathMessage(…)` |
-| `PlayerDamage` | ✅ | `player`, amount, cause |
+| `PlayerDamage` | ✅ | `player`, amount, cause — where a hit is vetoed or rescaled, and the only one that knows *why* |
+| `PlayerHealthChange` | ✅ | `player`, old / new health, `isDamage()`. **Any** change from any source, damage and healing alike; `setNewHealth(…)` rewrites the number. Fires after `PlayerDamage` on a hit. Cancelling on a lethal blow makes them unkillable — that is the feature and the footgun |
 | `PlayerPickupItem` | ✅ | `player`, state |
 | `PlayerUseItem` | ✅ | `player`, state |
 | `PlayerHeldItemChange` | ✅ | `player`, slot |
@@ -624,9 +640,13 @@ Subscribe by name. **Cancellable** means `event.cancel()` prevents it.
 | `BlockPlace` | ✅ | `player`, position, state |
 | `WeatherChange` | ✅ | world, new weather |
 | `WorldSave` | — | world |
+| `WorldCreate` | — | world, template — fires **once ever** for that world, right after its terrain is baked. The only safe place to carve something in |
+| `WorldLoad` | — | world, `isCreated()` — every time a world becomes available, including just after a create |
+| `WorldUnload` | ✅ | world — before anything is torn down; cancel to keep it loaded. Unloading is not deleting |
 | `ServerStart` | — | everything is up; do one-time setup here |
 | `ServerStop` | — | the world and players are still alive |
 | `ServerTick` | — | every tick. Built only when something listens — an idle server pays nothing |
+| `ServerListPing` | — | `getPing()`: MOTD and the two counts, rewritable in place. Both editions, no player, on an I/O thread |
 
 ---
 

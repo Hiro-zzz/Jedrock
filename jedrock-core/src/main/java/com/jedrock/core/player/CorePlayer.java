@@ -2,6 +2,7 @@ package com.jedrock.core.player;
 
 import com.jedrock.api.event.EventBus;
 import com.jedrock.api.event.player.PlayerArmorChangeEvent;
+import com.jedrock.api.event.player.PlayerHealthChangeEvent;
 import com.jedrock.api.event.player.PlayerKickEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
@@ -531,7 +532,7 @@ public final class CorePlayer implements Player {
      * funnel syncs the resulting health itself. @return the new health.
      */
     public int damage(int amount) {
-        health = Math.max(0, health - Math.max(0, amount));
+        health = settle(health - Math.max(0, amount));
         return health;
     }
 
@@ -541,9 +542,59 @@ public final class CorePlayer implements Player {
      */
     @Override
     public void setHealth(int value) {
-        health = Math.max(0, Math.min(MAX_HEALTH, value));
+        health = settle(value);
         connection.setHealth(health);
     }
+
+    /**
+     * The one place a health number is decided: clamp it, offer it to listeners, clamp whatever they say
+     * back, and hand over the result. Both ways in go through this, which is the point — a script that
+     * wants to know when somebody's health moved should not have to know how it moved.
+     *
+     * <p>Re-entrancy is the trap here: a listener calling {@code setHealth} from inside the event would
+     * come straight back round. A flag holds the door — while a change is settling, a nested one is
+     * applied plainly, without announcing itself.
+     */
+    private int settle(int proposed) {
+        int clamped = Math.max(0, Math.min(MAX_HEALTH, proposed));
+        EventBus bus = eventBus;
+        if (bus == null || !bus.hasListeners(PlayerHealthChangeEvent.class)) {
+            return clamped;
+        }
+        // Checked before "did anything change", because the outer call has not written its own value yet:
+        // to a listener calling setHealth from inside the event, health still reads as it did before the
+        // change being settled, and comparing values here would miss the write entirely.
+        if (settlingHealth) {
+            // Don't announce it — that is the loop — but do record it. What the listener wrote is a later
+            // decision than the one being settled, and the caller must not overwrite it with a proposal
+            // made before the listener ran.
+            nestedHealthWrite = true;
+            return clamped;
+        }
+        if (clamped == health) {
+            return clamped; // "health changed" has to mean it changed
+        }
+        settlingHealth = true;
+        nestedHealthWrite = false;
+        PlayerHealthChangeEvent event;
+        try {
+            event = bus.post(new PlayerHealthChangeEvent(this, health, clamped));
+        } finally {
+            settlingHealth = false;
+        }
+        if (nestedHealthWrite) {
+            return health; // last write wins: setHealth inside the handler beats setNewHealth on it
+        }
+        if (event.isCancelled()) {
+            return health; // left exactly where it was
+        }
+        return Math.max(0, Math.min(MAX_HEALTH, event.getNewHealth()));
+    }
+
+    /** True while {@link #settle} is inside a listener — see its note on re-entrancy. */
+    private volatile boolean settlingHealth;
+    /** Set when a listener changed health directly, so the settling call knows not to undo it. */
+    private volatile boolean nestedHealthWrite;
 
     /** Vanilla-style post-hit invulnerability window (half a second) for melee, in nanoseconds. */
     private static final long HURT_COOLDOWN_NANOS = 500_000_000L;
