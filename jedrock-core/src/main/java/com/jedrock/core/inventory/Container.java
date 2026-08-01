@@ -20,11 +20,20 @@ public class Container {
      * back from disk pointing at nothing. See {@code ItemRegistry}.
      */
     protected final String[] customKeys;
+    /**
+     * Per slot, this <em>particular</em> stack's own state — an opaque string nobody here interprets, or
+     * {@code null}. The key says <em>which</em> item a stack is and is shared by every stack that names it;
+     * this says what has happened to <em>this one</em> ("charges left: 3"), which is the one thing a shared
+     * definition has nowhere to put. Written and read only by whoever set it, and compared verbatim: two
+     * stacks merge only if their data is equal, so a half-spent wand never dissolves into a full one.
+     */
+    protected final String[] customData;
 
     public Container(int size) {
         this.states = new int[size];
         this.counts = new int[size];
         this.customKeys = new String[size];
+        this.customData = new String[size];
     }
 
     public int size() {
@@ -51,6 +60,27 @@ public class Container {
         return slot >= 0 && slot < customKeys.length ? customKeys[slot] : null;
     }
 
+    /** Per-stack data per slot ({@code null} = none), parallel to {@link #states()}. */
+    public String[] customData() {
+        return customData;
+    }
+
+    /** This slot's own per-stack data, or {@code null}. */
+    public String customDataAt(int slot) {
+        return slot >= 0 && slot < customData.length ? customData[slot] : null;
+    }
+
+    /**
+     * Attach per-stack data to whatever is already in {@code slot}, leaving the item itself alone —
+     * how "this sword has one charge left" is written after the sword is already somewhere. Ignored for
+     * an empty slot: data belongs to a stack, and there is no stack to belong to.
+     */
+    public void setCustomData(int slot, String data) {
+        if (slot >= 0 && slot < customData.length && !isEmpty(slot)) {
+            customData[slot] = data;
+        }
+    }
+
     public int stateAt(int slot) {
         return states[slot];
     }
@@ -73,19 +103,49 @@ public class Container {
         return true;
     }
 
-    /** Set a slot outright (a swap / place); {@code state == 0} or {@code count <= 0} clears it. */
+    /**
+     * Set a slot to an <b>ordinary</b> stack; {@code state == 0} or {@code count <= 0} clears it.
+     *
+     * <p>Note what this means for a slot that held a custom item: it doesn't any more. That is the honest
+     * reading of "put this ordinary item here", and it is deliberate — the alternative, quietly keeping the
+     * old key, is how a frostblade's identity would end up on a stack of dirt. Code that means "the same
+     * stack, fewer of them" wants {@link #setCount} instead, and code that is moving a stack wants the
+     * overload that carries its identity along.
+     */
     public void set(int slot, int state, int count) {
-        set(slot, state, count, null);
+        set(slot, state, count, null, null);
     }
 
-    /** Set a slot to a custom item — the same thing, but the stack carries {@code customKey}. */
+    /** Set a slot to a custom item with no per-stack data of its own. */
     public void set(int slot, int state, int count, String customKey) {
+        set(slot, state, count, customKey, null);
+    }
+
+    /** Set a slot outright, identity and all — what every move of a whole stack goes through. */
+    public void set(int slot, int state, int count, String customKey, String data) {
         if (state == 0 || count <= 0) {
             clear(slot);
         } else {
             states[slot] = state;
             counts[slot] = count;
             customKeys[slot] = customKey;
+            customData[slot] = data;
+        }
+    }
+
+    /**
+     * Change how many are in {@code slot} without touching what they are — a stack being split, spent or
+     * merged into. {@code count <= 0} clears the slot; an empty slot has nothing to count.
+     *
+     * <p>This exists because {@code set(slot, sameState, fewer)} reads like the same thing and isn't: it
+     * rebuilds the stack as an ordinary one, which is exactly how a custom item used to lose its name by
+     * being picked up and put down again.
+     */
+    public void setCount(int slot, int count) {
+        if (count <= 0 || states[slot] == 0) {
+            clear(slot);
+        } else {
+            counts[slot] = count;
         }
     }
 
@@ -93,6 +153,7 @@ public class Container {
         states[slot] = 0;
         counts[slot] = 0;
         customKeys[slot] = null;
+        customData[slot] = null;
     }
 
     /**
@@ -100,22 +161,28 @@ public class Container {
      * {@link #MAX_STACK}) or filling the first empty one. @return the affected slot, or -1 if it didn't fit.
      */
     public int give(int state, int from, int to) {
-        return give(state, from, to, null);
+        return give(state, from, to, null, null);
+    }
+
+    /** Add one custom item with no per-stack data. */
+    public int give(int state, int from, int to, String customKey) {
+        return give(state, from, to, customKey, null);
     }
 
     /**
-     * Add one item into slots {@code [from, to)}. A stack only merges with one of the <b>same state and
-     * the same custom key</b>, so a named sword never quietly stacks with an ordinary one — they are
-     * different items even though they are drawn the same.
+     * Add one item into slots {@code [from, to)}. A stack only merges with one of the <b>same state, the
+     * same custom key and the same per-stack data</b>, so a named sword never quietly stacks with an
+     * ordinary one — they are different items even though they are drawn the same — and two of the same
+     * named item merge only while nothing has happened to one of them that hasn't happened to the other.
      *
      * @return the affected slot, or -1 if it didn't fit
      */
-    public int give(int state, int from, int to, String customKey) {
+    public int give(int state, int from, int to, String customKey, String data) {
         if (state == 0) {
             return -1;
         }
         for (int i = from; i < to; i++) {
-            if (states[i] == state && counts[i] < MAX_STACK && sameCustom(customKeys[i], customKey)) {
+            if (states[i] == state && counts[i] < MAX_STACK && sameStack(i, customKey, data)) {
                 counts[i]++;
                 return i;
             }
@@ -125,10 +192,16 @@ public class Container {
                 states[i] = state;
                 counts[i] = 1;
                 customKeys[i] = customKey;
+                customData[i] = data;
                 return i;
             }
         }
         return -1;
+    }
+
+    /** Whether the stack in {@code slot} carries exactly this identity — the merge test, in one place. */
+    public boolean sameStack(int slot, String customKey, String data) {
+        return sameCustom(customKeys[slot], customKey) && sameCustom(customData[slot], data);
     }
 
     private static boolean sameCustom(String a, String b) {
@@ -137,22 +210,40 @@ public class Container {
 
     /** Remove one {@code state} from slots {@code [from, to)}. @return the affected slot, or -1. */
     public int take(int state, int from, int to) {
-        return take(state, from, to, null);
+        return take(state, from, to, null, null);
     }
 
-    /** Remove one item matching both state and custom key. @return the affected slot, or -1. */
+    /** Remove one item matching both state and custom key, whatever its per-stack data. */
     public int take(int state, int from, int to, String customKey) {
         if (state == 0) {
             return -1;
         }
         for (int i = from; i < to; i++) {
             if (states[i] == state && counts[i] > 0 && sameCustom(customKeys[i], customKey)) {
-                if (--counts[i] == 0) {
-                    clear(i);
-                }
+                takeOneAt(i);
                 return i;
             }
         }
         return -1;
+    }
+
+    /** Remove one item matching state, custom key <em>and</em> data. @return the affected slot, or -1. */
+    public int take(int state, int from, int to, String customKey, String data) {
+        if (state == 0) {
+            return -1;
+        }
+        for (int i = from; i < to; i++) {
+            if (states[i] == state && counts[i] > 0 && sameStack(i, customKey, data)) {
+                takeOneAt(i);
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private void takeOneAt(int slot) {
+        if (--counts[slot] == 0) {
+            clear(slot);
+        }
     }
 }

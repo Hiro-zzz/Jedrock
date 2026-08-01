@@ -36,11 +36,15 @@ public final class ScriptItems {
     private final PluginManager manager;
     private final ScriptPlugin plugin;
     private final ItemRegistry registry;
+    /** The plugin's scope — where {@code JSON} lives, for per-stack data that isn't a plain string. */
+    private final org.mozilla.javascript.Scriptable scope;
 
-    ScriptItems(PluginManager manager, ScriptPlugin plugin, ItemRegistry registry) {
+    ScriptItems(PluginManager manager, ScriptPlugin plugin, ItemRegistry registry,
+                org.mozilla.javascript.Scriptable scope) {
         this.manager = manager;
         this.plugin = plugin;
         this.registry = registry;
+        this.scope = scope;
     }
 
     /**
@@ -133,6 +137,91 @@ public final class ScriptItems {
     /** The custom key of whatever the player is holding, or {@code null}. */
     public String heldKey(Object player) {
         return core(player).getHeldItemKey();
+    }
+
+    // ===== Per-stack data =====
+
+    /**
+     * What <em>this particular stack</em> is carrying, or {@code null} if nothing has been put on it.
+     *
+     * <pre>{@code
+     *   items.define('wand', Blocks.state(280, 0)).onUse(function (player) {
+     *       var state = items.heldData(player) || {charges: 3};
+     *       if (state.charges <= 0) { player.sendMessage('{gray}Spent.'); return true; }
+     *       state.charges--;
+     *       items.setHeldData(player, state);      // …and this wand, not every wand, is down one
+     *       return true;
+     *   });
+     * }</pre>
+     *
+     * <p>A definition is shared by every stack that names it, so it is the wrong place for anything that
+     * happened to one of them. This is the right place. Strings, numbers and booleans come back as
+     * themselves; an object or array is stored as JSON and handed back as a real value.
+     *
+     * <p>Two stacks with different data do not merge, which is what stops a spent wand from dissolving
+     * into a full one when they meet in a slot.
+     */
+    public Object heldData(Object player) {
+        CorePlayer target = core(player);
+        return readData(target.getInventory().customDataAt(target.getHeldItemSlot()));
+    }
+
+    /** Put data on the stack the player is holding. {@code null} clears it; an empty hand is a no-op. */
+    public void setHeldData(Object player, Object value) {
+        CorePlayer target = core(player);
+        setDataAt(player, target.getHeldItemSlot(), value);
+    }
+
+    /** The per-stack data in an inventory slot (0-35), or {@code null}. */
+    public Object dataAt(Object player, int slot) {
+        CorePlayer target = core(player);
+        return inStorage(slot) ? readData(target.getInventory().customDataAt(slot)) : null;
+    }
+
+    /**
+     * Put data on the stack in one inventory slot. It belongs to the stack, so an empty slot has nowhere
+     * to keep it and the call does nothing.
+     */
+    public void setDataAt(Object player, int slot, Object value) {
+        CorePlayer target = core(player);
+        if (!inStorage(slot) || target.getInventory().isEmpty(slot)) {
+            return;
+        }
+        target.getInventory().setCustomData(slot, writeData(value));
+        target.syncSlot(slot);
+    }
+
+    private static boolean inStorage(int slot) {
+        return slot >= 0 && slot < CorePlayer.STORAGE_SLOTS;
+    }
+
+    /** Stored text back to the value a script put there. Package-private: {@code ScriptChest} shares it. */
+    Object readData(String stored) {
+        return stored == null ? null : ScriptJson.parse(scope, stored);
+    }
+
+    /**
+     * A script's value down to the one string a stack can carry. Kept deliberately narrow: a stack's data
+     * rides in the level file and is compared verbatim for merging, so it has to be something that means
+     * the same thing every time it is written.
+     */
+    String writeData(Object value) {
+        Object unwrapped = ScriptJson.unwrap(value);
+        if (unwrapped == null || unwrapped instanceof org.mozilla.javascript.Undefined) {
+            return null;
+        }
+        if (unwrapped instanceof CharSequence text) {
+            return text.toString();
+        }
+        if (unwrapped instanceof Number || unwrapped instanceof Boolean) {
+            return unwrapped.toString();
+        }
+        if (unwrapped instanceof org.mozilla.javascript.Scriptable s
+                && !(unwrapped instanceof org.mozilla.javascript.Function)) {
+            return ScriptJson.stringify(scope, s, "items.setHeldData");
+        }
+        throw new IllegalArgumentException("a stack can carry a string, number, boolean, object or array"
+                + " — not " + ScriptJson.describe(unwrapped));
     }
 
     /** How many of a custom item a player is carrying, counted across their inventory. */

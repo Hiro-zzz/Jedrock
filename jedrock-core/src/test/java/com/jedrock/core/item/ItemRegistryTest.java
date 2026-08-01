@@ -236,6 +236,147 @@ class ItemRegistryTest {
         assertFalse(events.hasListeners(BlockBreakEvent.class), "and gone with the last behaviour");
     }
 
+    // ===== Cooldown =====
+
+    @Test
+    void aCoolingItemAnswersOnceAndThenStopsAnswering() {
+        List<String> log = new ArrayList<>();
+        CoreCustomItem bomb = registry.define("bomb", SWORD, null, null);
+        bomb.setCooldownMillis(60_000L);
+        bomb.setHook(CoreCustomItem.Trigger.USE, (p, ctx) -> { log.add("boom"); return true; });
+        registry.hooksChanged();
+        CorePlayer holder = player();
+        holder.getInventory().set(0, SWORD, 1, "bomb");
+
+        assertTrue(events.post(new PlayerUseItemEvent(holder, true)).isCancelled());
+        assertFalse(events.post(new PlayerUseItemEvent(holder, true)).isCancelled(),
+                "still warm, and with no cooldown hook the click falls through as the vanilla item");
+        assertEquals(List.of("boom"), log, "the behaviour ran exactly once");
+    }
+
+    @Test
+    void aCooldownHookRunsInsteadAndCanConsumeTheAction() {
+        double[] remaining = {-1};
+        CoreCustomItem bomb = registry.define("bomb", SWORD, null, null);
+        bomb.setCooldownMillis(60_000L);
+        bomb.setHook(CoreCustomItem.Trigger.USE, (p, ctx) -> true);
+        bomb.setHook(CoreCustomItem.Trigger.COOLDOWN, (p, ctx) -> {
+            remaining[0] = ctx.remainingMillis();
+            return true;
+        });
+        registry.hooksChanged();
+        CorePlayer holder = player();
+        holder.getInventory().set(0, SWORD, 1, "bomb");
+
+        events.post(new PlayerUseItemEvent(holder, true));
+        assertTrue(events.post(new PlayerUseItemEvent(holder, true)).isCancelled(),
+                "the cooldown hook returned true, so it swallowed the click");
+        assertTrue(remaining[0] > 0 && remaining[0] <= 60_000L, "it was told how long is left");
+    }
+
+    @Test
+    void aCoolingBreakStillKnowsWhichBlockItRefused() {
+        int[] seen = {-1, -1, -1};
+        CoreCustomItem wand = registry.define("wand", SWORD, null, null);
+        wand.setCooldownMillis(60_000L);
+        wand.setHook(CoreCustomItem.Trigger.BREAK, (p, ctx) -> true);
+        wand.setHook(CoreCustomItem.Trigger.COOLDOWN, (p, ctx) -> {
+            seen[0] = ctx.x(); seen[1] = ctx.y(); seen[2] = ctx.z();
+            return false;
+        });
+        registry.hooksChanged();
+        CorePlayer holder = player();
+        holder.getInventory().set(0, SWORD, 1, "wand");
+
+        events.post(new BlockBreakEvent(holder, 1, 2, 3, STONE));
+        assertFalse(events.post(new BlockBreakEvent(holder, 4, 70, -2, STONE)).isCancelled(),
+                "the hook returned false, so the block breaks the ordinary way");
+        assertEquals(List.of(4, 70, -2), List.of(seen[0], seen[1], seen[2]));
+    }
+
+    @Test
+    void clearingACooldownMakesTheItemAnswerAgain() {
+        List<String> log = new ArrayList<>();
+        CoreCustomItem bomb = registry.define("bomb", SWORD, null, null);
+        bomb.setCooldownMillis(60_000L);
+        bomb.setHook(CoreCustomItem.Trigger.USE, (p, ctx) -> { log.add("boom"); return true; });
+        registry.hooksChanged();
+        CorePlayer holder = player();
+        holder.getInventory().set(0, SWORD, 1, "bomb");
+
+        events.post(new PlayerUseItemEvent(holder, true));
+        assertTrue(registry.cooldownRemaining(holder, "bomb") > 0);
+        registry.clearCooldown(holder, "bomb");
+
+        assertEquals(0L, registry.cooldownRemaining(holder, "bomb"));
+        assertTrue(events.post(new PlayerUseItemEvent(holder, true)).isCancelled());
+        assertEquals(List.of("boom", "boom"), log);
+    }
+
+    @Test
+    void takingAnItemInHandIsNotSomethingACooldownRefuses() {
+        List<String> log = new ArrayList<>();
+        CoreCustomItem cursed = registry.define("cursed", SWORD, null, null);
+        cursed.setCooldownMillis(60_000L);
+        cursed.setHook(CoreCustomItem.Trigger.HOLD, (p, ctx) -> { log.add("held"); return false; });
+        registry.hooksChanged();
+        CorePlayer holder = player();
+        holder.getInventory().set(3, SWORD, 1, "cursed");
+
+        events.post(new PlayerHeldItemChangeEvent(holder, 0, 3, 0, SWORD));
+        events.post(new PlayerHeldItemChangeEvent(holder, 0, 3, 0, SWORD));
+
+        assertEquals(List.of("held", "held"), log, "a hotbar switch is not an act the item gets to refuse");
+    }
+
+    @Test
+    void aCooldownSurvivesTheHotReloadThatReplacesItsDefinition() {
+        CoreCustomItem bomb = registry.define("bomb", SWORD, null, null);
+        bomb.setCooldownMillis(60_000L);
+        bomb.setHook(CoreCustomItem.Trigger.USE, (p, ctx) -> true);
+        registry.hooksChanged();
+        CorePlayer holder = player();
+        holder.getInventory().set(0, SWORD, 1, "bomb");
+        events.post(new PlayerUseItemEvent(holder, true));
+
+        CoreCustomItem reloaded = registry.define("bomb", SWORD, null, null); // saving the script
+        reloaded.setCooldownMillis(60_000L);
+        reloaded.setHook(CoreCustomItem.Trigger.USE, (p, ctx) -> true);
+        registry.hooksChanged();
+
+        assertTrue(registry.cooldownRemaining(holder, "bomb") > 0,
+                "editing a plugin must not hand every player a fresh bomb");
+    }
+
+    @Test
+    void theQuitCleanupExistsOnlyWhileSomethingCools() {
+        registry.define("plain", SWORD, null, null)
+                .setHook(CoreCustomItem.Trigger.USE, (p, ctx) -> true);
+        registry.hooksChanged();
+        assertFalse(events.hasListeners(com.jedrock.api.event.player.PlayerQuitEvent.class),
+                "a server whose items never cool pays nothing for cooldowns");
+
+        CoreCustomItem bomb = registry.define("bomb", SWORD, null, null);
+        bomb.setCooldownMillis(1_000L);
+        registry.hooksChanged();
+        assertTrue(events.hasListeners(com.jedrock.api.event.player.PlayerQuitEvent.class));
+
+        registry.remove("bomb");
+        assertFalse(events.hasListeners(com.jedrock.api.event.player.PlayerQuitEvent.class),
+                "and gone with the last cooling item");
+    }
+
+    @Test
+    void aCooldownAloneIsNotABehaviourWorthDispatching() {
+        CoreCustomItem bomb = registry.define("bomb", SWORD, null, null);
+        bomb.setCooldownMillis(1_000L);
+        bomb.setHook(CoreCustomItem.Trigger.COOLDOWN, (p, ctx) -> true);
+        registry.hooksChanged();
+
+        assertFalse(events.hasListeners(BlockBreakEvent.class),
+                "a cooldown hook only ever fires instead of something else — alone it has nothing to say");
+    }
+
     @Test
     void removingADefinitionTearsDownItsDispatch() {
         registry.define("wand", SWORD, null, null)

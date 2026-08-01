@@ -67,6 +67,10 @@ class ScriptEntitiesTest {
             this.location = new Location(at.world(), at.x(), at.y(), at.z(), yaw, pitch);
         }
         @Override public void lookAt(Location target) { }
+        @Override public float getHeadYaw() { return headYaw != null ? headYaw : location.yaw(); }
+        @Override public void setHeadYaw(float headYaw) { this.headYaw = headYaw; }
+        @Override public void glanceAt(Location target) { }
+        private Float headYaw;
         @Override public boolean hasFlag(PuppetFlag flag) { return flag.isSet(flags); }
         @Override public void setFlag(PuppetFlag flag, boolean on) {
             flags = on ? (flags | flag.bit()) : (flags & ~flag.bit());

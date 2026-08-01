@@ -90,6 +90,24 @@ public final class ScriptPuppet {
         }
     }
 
+    /** Aim the head at something without turning the body. See {@code ScriptEntity.glanceAt}. */
+    public void glanceAt(Object target) {
+        Location at = ScriptEntity.locationOf(target);
+        if (at != null) {
+            puppet.glanceAt(at);
+        }
+    }
+
+    /** Where the head is aimed, in degrees. */
+    public double getHeadYaw() {
+        return puppet.getHeadYaw();
+    }
+
+    /** Turn the head alone. */
+    public void setHeadYaw(double headYaw) {
+        puppet.setHeadYaw((float) headYaw);
+    }
+
     // ===== Looks =====
 
     /** Floating text above it, in the unified {@code {color}} markup; null or empty removes it. */

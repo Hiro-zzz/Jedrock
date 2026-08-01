@@ -139,6 +139,42 @@ class PluginManagerTest {
                 world, world.getSpawnLocation(), GameMode.SURVIVAL);
     }
 
+    /**
+     * The two halves of an item's memory, end to end through Rhino: what one stack is carrying, and how
+     * long the item makes you wait. Both go through conversions that compile whatever they do — a JS object
+     * stored as JSON and handed back, and a hook that is not called at all — so they are worth running.
+     */
+    @Test
+    void aScriptGivesOneStackItsOwnStateAndTheItemACooldown(@TempDir Path dir) {
+        EventBus bus = new EventBus();
+        PluginManager plugins = manager(bus, dir);
+        plugins.loadSource("wand.js",
+                "items.define('wand', 280 << 4)\n"
+              + "  .setCooldown(60000)\n"
+              + "  .onUse(function (player) {\n"
+              + "      var s = items.heldData(player) || {charges: 3};\n"
+              + "      s.charges--;\n"
+              + "      items.setHeldData(player, s);\n"
+              + "      return true;\n"
+              + "  })\n"
+              + "  .onCooldown(function (player, ctx) {\n"
+              + "      console.log('cooling for ' + ctx.getRemaining());\n"
+              + "      return true;\n"
+              + "  });\n", 1L);
+
+        CorePlayer holder = newPlayer();
+        holder.getInventory().set(0, 280 << 4, 1, "wand");
+
+        assertTrue(bus.post(new com.jedrock.api.event.player.PlayerUseItemEvent(holder, true)).isCancelled());
+        assertEquals("{\"charges\":2}", holder.getInventory().customDataAt(0),
+                "the JS object came back as an object, was edited, and went back down as JSON");
+
+        assertTrue(bus.post(new com.jedrock.api.event.player.PlayerUseItemEvent(holder, true)).isCancelled(),
+                "the cooldown hook consumed the second use");
+        assertEquals("{\"charges\":2}", holder.getInventory().customDataAt(0),
+                "…and the behaviour did not run, so nothing was spent");
+    }
+
     @Test
     void aScriptListenerRunsWhenTheEventIsPosted(@TempDir Path dir) {
         EventBus bus = new EventBus();

@@ -29,9 +29,11 @@
 // script contract — the methods below and nothing else. The server's internals are not reachable, and
 // neither is a player's connection; player.getVersion() gives the edition string that used to need it.
 //                onClick + button(slot,item,label) makes a button menu; setItem alone is a storage chest.
-//   items      — custom items: define(key, state) → setName / setLore / onUse / onHit / onBreak / onHold;
-//                give(player, key, n) / set / heldKey / count. A stack carries the KEY, so a hot reload
-//                re-points every existing stack at the new definition. See /forge.
+//   items      — custom items: define(key, state) → setName / setLore / onUse / onHit / onBreak / onHold /
+//                setCooldown(ms) + onCooldown; give(player, key, n) / set / heldKey / count. A stack
+//                carries the KEY, so a hot reload re-points every existing stack at the new definition —
+//                and its OWN state (heldData / setHeldData / dataAt), which is where "this particular
+//                wand's charges" lives, since a definition is shared by every stack. See /forge, /wand.
 //   permissions— groups and rights: createGroup(n) → .add(node) / .inherit(g) / .setPrefix(s);
 //                forPlayer(p or 'Name') → .addGroup / .add(node) / .has / .isOp / .setOp. Server state,
 //                written straight to permissions.txt — a script no longer builds /perm command strings.
@@ -514,6 +516,42 @@ commands.register('forge', function (player, args) {
                              : '{red}No room in your inventory.');
 });
 
+// /wand — the two things a definition alone cannot say: how long the item makes you wait, and what has
+// happened to THIS ONE. The definition is shared by every wand in the world, so 'charges' cannot live on
+// it; it goes on the stack, where it persists in a chest and does not merge two wands that disagree.
+items.define('wand', Blocks.state(280, 0))
+    .setName('{light_purple}Spark Wand')
+    .setLore(['{gray}Three charges. Right-click to spend one.'])
+    .setCooldown(2000)                     // per player, in milliseconds
+    .onUse(function (player, ctx) {
+        var state = items.heldData(player) || {charges: 3};
+        if (state.charges <= 0) {
+            player.sendActionBar('{dark_gray}The wand is spent.');
+            return true;
+        }
+        state.charges--;
+        items.setHeldData(player, state);  // this wand, not every wand
+        var at = player.getLocation();
+        world.spawnParticle('villager_happy', at.x(), at.y() + 1, at.z(), 8, 0.4);
+        player.sendActionBar('{light_purple}' + state.charges + ' charge(s) left');
+        return true;
+    })
+    .onCooldown(function (player, ctx) {
+        // Fired INSTEAD of onUse while the wand is warm. No client here draws the vanilla cooldown
+        // sweep for a server-side item, so without this nothing at all would happen and the player
+        // would think the wand was broken.
+        player.sendActionBar('{gray}Recharging… ' + Math.ceil(ctx.getRemaining() / 1000) + 's');
+        return true;                       // and swallow the click meanwhile
+    });
+
+commands.register('wand', function (player, args) {
+    if (items.give(player, 'wand')) {
+        player.sendMessage('{green}A wand. {gray}Spend it, drop it in a chest, come back tomorrow.');
+    } else {
+        player.sendMessage('{red}No room in your inventory.');
+    }
+});
+
 // /bag — the OTHER menu shape: a storage chest with no onClick, backed by no world block. The player
 // moves items in and out freely and the contents last as long as the script does (nothing persists —
 // use `storage` for that). One bag per player, so re-opening shows what you left in it.
@@ -744,8 +782,14 @@ commands.register('guard', function (player, args) {
     guard.onTick(function (e) {
         var target = e.nearestPlayer(12);
         if (target) {
-            e.lookAt(target);
-            if (e.distanceTo(target) > 2.5) e.moveToward(target.getLocation(), 0.12);
+            // glanceAt turns the head and leaves the body facing its post — the difference between a
+            // guard watching you and a guard swivelling to follow you. lookAt turns both.
+            if (e.distanceTo(target) > 2.5) {
+                e.lookAt(target);
+                e.moveToward(target.getLocation(), 0.12);
+            } else {
+                e.glanceAt(target);
+            }
         } else {
             e.moveToward(e.get('home'), 0.08);   // drift back to its post
         }

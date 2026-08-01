@@ -35,14 +35,30 @@ public final class ScriptWorld {
     private final World world;
     /** Only needed to show a chest edit to whoever has that chest open; null in a bare view. */
     private final PluginManager manager;
+    /**
+     * The scope of whichever plugin this view was handed to — where {@code JSON} is, for reading the
+     * per-stack data in a chest back as a value rather than as text. Null in a bare view, and a chest
+     * built from one hands that data over as the string it is stored as.
+     */
+    private final org.mozilla.javascript.Scriptable scope;
 
     ScriptWorld(World world) {
-        this(null, world);
+        this(null, world, null);
     }
 
     ScriptWorld(PluginManager manager, World world) {
+        this(manager, world, null);
+    }
+
+    ScriptWorld(PluginManager manager, World world, org.mozilla.javascript.Scriptable scope) {
         this.manager = manager;
         this.world = world;
+        this.scope = scope;
+    }
+
+    /** The scope this view carries, so a derived view (another world, a chest) keeps it. */
+    org.mozilla.javascript.Scriptable scope() {
+        return scope;
     }
 
     /** The world behind this view — for the core's own wiring, never reachable from a script. */
@@ -78,7 +94,7 @@ public final class ScriptWorld {
                 || !(world instanceof com.jedrock.core.world.CoreWorld core)) {
             return null;
         }
-        return new ScriptChest(manager, core, core.getChestContainer(x, y, z), x, y, z);
+        return new ScriptChest(manager, core, core.getChestContainer(x, y, z), x, y, z, scope);
     }
 
     /** Whether there is a chest block at {@code (x, y, z)} — {@link #getChest} without building a view. */

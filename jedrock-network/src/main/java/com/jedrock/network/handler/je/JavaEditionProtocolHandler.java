@@ -473,6 +473,21 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     }
 
     @Override
+    public void setEntityHeadYaw(JedrockConnection c, long entityId, double x, double y, double z,
+                                 float bodyYaw, float pitch, float headYaw) {
+        // 1.12.2 Entity Head Look: the head alone, so a glance costs one packet and no position.
+        c.send(new ClientboundEntityHeadLook((int) entityId, headYaw));
+    }
+
+    @Override
+    public void moveEntity(JedrockConnection c, long entityId, double x, double y, double z,
+                           float bodyYaw, float pitch, float headYaw) {
+        // The same pair {@link #moveAvatar} sends, except the head is aimed where it is actually looking.
+        c.send(new ClientboundEntityTeleport((int) entityId, x, y, z, bodyYaw, pitch));
+        c.send(new ClientboundEntityHeadLook((int) entityId, headYaw));
+    }
+
+    @Override
     public void removeEntity(JedrockConnection c, long entityId) {
         c.send(new ClientboundDestroyEntities((int) entityId));
     }

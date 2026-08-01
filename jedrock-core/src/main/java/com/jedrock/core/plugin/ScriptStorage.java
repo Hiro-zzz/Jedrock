@@ -1,11 +1,8 @@
 package com.jedrock.core.plugin;
 
 import com.jedrock.api.player.Player;
-import org.mozilla.javascript.Context;
 import org.mozilla.javascript.Function;
-import org.mozilla.javascript.NativeJavaObject;
 import org.mozilla.javascript.Scriptable;
-import org.mozilla.javascript.ScriptableObject;
 import org.mozilla.javascript.Undefined;
 
 /**
@@ -143,37 +140,17 @@ public final class ScriptStorage {
 
     /** Render a JS object or array through the script's own {@code JSON.stringify}. */
     private String stringifyJson(Scriptable value) {
-        Context cx = Context.getCurrentContext();
-        if (cx == null) {
-            throw new IllegalStateException("storage.set of an object must run on a script thread");
-        }
-        Object json = ScriptableObject.getProperty(scope, "JSON");
-        if (!(json instanceof Scriptable jsonObj)
-                || !(ScriptableObject.getProperty(jsonObj, "stringify") instanceof Function stringify)) {
-            throw new IllegalStateException("JSON.stringify is missing from the script scope");
-        }
-        Object result = stringify.call(cx, scope, jsonObj, new Object[]{value});
-        if (!(result instanceof CharSequence text)) {
-            // JSON.stringify returns undefined for values it can't represent (a lone function, say).
-            throw new IllegalArgumentException("storage.set could not turn that value into JSON");
-        }
-        return text.toString();
+        return ScriptJson.stringify(scope, value, "storage.set");
     }
 
     /** Hand a stored JSON payload back as a real JS value. */
     private Object parseJson(String text) {
-        Context cx = Context.getCurrentContext();
-        Object json = ScriptableObject.getProperty(scope, "JSON");
-        if (cx == null || !(json instanceof Scriptable jsonObj)
-                || !(ScriptableObject.getProperty(jsonObj, "parse") instanceof Function parse)) {
-            return text; // off a script thread there is no scope to parse into — the text is the honest answer
-        }
-        return parse.call(cx, scope, jsonObj, new Object[]{text});
+        return ScriptJson.parse(scope, text);
     }
 
     /** Rhino hands Java values in wrapped; unwrap once so the type checks above see the real thing. */
     private static Object unwrap(Object value) {
-        return value instanceof NativeJavaObject wrapper ? wrapper.unwrap() : value;
+        return ScriptJson.unwrap(value);
     }
 
     private static String requireKey(String key) {
@@ -184,9 +161,6 @@ public final class ScriptStorage {
     }
 
     private static String describe(Object value) {
-        if (value == null) {
-            return "null";
-        }
-        return value instanceof Function ? "a function" : value.getClass().getSimpleName();
+        return ScriptJson.describe(value);
     }
 }

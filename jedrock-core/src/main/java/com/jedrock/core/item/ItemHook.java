@@ -23,21 +23,29 @@ public interface ItemHook {
     boolean run(Player player, ItemContext context);
 
     /** What the action was about, beyond the player holding the item. Fields not relevant to a hook are 0. */
-    record ItemContext(int x, int y, int z, int blockState, Player target) {
+    record ItemContext(int x, int y, int z, int blockState, Player target, long remainingMillis) {
 
         /** For a hook with no place and no other player — {@code use} and {@code hold}. */
         public static ItemContext none() {
-            return new ItemContext(0, 0, 0, 0, null);
+            return new ItemContext(0, 0, 0, 0, null, 0L);
         }
 
         /** For a hook about a block — {@code break}. */
         public static ItemContext at(int x, int y, int z, int blockState) {
-            return new ItemContext(x, y, z, blockState, null);
+            return new ItemContext(x, y, z, blockState, null, 0L);
         }
 
         /** For a hook about somebody else — {@code hit}. */
         public static ItemContext on(Player target) {
-            return new ItemContext(0, 0, 0, 0, target);
+            return new ItemContext(0, 0, 0, 0, target, 0L);
+        }
+
+        /**
+         * The same context, handed to a {@code cooldown} hook instead of the behaviour it stands in for —
+         * so a refused break still knows which block, and a refused hit still knows who.
+         */
+        public ItemContext cooling(long remainingMillis) {
+            return new ItemContext(x, y, z, blockState, target, remainingMillis);
         }
     }
 }

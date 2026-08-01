@@ -33,14 +33,18 @@ public final class ScriptChest {
     private final int x;
     private final int y;
     private final int z;
+    /** Where {@code JSON} lives, for per-stack data; null in a view built without a plugin's scope. */
+    private final org.mozilla.javascript.Scriptable scope;
 
-    ScriptChest(PluginManager manager, CoreWorld world, Container container, int x, int y, int z) {
+    ScriptChest(PluginManager manager, CoreWorld world, Container container, int x, int y, int z,
+                org.mozilla.javascript.Scriptable scope) {
         this.manager = manager;
         this.world = world;
         this.container = container;
         this.x = x;
         this.y = y;
         this.z = z;
+        this.scope = scope;
     }
 
     // ===== Where it is =====
@@ -91,6 +95,65 @@ public final class ScriptChest {
 
     public boolean contains(int state) {
         return count(state) > 0;
+    }
+
+    /**
+     * The {@linkplain ScriptItems custom-item key} in {@code slot}, or {@code null} for an ordinary stack.
+     *
+     * <p>A chest is where a custom item spends most of its life — the level file has carried these keys
+     * since v4, long enough that a chest can hold an item whose script has been uninstalled and reinstalled
+     * since. Reading one costs nothing and does not require the item to be defined right now.
+     */
+    public String getKey(int slot) {
+        return inRange(slot) ? container.customKeyAt(slot) : null;
+    }
+
+    /** What the stack in {@code slot} carries as its own state, or {@code null}. See {@code items.heldData}. */
+    public Object getData(int slot) {
+        if (!inRange(slot)) {
+            return null;
+        }
+        String stored = container.customDataAt(slot);
+        if (stored == null) {
+            return null;
+        }
+        return scope == null ? stored : ScriptJson.parse(scope, stored);
+    }
+
+    /** Put data on the stack in {@code slot}. An empty slot has no stack to put it on. */
+    public void setData(int slot, Object value) {
+        if (!inRange(slot) || container.isEmpty(slot)) {
+            return;
+        }
+        container.setCustomData(slot, writeData(value));
+        changed();
+    }
+
+    private String writeData(Object value) {
+        Object unwrapped = ScriptJson.unwrap(value);
+        if (unwrapped == null || unwrapped instanceof org.mozilla.javascript.Undefined) {
+            return null;
+        }
+        if (unwrapped instanceof CharSequence text) {
+            return text.toString();
+        }
+        if (unwrapped instanceof Number || unwrapped instanceof Boolean) {
+            return unwrapped.toString();
+        }
+        if (scope != null && unwrapped instanceof org.mozilla.javascript.Scriptable s
+                && !(unwrapped instanceof org.mozilla.javascript.Function)) {
+            return ScriptJson.stringify(scope, s, "chest.setData");
+        }
+        throw new IllegalArgumentException("a stack can carry a string, number, boolean, object or array"
+                + " — not " + ScriptJson.describe(unwrapped));
+    }
+
+    /** Put a <b>custom</b> item in {@code slot} — the key is what makes it one; see {@code items.define}. */
+    public void setItem(int slot, int state, int count, String customKey) {
+        if (inRange(slot)) {
+            container.set(slot, state, count, customKey);
+            changed();
+        }
     }
 
     // ===== Writing =====

@@ -108,6 +108,33 @@ public interface PlayerConnection {
     /** Move a puppet entity previously shown via {@link #spawnEntity} to an absolute position. */
     default void moveEntity(long entityId, double x, double y, double z, float yaw, float pitch) {}
 
+    /**
+     * As {@link #moveEntity(long, double, double, double, float, float)}, but saying where the entity is
+     * <em>looking</em> as well as which way its body is turned.
+     *
+     * <p>Every edition here has carried both numbers all along — a Java client has a whole packet for the
+     * head alone, and both Bedrock eras put a head yaw in the move itself. The server simply had nothing
+     * to put in the field and wrote the body yaw twice, which is why a puppet could never glance.
+     *
+     * <p>The default drops the head yaw rather than refusing: a connection that hasn't learned this still
+     * moves the entity to the right place, facing the right way, which is what it did before.
+     */
+    default void moveEntity(long entityId, double x, double y, double z,
+                            float bodyYaw, float pitch, float headYaw) {
+        moveEntity(entityId, x, y, z, bodyYaw, pitch);
+    }
+
+    /**
+     * Turn a puppet's <b>head</b> and nothing else — the glance.
+     *
+     * <p>Takes the whole pose, not just the angle, because the editions disagree about whether that is a
+     * thing you can say on its own: Java has a packet for exactly this and ignores everything else here,
+     * while on both Bedrock eras a head yaw only travels inside a move, so the rest of the pose has to be
+     * restated to avoid moving the entity while turning its head. Default no-op.
+     */
+    default void setEntityHeadYaw(long entityId, double x, double y, double z,
+                                  float bodyYaw, float pitch, float headYaw) {}
+
     /** Despawn a puppet entity previously shown via {@link #spawnEntity}. */
     default void removeEntity(long entityId) {}
 

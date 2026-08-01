@@ -11,6 +11,7 @@ import com.jedrock.api.world.World;
 import com.jedrock.core.entity.EntityIds;
 import com.jedrock.core.inventory.Container;
 import com.jedrock.core.inventory.Cursor;
+import com.jedrock.core.inventory.CustomStackTrail;
 import com.jedrock.core.inventory.SlotEchoGuard;
 import com.jedrock.core.permission.OpList;
 import com.jedrock.core.permission.PermissionManager;
@@ -270,6 +271,16 @@ public final class CorePlayer implements Player {
         return inventory.give(state, 0, STORAGE_SLOTS);
     }
 
+    /**
+     * As {@link #addToInventory(int)}, but for a stack that is <em>something</em> — a custom item, and
+     * whatever has happened to that particular one. Everything moving an existing stack into a player's
+     * inventory goes through this rather than the plain form, or the stack arrives as the ordinary item
+     * it is merely drawn as.
+     */
+    public int addToInventory(int state, String customKey, String customData) {
+        return inventory.give(state, 0, STORAGE_SLOTS, customKey, customData);
+    }
+
     /** Give one {@code state} and refresh that slot on the client. @return true if it fit. (api {@link Player}) */
     @Override
     public boolean giveItem(int state) {
@@ -331,7 +342,15 @@ public final class CorePlayer implements Player {
 
     /** The display for one slot: the custom item's name and lore, or {@code null} for an ordinary stack. */
     private com.jedrock.api.item.ItemDisplay displayAt(int slot) {
-        String key = inventory.customKeyAt(slot);
+        return displayForKey(inventory.customKeyAt(slot));
+    }
+
+    /**
+     * How a stack carrying {@code key} should be named and described, or {@code null} if it is an ordinary
+     * one. Public because a chest window is filled by {@code ContainerService} out of somebody else's
+     * container, and a named sword should read the same whichever box it is sitting in.
+     */
+    public com.jedrock.api.item.ItemDisplay displayForKey(String key) {
         if (key == null) {
             return null; // the overwhelmingly common case — no lookup, no allocation
         }
@@ -387,6 +406,7 @@ public final class CorePlayer implements Player {
      */
     public void syncInventory() {
         slotEchoGuard.armAll(System.nanoTime());
+        stackTrail.clear(); // the client is about to be told everything — no half-move is outstanding
         connection.setInventory(inventory.states(), inventory.counts(), inventoryDisplay());
         heldItemMayHaveChanged();
         armorMayHaveChanged();
@@ -399,9 +419,20 @@ public final class CorePlayer implements Player {
      */
     private final SlotEchoGuard slotEchoGuard = new SlotEchoGuard(INV_SLOTS);
 
+    /**
+     * Carries a custom stack's identity across a drag the client made and only reported afterwards — the
+     * other half of the same problem. See {@link CustomStackTrail}.
+     */
+    private final CustomStackTrail stackTrail = new CustomStackTrail();
+
     /** True while {@code slot} is still inside the echo window of a server-authored push. */
     public boolean isSlotEchoGuarded(int slot) {
         return slotEchoGuard.isGuarded(slot, System.nanoTime());
+    }
+
+    /** The trail of the last stack a client report displaced — read and written by {@code ContainerService}. */
+    public CustomStackTrail getStackTrail() {
+        return stackTrail;
     }
 
     // ===== Inventory API (scripting-facing; operates on the 36 storage slots 0-35) =====

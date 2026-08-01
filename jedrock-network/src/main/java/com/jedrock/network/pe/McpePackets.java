@@ -292,14 +292,23 @@ final class McpePackets {
      * byte. Unlike {@link #movePlayer} (player-only) this addresses any entity runtime id.
      */
     static void moveEntity(ByteBuf b, long entityId, double x, double y, double z, float yaw, float pitch) {
+        moveEntity(b, entityId, x, y, z, yaw, pitch, yaw);
+    }
+
+    /**
+     * As above, aiming the head separately from the body. The field has always been on this wire; what
+     * used to go in it was the body yaw a second time, so nothing here could look anywhere but forwards.
+     */
+    static void moveEntity(ByteBuf b, long entityId, double x, double y, double z,
+                           float bodyYaw, float pitch, float headYaw) {
         ByteBufUtils.writeVarInt(b, ID_MOVE_ENTITY);
         ByteBufUtils.writeVarLong(b, entityId);
         b.writeFloatLE((float) x);
         b.writeFloatLE((float) y);                         // feet
         b.writeFloatLE((float) z);
         ByteBufUtils.writeAngle(b, pitch);
-        ByteBufUtils.writeAngle(b, yaw);
-        ByteBufUtils.writeAngle(b, yaw);                   // head yaw
+        ByteBufUtils.writeAngle(b, bodyYaw);
+        ByteBufUtils.writeAngle(b, headYaw);               // head yaw
         b.writeByte(0);                                    // flags (on-ground / teleport)
     }
 

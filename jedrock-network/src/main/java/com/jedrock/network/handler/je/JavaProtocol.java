@@ -94,6 +94,20 @@ public interface JavaProtocol extends ProtocolHandler {
         moveAvatar(c, entityId, x, y, z, yaw, pitch); // an entity teleport works for any entity id
     }
 
+    /** As above, with the head aimed separately from the body. */
+    default void moveEntity(JedrockConnection c, long entityId, double x, double y, double z,
+                            float bodyYaw, float pitch, float headYaw) {
+        moveEntity(c, entityId, x, y, z, bodyYaw, pitch);
+        setEntityHeadYaw(c, entityId, x, y, z, bodyYaw, pitch, headYaw);
+    }
+
+    /**
+     * Turn a puppet's head alone. Every Java version has a packet for it (Entity Head Look), so the pose
+     * this is handed is ignored here — it is there for the Bedrock sessions, which have no such packet.
+     */
+    default void setEntityHeadYaw(JedrockConnection c, long entityId, double x, double y, double z,
+                                  float bodyYaw, float pitch, float headYaw) {}
+
     /** Despawn a puppet entity previously shown via {@link #spawnEntity}. */
     void removeEntity(JedrockConnection c, long entityId);
 

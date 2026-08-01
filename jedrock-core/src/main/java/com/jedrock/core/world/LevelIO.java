@@ -51,7 +51,9 @@ import java.util.zip.InflaterInputStream;
  *   repeat containerCount:
  *     long  position (packed x,y,z)
  *     byte  slotCount
- *     repeat slotCount: short state (id&lt;&lt;4|meta), byte count
+ *     repeat slotCount: short state (id&lt;&lt;4|meta), byte count,
+ *                       utf customItemKey ("" = ordinary)   (v4+)
+ *                       utf customStackData ("" = none)     (v6+)
  * </pre>
  *
  * <p>Only non-null sections are stored, so an all-air world costs one {@code sectionCount = 0}. DEFLATE
@@ -62,8 +64,9 @@ import java.util.zip.InflaterInputStream;
 public final class LevelIO {
 
     /** Current on-disk format version; bump on any incompatible layout change. (v2 added the biome map,
-     *  v3 the chest container contents, v4 the custom-item key each stack carries, v5 the dimension.) */
-    public static final int FORMAT_VERSION = 5;
+     *  v3 the chest container contents, v4 the custom-item key each stack carries, v5 the dimension,
+     *  v6 the per-stack data a single stack carries on top of that key.) */
+    public static final int FORMAT_VERSION = 6;
 
     private static final byte[] MAGIC = {'J', 'D', 'W', 'L'};
     private static final int SECTION_SHORTS = 4096;
@@ -149,6 +152,10 @@ public final class LevelIO {
                         // this file is read long before any plugin exists to define one.
                         String key = c.customKeyAt(i);
                         body.writeUTF(key == null ? "" : key);
+                        // v6: this one stack's own data, or "" for none. Opaque here by design — it is
+                        // whatever the script that wrote it decided, and this file only has to give it back.
+                        String data = c.customDataAt(i);
+                        body.writeUTF(data == null ? "" : data);
                     }
                 }
             } finally {
@@ -262,9 +269,12 @@ public final class LevelIO {
                     for (int i = 0; i < slots; i++) {
                         int state = body.readUnsignedShort();
                         int count = body.readUnsignedByte();
-                        // v3 chests predate custom items, so every stack in one is ordinary.
+                        // v3 chests predate custom items, so every stack in one is ordinary; v4 and v5
+                        // predate per-stack data, so every stack in one is a plain instance of its item.
                         String key = version < 4 ? "" : body.readUTF();
-                        container.set(i, state, count, key.isEmpty() ? null : key);
+                        String data = version < 6 ? "" : body.readUTF();
+                        container.set(i, state, count, key.isEmpty() ? null : key,
+                                data.isEmpty() ? null : data);
                     }
                     containers.put(pos, container);
                 }

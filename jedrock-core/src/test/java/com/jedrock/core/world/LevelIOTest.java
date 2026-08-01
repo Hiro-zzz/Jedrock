@@ -157,6 +157,75 @@ class LevelIOTest {
     }
 
     @Test
+    void whatHappenedToOneStackSurvivesARestart(@TempDir Path dir) throws Exception {
+        Map<Long, Container> src = chests();
+        Container chest = new Container(27);
+        chest.set(0, Blocks.state(280, 0), 1, "wand", "{\"charges\":2}");
+        chest.set(1, Blocks.state(280, 0), 1, "wand", "{\"charges\":7}"); // the same wand, differently spent
+        chest.set(2, Blocks.state(280, 0), 1, "wand");                   // and one nothing has happened to
+        src.put(42L, chest);
+
+        Path file = dir.resolve("level.jdw");
+        LevelIO.save(file, meta(1L, true), new BlockStorage(), new BiomeStorage(), src);
+        Map<Long, Container> dst = chests();
+        LevelIO.load(file, new BlockStorage(), new BiomeStorage(), dst);
+
+        Container out = dst.get(42L);
+        assertEquals("{\"charges\":2}", out.customDataAt(0));
+        assertEquals("{\"charges\":7}", out.customDataAt(1),
+                "two stacks of one item, each with its own history");
+        assertNull(out.customDataAt(2), "and nothing invented for the one that had none");
+        assertEquals("wand", out.customKeyAt(0), "the key still rides along");
+    }
+
+    @Test
+    void aWorldWrittenBeforePerStackDataStillLoads(@TempDir Path dir) throws Exception {
+        // v5 is the last layout without the data field. Written by hand, because the point is a file this
+        // build did not produce — an upgrade in place is only real if an older file can still be read.
+        Path file = dir.resolve("level.jdw");
+        writeV5WithOneChest(file, 42L, Blocks.state(276, 0), 1, "frostblade");
+
+        Map<Long, Container> dst = chests();
+        LevelData meta = LevelIO.load(file, new BlockStorage(), new BiomeStorage(), dst);
+
+        assertEquals(5, meta.formatVersion(), "read as what it is");
+        Container out = dst.get(42L);
+        assertEquals("frostblade", out.customKeyAt(0), "v5 already carried the key");
+        assertNull(out.customDataAt(0), "and a stack from before per-stack data simply has none");
+    }
+
+    /** A minimal v5 level file with one chest — header, then the DEFLATE body v5 expects. */
+    private static void writeV5WithOneChest(Path file, long pos, int state, int count, String key)
+            throws IOException {
+        try (java.io.OutputStream out = Files.newOutputStream(file)) {
+            java.io.DataOutputStream header = new java.io.DataOutputStream(out);
+            header.write(new byte[]{'J', 'D', 'W', 'L'});
+            header.writeInt(5);
+            header.writeLong(1L);
+            header.writeInt(48);
+            header.writeInt(48);
+            header.writeBoolean(true);
+            header.writeDouble(0.5); header.writeDouble(63.0); header.writeDouble(0.5);
+            header.writeFloat(90.0f); header.writeFloat(0.0f);
+            header.writeByte(0); // overworld
+            header.flush();
+            try (java.io.DataOutputStream body = new java.io.DataOutputStream(
+                    new java.util.zip.DeflaterOutputStream(out))) {
+                body.writeInt(0); // no sections
+                body.writeInt(0); // no biome chunks
+                body.writeInt(1); // one container
+                body.writeLong(pos);
+                body.writeByte(27);
+                for (int i = 0; i < 27; i++) {
+                    body.writeShort(i == 0 ? state : 0);
+                    body.writeByte(i == 0 ? count : 0);
+                    body.writeUTF(i == 0 ? key : "");
+                }
+            }
+        }
+    }
+
+    @Test
     void saveIsAtomicAndOverwrites(@TempDir Path dir) throws IOException {
         Path file = dir.resolve("level.jdw");
         BlockStorage first = new BlockStorage();

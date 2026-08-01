@@ -284,8 +284,10 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   armor and off-hand slots. **Chests** are a placeable block (right-click to open) backed by a 27-slot
   container: move items in and out, shift to quick-transfer, in survival <em>and</em> creative (the
   creative inventory is mirrored server-side so the chest's player half is tracked). Chest contents
-  **persist** in the level file (format v4, which loads a v2 or v3 world in place and rewrites it on the
-  next save; v3 added chests, v4 the custom-item key each stack carries). Wired for JE 1.12.2 and 1.8.
+  **persist** in the level file (format v6, which loads a v2–v5 world in place and rewrites it on the
+  next save; v3 added chests, v4 the custom-item key each stack carries, v6 that stack's own data).
+  A custom item keeps its name, its lore and its own state through every one of those moves, and the
+  window draws the name. Wired for JE 1.12.2 and 1.8.
   True to the model, the server only <em>stores and moves</em> items — no crafting or smelting simulation,
   no item entities (a dropped / overflow item simply vanishes).
 - ✅ **Chests on Bedrock 1.1.5 — click-transfer.** The retail 1.1.5 client crashes on a real chest window,
@@ -298,7 +300,9 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   (`SlotEchoGuard`), so a deposit→withdraw cycle can't duplicate items and a rearranged inventory still
   sticks.
 - ✅ **Puppets and holograms — visuals the server drives, cross-edition.** A **puppet** is a mob / NPC the
-  server puppeteers and never simulates: spawn it, move it, turn it to face a player (`lookAt`), give it a
+  server puppeteers and never simulates: spawn it, move it, turn it to face a player (`lookAt`) or just
+  **glance** at one with its head while its body stays put (`glanceAt` / `setHeadYaw` — every edition has
+  carried the two angles separately all along), give it a
   floating **name tag**, set it alight / invisible / crouching, make it swing or flinch — and hitting one
   fires an interaction callback. A **hologram** is the same idea with the body removed: floating lines of
   text, authored once in the shared markup, rendered on Java as an invisible marker armor stand and on
@@ -357,11 +361,21 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   cancelling the event the core already routes that decision through.
   Identity is the **key**, and a stack carries the key rather than a copy of the definition. That is what
   makes a custom item survive what a reference could not: a hot reload re-points every existing stack at
-  the new definition, the level file (v4) restores a chest full of them long before any plugin exists, and
+  the new definition, the level file (v6) restores a chest full of them long before any plugin exists, and
   an item whose plugin was removed simply behaves as the vanilla one it is drawn as until its script comes
   back. A custom stack never merges with an ordinary one of the same state. Dispatch listeners are
   registered only while some item actually has a behaviour, so a purely cosmetic item — or none at all —
   costs nothing. Try `/forge` in `plugins/example.js`.
+  **A stack also carries its own state** — `items.heldData(player)` / `setHeldData` — because a definition
+  is shared by every stack that names it and has nowhere to put "this particular wand has one charge
+  left". Strings and numbers go in as themselves; an object goes through the script's own `JSON` and comes
+  back as a value rather than as text that looks like one. Two stacks whose data differs do not merge, so
+  a spent wand never dissolves into a full one, and it persists in the level file beside the key. And the
+  item itself can carry a **cooldown**: `setCooldown(ms)` and it stops answering that player until it
+  elapses, with an optional `onCooldown` hook fired in the behaviour's place (`ctx.getRemaining()`) whose
+  `true` swallows the action and whose absence lets it fall through as the vanilla item. The wait belongs
+  to the item; *when a given player last used one* belongs to the server, so editing a plugin no longer
+  hands everyone a fresh wand.
   **The name and lore reach the client on all four protocols**, as item NBT in the Slot's own NBT field —
   two dialects: **Java** is big-endian named NBT written inline (plain §-coded strings, since text
   components in `Name` arrived in 1.13), and **both Bedrock eras** are length-prefixed *little-endian* NBT.
@@ -638,7 +652,9 @@ another.
 | `Region` / `RegionManager` | api / core | Named boxes with rules **in one world**; flags enforced by cancelling the events the core already routes decisions through, and registered only while a region exists |
 | `CustomItem` / `ItemRegistry` | api / core | A name, lore and behaviour on a vanilla item state; a stack carries the **key**, the registry gives that key meaning |
 | `ItemDisplay` | api | The only part of a custom item the client learns — name + lore, legacy-rendered, `null` for an ordinary stack |
+| `ItemCooldowns` | core/item | The half of a cooldown that isn't the item's: when each player last used each key. On the registry, so a hot reload doesn't reset it |
 | `SlotEchoGuard` | core/inventory | Tells a Bedrock client's own inventory move from its echo of one the server made — by timing, since the two are identical in content |
+| `CustomStackTrail` | core/inventory | Carries a stack's identity across a drag that client made and only reported afterwards — the same wire, the same reason, one stack deep |
 | `ScriptEntity` / `ScriptEntities` | core/plugin | That primitive as scripts see it: movement, state, spatial queries and an `onTick` brain, owned per plugin |
 | `EntityTypeIds` / `EntityFlagIds` | network | The entity counterpart of the block palette: canonical type / flag → each edition's wire ids |
 | `CommandManager` / `CommandSender` | core | One command surface for players and the console, gated by `PermissionManager` (groups, wildcards, deny-wins) |
@@ -782,7 +798,10 @@ level is a 400 KB DEFLATE blob, and a table has nothing to offer it.
 A few knobs stay `-D`-only, since they exist to be turned down rather than tuned:
 `-Djedrock.pe.raknetProtocolVersion=N` (default `8` = MCPE 1.1.5, for other client builds),
 `-Djedrock.pe.slotEchoGuardMs=<ms>` (default `750`, `0` = off — how long after the server pushes an
-inventory slot a Bedrock client's report of it is read as a stale echo), and the 1.1.5 block-edit debounce
+inventory slot a Bedrock client's report of it is read as a stale echo),
+`-Djedrock.pe.stackTrailMs=<ms>` (default `750`, `0` = off — how long a custom stack a Bedrock client
+picked up stays claimable by the report that puts it down, which is what carries a named item across a
+drag), and the 1.1.5 block-edit debounce
 windows (`-Djedrock.pe.placeBurstMs`, `placeSameCellMs`, `breakSameCellMs`).
 
 ### Console & diagnostics
@@ -861,9 +880,25 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   was the only honest option before items had names; now that they do, it's simply not wired up yet.
 - **Forms are out on both PE eras** — the legacy clients predate them, so a menu is a window (Java) or a
   list (Bedrock) and nothing richer.
-- **Entities can't be posed finely.** No armor stands in either PE era, no per-entity scale, no limb
-  posing, and head yaw isn't split from body yaw yet. 0.14 renders only the mobs it is old enough to
-  know; anything younger silently doesn't appear.
+- **Entities can't be posed finely.** No armor stands in either PE era, no per-entity scale and no limb
+  posing. Head yaw *is* now separate from body yaw, but how far a neck may turn is the client's opinion
+  and none of them tells us where the limit is — ask for 180° behind and you get whatever that client
+  thinks a neck does. A `PLAYER` puppet can't glance at all, because it borrows a real player's rendering
+  and a real player reports one yaw. On both PE eras a glance is a whole `MoveEntity` (there is no
+  head-only packet on that wire), so a puppet that follows somebody every tick costs a move every tick
+  there and one small packet on Java. 0.14 renders only the mobs it is old enough to know; anything
+  younger silently doesn't appear.
+- **Per-stack state lives exactly as long as the stack does.** A wand's remaining charges persist in a
+  chest, because chests are in the level file; the same wand in a player's backpack loses them at logout,
+  because a player's inventory has never been persisted here at all. Nothing is lost that wasn't already
+  — the wand goes with it — but it is worth knowing before designing around it. For anything that must
+  outlive a session, `storage.forPlayer` is still the right place.
+- **A Bedrock client's drag is rescued one stack at a time.** That client owns its window and reports
+  only an id, a meta and a count, so a custom item's identity is carried across a move by pairing the
+  report that empties a slot with the one that fills another. A straight drag works. A *swap* displaces
+  two stacks and there is only one trail, so one of the two arrives as the ordinary item it is drawn as
+  — as does anything moved faster than the pairing window (`-Djedrock.pe.stackTrailMs`, default 750).
+  Java's window is server-authoritative and has none of this problem.
 - **Scenes cost packets, not ticks.** A static prop runs no logic, but every joining player pays one
   spawn packet for it. A 0.14 client will find that ceiling first — it's the number to watch as a scene
   grows.
@@ -903,18 +938,15 @@ smaller by nature — a missing convenience on a surface that already exists, a 
 verification run, and packaging the whole thing so it can be handed to someone. Nothing here is
 promised; it's the list of what would be worth doing next, roughly in the order it would pay off.
 
-- **Small additions to the script API.** A **cooldown** primitive for custom items (every `onUse` script
-  writes its own today), and per-*stack* state — there is nowhere to put "this particular sword's
-  remaining charges", since a definition is shared by every stack that names it. Regions want a
-  **greeting / farewell** message and a **priority** escape hatch for the case deny-wins can't express:
-  an allow island inside a deny. And the `/pick` storage list should show the names custom items now
-  have, instead of a slot number and a raw state.
+- **Small additions to the script API.** Regions want a **greeting / farewell** message and a
+  **priority** escape hatch for the case deny-wins can't express: an allow island inside a deny. And the
+  `/pick` storage list should show the names custom items now have, instead of a slot number and a raw
+  state.
 - **What worlds still want.** **Deleting** one, which is deliberately absent — unloading leaves the folder,
   and removing it is a decision that belongs to whoever can see the filesystem, not to a script. A
   **portal** is not on this list: noticing a player standing in a frame is the shape of simulation this
   server doesn't do, and travel already has a command, an api and a script call.
-- **Polish on what's already there.** Split **head yaw from body yaw** on puppets (the packets exist; a
-  puppet just can't glance without turning). A **sharper judge** — per-axis movement limits and a real
+- **Polish on what's already there.** A **sharper judge** — per-axis movement limits and a real
   interaction ray-cast, still cheap, still approximate. And the illusion toolkit (sidebar, boss bar,
   menus) wants a **real-client pass on Bedrock 1.1.5**, which is the only way anything on that wire
   becomes true.

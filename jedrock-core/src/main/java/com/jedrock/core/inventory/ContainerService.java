@@ -66,7 +66,7 @@ public final class ContainerService {
             // A click can dress or undress the player — dragging a helmet in, or shifting one out — and
             // what it ends up doing depends on the cursor, so the armor is compared after the fact
             // rather than predicted. Only snapshotted when somebody is listening.
-            int[] wornBefore = armorSnapshot(player);
+            WornSnapshot wornBefore = armorSnapshot(player);
             if (shift) {
                 // Quick-move to the "other" region: hotbar↔main, and armor/off-hand back into storage.
                 int from, to;
@@ -96,8 +96,9 @@ public final class ContainerService {
         player.closeContainer(); // a chest, if any, is no longer open
         Cursor cur = player.getCursor();
         // Return any carried item to storage; whatever doesn't fit is lost (no item entities to drop).
-        while (!cur.isEmpty() && player.addToInventory(cur.state()) >= 0) {
-            cur.set(cur.state(), cur.count() - 1);
+        while (!cur.isEmpty()
+                && player.addToInventory(cur.state(), cur.customKey(), cur.customData()) >= 0) {
+            cur.setCount(cur.count() - 1);
         }
         cur.clear();
         player.syncInventory();
@@ -431,9 +432,11 @@ public final class ContainerService {
             container.clear(slot); // no real items to a creative player — just clear the stack
             return have;
         }
+        String key = container.customKeyAt(slot);
+        String data = container.customDataAt(slot);
         int prev = -1, moved = 0;
         for (int c = 0; c < have; c++) {
-            int into = player.addToInventory(state);
+            int into = player.addToInventory(state, key, data);
             if (into < 0) break; // inventory full
             if (into != prev) {
                 if (prev >= 0) player.syncSlot(prev);
@@ -443,7 +446,7 @@ public final class ContainerService {
         }
         if (prev >= 0) player.syncSlot(prev);
         if (moved > 0) {
-            container.set(slot, have - moved > 0 ? state : 0, have - moved);
+            container.setCount(slot, have - moved);
         }
         return moved;
     }
@@ -456,13 +459,15 @@ public final class ContainerService {
         }
         Container inv = player.getInventory();
         int state = inv.stateAt(heldSlot);
+        String key = inv.customKeyAt(heldSlot);
+        String data = inv.customDataAt(heldSlot);
         int moved = 0;
         for (int c = 0; c < have; c++) {
-            if (container.give(state, 0, container.size()) < 0) break; // container full
+            if (container.give(state, 0, container.size(), key, data) < 0) break; // container full
             moved++;
         }
         if (moved > 0 && !creative) { // survival consumes what was deposited; creative's hand is infinite
-            inv.set(heldSlot, have - moved > 0 ? state : 0, have - moved);
+            inv.setCount(heldSlot, have - moved);
             player.syncSlot(heldSlot);
         }
         return moved;
@@ -550,22 +555,45 @@ public final class ContainerService {
         int chestSize = chest.size();
         int[] ps = player.inventoryStates();
         int[] pc = player.inventoryCounts();
+        Container inv = player.getInventory();
         int[] states = new int[chestSize + 36];
         int[] counts = new int[chestSize + 36];
+        // A window is where a custom item is most likely to be looked at, so it is named here too. The
+        // array stays null until something in the window actually has a name, and the wire is then
+        // byte-identical to what it always was.
+        com.jedrock.api.item.ItemDisplay[] display = null;
         for (int i = 0; i < chestSize; i++) {          // chest
             states[i] = chest.stateAt(i);
             counts[i] = chest.countAt(i);
+            display = withDisplay(display, states.length, i, player.displayForKey(chest.customKeyAt(i)));
         }
         for (int i = 0; i < 27; i++) {                 // player main (core 9-35)
             states[chestSize + i] = ps[9 + i];
             counts[chestSize + i] = pc[9 + i];
+            display = withDisplay(display, states.length, chestSize + i,
+                    player.displayForKey(inv.customKeyAt(9 + i)));
         }
         for (int i = 0; i < 9; i++) {                  // player hotbar (core 0-8)
             states[chestSize + 27 + i] = ps[i];
             counts[chestSize + 27 + i] = pc[i];
+            display = withDisplay(display, states.length, chestSize + 27 + i,
+                    player.displayForKey(inv.customKeyAt(i)));
         }
-        connection.setWindowItems(windowId, states, counts);
+        connection.setWindowItems(windowId, states, counts, display);
         connection.setCursorItem(player.getCursor().state(), player.getCursor().count());
+    }
+
+    /** Record one slot's display, allocating the array only once something in the window has one. */
+    private static com.jedrock.api.item.ItemDisplay[] withDisplay(
+            com.jedrock.api.item.ItemDisplay[] display, int size, int slot,
+            com.jedrock.api.item.ItemDisplay one) {
+        if (one == null) {
+            return display;
+        }
+        com.jedrock.api.item.ItemDisplay[] out =
+                display == null ? new com.jedrock.api.item.ItemDisplay[size] : display;
+        out[slot] = one;
+        return out;
     }
 
     public void onContainerSetSlot(PlayerConnection connection, int windowId, int slot, int state, int count) {
@@ -589,7 +617,7 @@ public final class ContainerService {
                 return;
             }
             if (slot < chest.size()) {
-                chest.set(slot, state, count);
+                applyClientSlot(player, chest, slot, state, count);
                 if (player.isOpenContainerPersistent()) {
                     player.getCoreWorld().markDirty(); // a world-chest edit persists; a menu's is transient
                 }
@@ -609,7 +637,7 @@ public final class ContainerService {
             // (the client drew the stale one, so it needs correcting either way). See CorePlayer.
             Container inv = player.getInventory();
             if (player.getGameMode() != GameMode.SURVIVAL) {
-                inv.set(slot, state, count); // creative: mirror it, the client is the owner
+                applyClientSlot(player, inv, slot, state, count); // creative: mirror it, the client owns it
                 return;
             }
             if (player.isSlotEchoGuarded(slot)) {
@@ -617,10 +645,41 @@ public final class ContainerService {
                 return;
             }
             int before = inv.stateAt(slot);
-            inv.set(slot, state, count);
+            applyClientSlot(player, inv, slot, state, count);
             if (slot == player.getHeldItemSlot() && inv.stateAt(slot) != before) {
                 broadcast.heldItem(player); // the hand itself changed — redraw it on every other client
             }
+        }
+    }
+
+    /**
+     * Apply a slot report from a client that owns its own window (both Bedrock eras), keeping whatever the
+     * stack <em>is</em> rather than only what it looks like.
+     *
+     * <p>The report carries an id, a meta and a count — there is no field on that wire for a custom-item
+     * key, and none for a stack's own data, because both are the server's invention. Applied literally a
+     * report therefore reads as "an ordinary item is here now", which turned every drag of a named item
+     * into a plain one. Two things save it: a report that leaves the slot's item unchanged is an amount
+     * changing and nothing else, so the identity simply stays; and a report that puts an item down claims
+     * the {@link CustomStackTrail} left by the report that picked one up.
+     *
+     * <p>Claiming before recording matters — in a swap both reports displace something, and the arriving
+     * half can only be explained by what left <em>first</em>.
+     */
+    private static void applyClientSlot(CorePlayer player, Container container, int slot, int state, int count) {
+        if (container.stateAt(slot) == state && state != 0) {
+            container.setCount(slot, count); // same item, different amount: nothing about it has changed
+            return;
+        }
+        long now = System.nanoTime();
+        CustomStackTrail trail = player.getStackTrail();
+        CustomStackTrail.Displaced arriving = state == 0 ? null : trail.claim(state, now);
+        trail.displaced(container.stateAt(slot), container.customKeyAt(slot),
+                container.customDataAt(slot), now);
+        if (arriving == null) {
+            container.set(slot, state, count);
+        } else {
+            container.set(slot, state, count, arriving.customKey(), arriving.customData());
         }
     }
 
@@ -631,8 +690,8 @@ public final class ContainerService {
         }
         Container inv = player.getInventory();
         if (coreSlot >= 0 && coreSlot < inv.size()) {
-            int[] wornBefore = armorSnapshot(player);
-            inv.set(coreSlot, state, count); // mirror only; the creative client already shows it
+            WornSnapshot wornBefore = armorSnapshot(player);
+            applyClientSlot(player, inv, coreSlot, state, count); // mirror; the creative client shows it
             // A creative player dragging armor into slots 36-39 dresses their avatar for everyone else;
             // dropping something into the held slot redraws the hand the same way.
             if (coreSlot >= ArmorSlot.HELMET.inventorySlot() && coreSlot <= ArmorSlot.BOOTS.inventorySlot()) {
@@ -673,19 +732,32 @@ public final class ContainerService {
     }
 
     /**
-     * The four worn states, or {@code null} when nothing is listening for armor changes — the snapshot
+     * The four worn pieces as they are right now — enough to compare against, and enough to put one
+     * <em>back</em>, which is why it holds each piece's identity and not only its state. A refused
+     * enchanted helmet that came back as an ordinary one would be its own small dupe of the bug this
+     * whole path exists to avoid.
+     */
+    private record WornSnapshot(int[] states, String[] keys, String[] data) {}
+
+    /**
+     * The four worn pieces, or {@code null} when nothing is listening for armor changes — the snapshot
      * exists only to compare against, so an unlistened server doesn't take one.
      */
-    private int[] armorSnapshot(CorePlayer player) {
+    private WornSnapshot armorSnapshot(CorePlayer player) {
         if (!events.hasListeners(PlayerArmorChangeEvent.class)) {
             return null;
         }
         ArmorSlot[] slots = ArmorSlot.values();
         int[] worn = new int[slots.length];
+        String[] keys = new String[slots.length];
+        String[] data = new String[slots.length];
+        Container inv = player.getInventory();
         for (int i = 0; i < slots.length; i++) {
             worn[i] = player.getArmor(slots[i]);
+            keys[i] = inv.customKeyAt(slots[i].inventorySlot());
+            data[i] = inv.customDataAt(slots[i].inventorySlot());
         }
-        return worn;
+        return new WornSnapshot(worn, keys, data);
     }
 
     /**
@@ -695,21 +767,23 @@ public final class ContainerService {
      *
      * @return {@code true} if at least one change was refused
      */
-    private boolean vetoArmorChanges(CorePlayer player, int[] wornBefore) {
+    private boolean vetoArmorChanges(CorePlayer player, WornSnapshot wornBefore) {
         if (wornBefore == null) {
             return false; // nobody listening — nothing was snapshotted
         }
         boolean refused = false;
         Container inv = player.getInventory();
         for (ArmorSlot slot : ArmorSlot.values()) {
-            int previous = wornBefore[slot.ordinal()];
+            int previous = wornBefore.states()[slot.ordinal()];
             int next = player.getArmor(slot);
             if (previous == next) {
                 continue;
             }
             if (events.post(new PlayerArmorChangeEvent(player, slot, previous, next)).isCancelled()) {
-                // Written straight to the container: setArmor would post the event a second time.
-                inv.set(slot.inventorySlot(), previous, previous == 0 ? 0 : 1);
+                // Written straight to the container: setArmor would post the event a second time. The
+                // piece goes back as the piece it was, not as a lookalike.
+                inv.set(slot.inventorySlot(), previous, previous == 0 ? 0 : 1,
+                        wornBefore.keys()[slot.ordinal()], wornBefore.data()[slot.ordinal()]);
                 refused = true;
             }
         }

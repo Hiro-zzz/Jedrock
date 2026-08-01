@@ -4,6 +4,7 @@ import com.jedrock.api.event.EventBus;
 import com.jedrock.api.event.EventPriority;
 import com.jedrock.api.event.block.BlockBreakEvent;
 import com.jedrock.api.event.player.PlayerHeldItemChangeEvent;
+import com.jedrock.api.event.player.PlayerQuitEvent;
 import com.jedrock.api.event.player.PlayerUseItemEvent;
 import com.jedrock.api.item.CustomItem;
 import com.jedrock.api.player.Player;
@@ -161,6 +162,30 @@ public final class ItemRegistry {
         if (hook == null) {
             return false;
         }
+        long cooldown = item.getCooldownMillis();
+        if (cooldown > 0 && CoreCustomItem.isCooledDown(trigger)) {
+            long now = System.nanoTime();
+            long remaining = cooldowns.remainingMillis(player.getUniqueId(), item.getKey(), cooldown, now);
+            if (remaining > 0) {
+                // Still warm. The behaviour does not run; what happens instead is the script's call — with
+                // no cooldown hook the action simply falls through and the item behaves as the vanilla one
+                // it is drawn as, which is what "not ready" looks like to a player holding a sword.
+                return invoke(item, CoreCustomItem.Trigger.COOLDOWN, player, context.cooling(remaining));
+            }
+            // Started when the behaviour runs, not when it consumes: a hook returning false has still
+            // been asked, and an item that decides this one didn't count can undo it with clearCooldown.
+            cooldowns.start(player.getUniqueId(), item.getKey(), now);
+        }
+        return invoke(item, trigger, player, context);
+    }
+
+    /** Run one hook if it exists, containing whatever it throws. */
+    private boolean invoke(CoreCustomItem item, CoreCustomItem.Trigger trigger, Player player,
+                           ItemHook.ItemContext context) {
+        ItemHook hook = item.hook(trigger);
+        if (hook == null) {
+            return false;
+        }
         try {
             return hook.run(player, context);
         } catch (RuntimeException e) {
@@ -170,8 +195,48 @@ public final class ItemRegistry {
         }
     }
 
-    /** Keep the listeners in step with whether any defined item has a behaviour at all. Idempotent. */
+    // ===== Cooldowns =====
+
+    /** When each player last used each item — see {@link ItemCooldowns} for why it lives here. */
+    private final ItemCooldowns cooldowns = new ItemCooldowns();
+
+    /** How long {@code player} must still wait before {@code key} answers, in ms; {@code 0} = ready. */
+    public long cooldownRemaining(Player player, String key) {
+        CoreCustomItem item = get(key);
+        if (item == null) {
+            return 0L;
+        }
+        return cooldowns.remainingMillis(player.getUniqueId(), item.getKey(),
+                item.getCooldownMillis(), System.nanoTime());
+    }
+
+    /** End a cooldown early — the item is ready for this player again right now. */
+    public void clearCooldown(Player player, String key) {
+        CoreCustomItem item = get(key);
+        if (item != null) {
+            cooldowns.clear(player.getUniqueId(), item.getKey());
+        }
+    }
+
+    /** Start one by hand, as though the item had just been used. */
+    public void startCooldown(Player player, String key) {
+        CoreCustomItem item = get(key);
+        if (item != null && item.getCooldownMillis() > 0) {
+            cooldowns.start(player.getUniqueId(), item.getKey(), System.nanoTime());
+        }
+    }
+
+    /** The cooldown bookkeeping itself — for tests, which supply their own clock. */
+    public ItemCooldowns getCooldowns() {
+        return cooldowns;
+    }
+
+    /**
+     * Keep the listeners in step with whether any defined item has a behaviour at all — and, separately,
+     * whether any has a cooldown worth forgetting when its owner leaves. Idempotent.
+     */
     private synchronized void dispatchFollowsHooks() {
+        cleanupFollowsCooldowns();
         boolean wanted = items.values().stream().anyMatch(CoreCustomItem::hasHooks);
         if (wanted == !dispatch.isEmpty()) {
             return;
@@ -212,6 +277,28 @@ public final class ItemRegistry {
                 subscription.remove();
             }
             dispatch.clear();
+        }
+    }
+
+    /** Live only while some item has a cooldown — there is nothing to forget otherwise. */
+    private EventBus.Subscription cooldownCleanup;
+
+    /**
+     * A cooldown outlives the action that started it, so somebody has to notice when the player it belongs
+     * to has gone. That is one listener, registered only on a server that actually has a cooling item —
+     * the same rule the dispatch above follows, and the reason a server with no custom items pays nothing.
+     */
+    private void cleanupFollowsCooldowns() {
+        boolean wanted = items.values().stream().anyMatch(item -> item.getCooldownMillis() > 0);
+        if (wanted == (cooldownCleanup != null)) {
+            return;
+        }
+        if (wanted) {
+            cooldownCleanup = events.register(PlayerQuitEvent.class,
+                    event -> cooldowns.forget(event.getPlayer().getUniqueId()));
+        } else {
+            cooldownCleanup.remove();
+            cooldownCleanup = null;
         }
     }
 }

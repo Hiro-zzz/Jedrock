@@ -4,6 +4,68 @@ All notable changes to Jedrock are recorded here. This is an internal project lo
 loosely follows [Keep a Changelog](https://keepachangelog.com/). The project is pre-1.0 and
 unstable — anything may change between entries.
 
+## [Unreleased]
+
+### Fixed
+
+- **A custom item lost its name the moment a player moved it.** Identity was written onto a stack by
+  whoever created it and read back wherever it happened to still be sitting — but nothing in between
+  carried it. `Cursor` held a state and a count and no key at all, so picking a frostblade up and putting
+  it down again was enough to turn it into the ordinary diamond sword it is merely drawn as; the same went
+  for every shift-click, every chest transfer on the 1.1.5 click-transfer path, and every slot a Bedrock
+  client reported after moving something in its own window. What made it hard to see is that nothing
+  breaks: you get a perfectly good sword back, just not yours. The level file has carried these keys since
+  v4, so the persistence everyone tested worked — there was simply nothing left to persist by the time a
+  player had touched it.
+
+  The fix is mostly a distinction the code was missing. `Container.set(slot, state, count)` means "put an
+  ordinary item here", and half its callers meant "the same stack, fewer of them" — that is now
+  `setCount`, which leaves identity alone, and the moves that really are moves pass the key and data
+  along. Two stacks merge only when their state, key **and** per-stack data agree, so a named sword still
+  never dissolves into a plain one. On the Bedrock side the client owns the window and reports only an id,
+  a meta and a count, so a drag is rescued by a `CustomStackTrail`: the report that empties a slot leaves
+  what it displaced behind, and the report that fills another claims it — paired by time, the same
+  reasoning `SlotEchoGuard` already uses on the same wire, because content genuinely cannot tell those two
+  reports apart. A chest window now also names what is in it, which it never did.
+
+- **A refused armor change put back a lookalike.** Cancelling a `PlayerArmorChangeEvent` restored the
+  piece's *state*, which was all the snapshot held — so refusing to let someone take off an enchanted
+  helmet gave them an ordinary one.
+
+### Added
+
+- **Per-stack state — what happened to *this* sword, not to every sword named like it.** A definition is
+  shared by every stack that carries its key, which left nowhere to put "this particular wand has one
+  charge left"; scripts kept it in `storage` under a key they invented, which worked until two of the
+  wand existed. A stack now carries its own opaque string beside its key, reachable as
+  `items.heldData(player)` / `setHeldData` (and `dataAt` / `setDataAt` for a slot, `chest.getData` /
+  `setData` for a chest). Strings, numbers and booleans go in as themselves; an object or array goes
+  through the script's own `JSON.stringify` and comes back through `JSON.parse`, so what you get back is a
+  value and not text that looks like one — the same courtesy `storage` already did, now in one place both
+  use. Two stacks with different data do not merge, which is the whole point: a spent wand and a full one
+  are different objects and behave like it. It persists in the level file (**format v6**, which loads a
+  v2–v5 world in place and rewrites it on the next save). Note where it does *not* live: a player's
+  inventory has never survived a logout here, so neither does the data on a stack in it.
+
+- **A cooldown primitive for custom items.** Every `onUse` that wanted one wrote the same twenty lines,
+  because the shape never varies. `setCooldown(ms)` on a definition, and the item stops answering that
+  player until it elapses; `onCooldown(player, ctx)` fires in its place with `ctx.getRemaining()`, and
+  returning `true` swallows the action while returning nothing lets it fall through as the vanilla item.
+  It gates `onUse`, `onBreak` and `onHit` but not `onHold` — taking something into your hand is not an act
+  an item gets to refuse. How long an item makes you wait belongs to the item; *when a given player last
+  used one* does not, and lives on the registry, so saving a plugin no longer hands every player a fresh
+  wand. The per-player bookkeeping is forgotten when they leave, through a listener registered only while
+  some item actually cools, so a server with no cooldowns pays nothing for them.
+
+- **Puppets can glance.** `setHeadYaw` / `glanceAt` turn an entity's head while its body stays where it
+  stands — a guard who watches you cross the room without shuffling round to follow. Every edition here
+  has carried the two angles separately all along (Java has a whole packet for the head alone; both
+  Bedrock eras put a head yaw inside the move), and the server was writing the body yaw into that field
+  twice, which is why nothing could ever look anywhere but forwards. Pitch still moves with a glance —
+  there is nowhere else on an entity to put it — and how far a neck bends is the client's opinion, not
+  ours. A `PLAYER` puppet is deliberately excluded: it borrows a real player's rendering, and a real
+  player reports one yaw.
+
 ## [0.2.0] — 2026-07-29
 
 ### Fixed

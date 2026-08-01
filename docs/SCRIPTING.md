@@ -302,7 +302,9 @@ guard.setNameTag('{red}Guard');
 guard.setHeldItem(276);
 guard.setArmor('helmet', 306);
 guard.setFlag('invisible', false);   // also 'on_fire', 'sneaking'
-guard.lookAt(player);                  // or a location
+guard.lookAt(player);                  // or a location — turns the whole body
+guard.glanceAt(player);                // …or just the head, body stays put
+guard.setHeadYaw(90);  guard.getHeadYaw();
 guard.moveToward(player.getLocation(), 0.2);
 guard.set('mood', 'angry');            // per-entity state, yours
 guard.onTick(function () { … });       // called every tick while it lives
@@ -436,8 +438,64 @@ items.heldKey(player);               // the key of what they're holding, or null
 ```
 
 **Identity is the key.** A stack carries `'frostblade'`, not a copy of the definition — so editing this
-code and saving changes every existing one. State per *stack* (this particular sword's charges) has
-nowhere to live yet; keep it in [`storage`](#storage) against the player.
+code and saving changes every existing one.
+
+### Per-stack state
+
+A definition is shared by every stack that names it, so it is the wrong place for anything that happened
+to *one* of them. That goes on the stack:
+
+```js
+items.define('wand', 280).setCooldown(2000).onUse(function (player) {
+    const state = items.heldData(player) || {charges: 3};
+    if (state.charges <= 0) { player.sendMessage('{gray}Spent.'); return true; }
+    state.charges--;
+    items.setHeldData(player, state);         // this wand, not every wand
+    player.sendActionBar('{aqua}' + state.charges + ' left');
+    return true;
+});
+```
+
+| Call | What it does |
+|------|--------------|
+| `items.heldData(player)` | the held stack's own state, or `null` |
+| `items.setHeldData(player, value)` | put state on it; `null` clears it |
+| `items.dataAt(player, slot)` / `setDataAt(player, slot, value)` | the same for one inventory slot (0–35) |
+| `chest.getData(slot)` / `chest.setData(slot, value)` | and for a stack in a world chest |
+| `chest.getKey(slot)` | which custom item is in a chest slot, or `null` |
+
+Strings, numbers and booleans go in as themselves; an object or array goes through `JSON.stringify` and
+comes back through `JSON.parse`, so what you read is a real value and not text that looks like one.
+
+Two stacks merge only when their item, their key **and** their data all match — so a spent wand never
+dissolves into a full one, and a named sword never stacks with an ordinary one. Data persists in the level
+file wherever the stack does; **a player's inventory is not persisted at all here**, so a stack in a
+backpack loses its state at logout along with the stack. For anything that must outlive a session, keep it
+in [`storage`](#storage) against the player.
+
+### Cooldowns
+
+```js
+items.define('bomb', 46)
+     .setCooldown(5000)                       // per player, in milliseconds
+     .onUse(function (player) { world.spawnParticle('explode', …); return true; })
+     .onCooldown(function (player, ctx) {
+         player.sendActionBar('{gray}Ready in ' + Math.ceil(ctx.getRemaining() / 1000) + 's');
+         return true;                         // …and swallow the click meanwhile
+     });
+```
+
+`onCooldown` runs **instead of** the behaviour while the item is warm. Returning `true` consumes the
+action; returning nothing (or having no such hook) lets it fall through, so the item behaves as the
+vanilla one it is drawn as. It gates `onUse`, `onBreak` and `onHit` — not `onHold`, since taking something
+into your hand isn't an act an item gets to refuse.
+
+The clock starts when the behaviour *runs*, whatever it returns. Also on the item:
+`cooldownFor(player)` (ms left), `isReadyFor(player)`, `clearCooldown(player)`, `startCooldown(player)`.
+
+No client here draws the vanilla cooldown sweep for a server-side item, so **nothing appears on screen**
+unless your script says something. A cooldown survives a hot reload — it belongs to the server, not to the
+definition your file rebuilds every time you save.
 
 ---
 
@@ -554,10 +612,14 @@ if (!event.isCancelled()) { … }
 - **Forms are out on both Bedrock eras** — those clients predate them. A menu is a window or a list.
 - **No mob AI, pathfinding, redstone or crafting** — by design. A puppet does what your `onTick` says and
   nothing else; that is the point of the primitive.
-- **Entities can't be posed finely**: no armour stands on Bedrock, no per-entity scale, no limb posing,
-  and head yaw isn't split from body yaw. A 0.14 client renders only the mobs it is old enough to know.
+- **Entities can't be posed finely**: no armour stands on Bedrock, no per-entity scale, no limb posing. A
+  head *can* turn on its own now, but how far is the client's opinion, a `player` puppet can't glance at
+  all, and on Bedrock a glance costs a whole move packet. A 0.14 client renders only the mobs it is old
+  enough to know.
 - **Scenes cost packets, not ticks.** A static prop runs no logic, but every joining player pays one spawn
   packet for it.
-- **Per-stack item state has nowhere to live yet** — a custom item definition is shared by every stack that
-  names it.
+- **Per-stack state lives as long as the stack.** It persists in a chest and dies with a logout in a
+  backpack, because a player's inventory isn't persisted at all. On Bedrock, a *swap* inside the client's
+  own window can drop one of the two stacks' identity — that client reports only an id and a count, and
+  only one move at a time can be paired up.
 - **Your handler is on the server's thread.** Blocking blocks everyone.
