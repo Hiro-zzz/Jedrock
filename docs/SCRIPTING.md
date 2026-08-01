@@ -134,9 +134,19 @@ Colours are `{black}` `{dark_blue}` `{dark_green}` `{dark_aqua}` `{dark_red}` `{
 ## `events`
 
 ```js
-events.on(name, handler)          // subscribe; the handler takes one event object
-events.emit(name)                 // fire a custom event
-events.emit(name, data)           // …with a payload
+events.on(name, handler)                    // subscribe; the handler takes one event object
+events.on(name, handler, options)           // …with {priority, ignoreCancelled}
+events.once(name, handler[, options])       // fires at most once, then unsubscribes itself
+events.emit(name)                           // fire a custom event
+events.emit(name, data)                     // …with a payload
+events.names()                              // every built-in event name
+```
+
+`on` and `once` hand back a handle, so a listener no longer has to live as long as the plugin:
+
+```js
+const sub = events.on('PlayerMove', watchThem);
+scheduler.runLater(function () { sub.remove(); }, 20 * 60);   // …for a minute
 ```
 
 Every event object has `getName()`. Most carry a player — reached with `getPlayer()`, as every accessor
@@ -152,6 +162,35 @@ events.on('BlockBreak', function (event) {
 
 A cancelled event means "this did not happen": the block is not broken, the message is not sent, the
 teleport does not occur. See [Every event](#every-event) for what each one carries.
+
+### Priority — who gets the last word
+
+Listeners run in order: `LOWEST`, `LOW`, `NORMAL` (the default), `HIGH`, `HIGHEST`, `MONITOR`. Earlier
+ones **propose**, later ones **decide**.
+
+This is not decoration, because the core's own rules sit on that scale. **Regions enforce their flags at
+`HIGH`**, and custom items dispatch their behaviours there too. So a script that wants to *overrule* one
+has to ask for `HIGHEST`:
+
+```js
+// Let this one player build inside a no-build region after all.
+events.on('BlockBreak', function (e) {
+    if (e.getPlayer().getName() === 'Alice') { e.setCancelled(false); }
+}, {priority: 'HIGHEST'});
+```
+
+At the default `NORMAL` that listener runs *before* the region and is then overruled by it — which is
+what happened to every script that tried, for as long as this option didn't exist.
+
+`{ignoreCancelled: true}` skips the listener once something has cancelled the event. The default is to
+run anyway, which is exactly what makes the un-cancel above possible. Use `MONITOR` for watching only:
+by the time it runs the outcome is settled and something may have acted on it.
+
+Priority means the same thing for [custom events](#custom-events) — the name is all you have to go on,
+and nothing about `'shop:buy'` says which side of the built-in line it falls on.
+
+An unknown option key or a priority that isn't one is **refused**, not ignored: a misspelt `priorty`
+silently meaning "the default" is the failure this option exists to end.
 
 ---
 
@@ -574,7 +613,11 @@ Subscribe by name. **Cancellable** means `event.cancel()` prevents it.
 | `PlayerInteractBlock` | ✅ | `player`, position |
 | `PlayerInteractEntity` | ✅ | `player`, target |
 | `PlayerToggleSneak` / `PlayerToggleSprint` | ✅ | `player`, the new state |
+| `PlayerSwingArm` | ✅ | `player` — the nearest thing to "left-clicked". Fires often (a digging client swings every tick) and says only that an arm moved; cancelling suppresses the relay to others, not the swing on their own screen |
 | `PlayerRegionEnter` / `PlayerRegionLeave` | ✅ | `player`, region |
+| `PuppetInteract` | ✅ | `player`, the puppet — resolved, unlike `PlayerInteractEntity`'s raw id, and only for puppets. Cancel to stop that puppet's own `onInteract` |
+| `ContainerOpen` | ✅ | `player`, type (`CHEST` / `MENU`), title, position, size. Both routes to a window pass through it; cancel and nothing opens |
+| `ContainerClose` | — | `player`, type — where a chest's contents have settled |
 | `InventoryClick` | ✅ | `player`, slot, button |
 | `GameModeChange` | ✅ | `player`, old / new mode |
 | `BlockBreak` | ✅ | `player`, position, state |

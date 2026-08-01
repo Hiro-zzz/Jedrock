@@ -2,6 +2,9 @@ package com.jedrock.core.inventory;
 
 import com.jedrock.api.event.EventBus;
 import com.jedrock.api.event.block.PlayerInteractBlockEvent;
+import com.jedrock.api.event.player.ContainerCloseEvent;
+import com.jedrock.api.event.player.ContainerOpenEvent;
+import com.jedrock.api.event.player.ContainerType;
 import com.jedrock.api.event.player.InventoryClickEvent;
 import com.jedrock.api.event.player.PlayerArmorChangeEvent;
 import com.jedrock.api.event.player.PlayerHeldItemChangeEvent;
@@ -93,7 +96,13 @@ public final class ContainerService {
         if (player.getGameMode() != GameMode.SURVIVAL && !player.hasContainerOpen()) {
             return;
         }
+        // Read before closing, since "was it a world chest" is a fact about the container being let go of.
+        boolean hadContainer = player.hasContainerOpen();
+        ContainerType closed = player.isOpenContainerPersistent() ? ContainerType.CHEST : ContainerType.MENU;
         player.closeContainer(); // a chest, if any, is no longer open
+        if (hadContainer && events.hasListeners(ContainerCloseEvent.class)) {
+            events.post(new ContainerCloseEvent(player, closed));
+        }
         Cursor cur = player.getCursor();
         // Return any carried item to storage; whatever doesn't fit is lost (no item entities to drop).
         while (!cur.isEmpty()
@@ -148,6 +157,12 @@ public final class ContainerService {
     public boolean openMenu(CorePlayer player, String title, Container container, String[] labels,
                             MenuClick onClick) {
         PlayerConnection connection = player.getConnection();
+        // Announced before the fork, so a listener sees a menu opening whether it will arrive as a window
+        // or as a /pick list. Refusing reads to the caller as "this player did not get the menu", which is
+        // the same answer a Bedrock button menu with no labels already gives.
+        if (announceOpen(player, ContainerType.MENU, title, 0, 0, 0, container.size())) {
+            return false;
+        }
         if (connection.getProtocolVersion().isBedrock()) {
             if (openAsList(player, title, container, labels, onClick)) {
                 return true; // a button menu with labels
@@ -321,11 +336,27 @@ public final class ContainerService {
         CorePlayer player = clicker;
         if (player != null) {
             Container chest = world.getChestContainer(x, y, z);
+            if (announceOpen(player, ContainerType.CHEST, "Chest", x, y, z, chest.size())) {
+                return true; // refused: the click is still consumed, so no block is placed on the chest
+            }
             player.openContainer(CHEST_WINDOW_ID, chest);
             connection.openContainer(CHEST_WINDOW_ID, "Chest", 27, x, y, z);
             sendChestContents(player, connection);
         }
         return true;
+    }
+
+    /**
+     * Announce a container about to be opened. @return {@code true} if a listener refused it.
+     *
+     * <p>Both routes to a window go through here — the chest a player right-clicked and the menu a script
+     * raised — because "a container is opening" is one fact, and a lock or an audit log that had to hook
+     * two different paths would eventually hook only one of them.
+     */
+    private boolean announceOpen(CorePlayer player, ContainerType type, String title,
+                                 int x, int y, int z, int size) {
+        return events.hasListeners(ContainerOpenEvent.class)
+                && events.post(new ContainerOpenEvent(player, type, title, x, y, z, size)).isCancelled();
     }
 
     public boolean onChestInteract(PlayerConnection connection, int x, int y, int z, int heldSlot) {

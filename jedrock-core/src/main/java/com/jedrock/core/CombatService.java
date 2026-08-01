@@ -6,6 +6,7 @@ import com.jedrock.api.event.player.PlayerDamageEvent;
 import com.jedrock.api.event.player.PlayerDeathEvent;
 import com.jedrock.api.event.player.PlayerInteractEntityEvent;
 import com.jedrock.api.event.player.PlayerRespawnEvent;
+import com.jedrock.api.event.player.PuppetInteractEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.PlayerConnection;
 import com.jedrock.api.world.Location;
@@ -158,6 +159,13 @@ public final class CombatService {
             // and, as a visible demo, flash the puppet red on every client. A puppet has no health/damage.
             CorePuppet puppet = entities.getPuppet(targetEntityId);
             if (puppet != null) {
+                // The resolved counterpart of the event above: that one carries an entity id and fires for
+                // players too, so a script watching puppets it did not spawn had nothing to hook. Cancelling
+                // this stops the puppet's own callback, which is how one script overrules another's NPC.
+                if (events.hasListeners(PuppetInteractEvent.class)
+                        && events.post(new PuppetInteractEvent(attacker, puppet)).isCancelled()) {
+                    return;
+                }
                 puppet.fireInteract(attacker);
                 entities.relayHurt(puppet);
             }

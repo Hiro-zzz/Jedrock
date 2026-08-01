@@ -1,6 +1,7 @@
 package com.jedrock.core.plugin;
 
 import com.jedrock.api.event.EventBus;
+import com.jedrock.api.event.EventPriority;
 import com.jedrock.api.event.player.PlayerChatEvent;
 import com.jedrock.api.event.player.PlayerJoinEvent;
 import com.jedrock.api.event.server.ServerTickEvent;
@@ -173,6 +174,164 @@ class PluginManagerTest {
                 "the cooldown hook consumed the second use");
         assertEquals("{\"charges\":2}", holder.getInventory().customDataAt(0),
                 "…and the behaviour did not run, so nothing was spent");
+    }
+
+    // ===== Priority, unsubscribe, once =====
+
+    /**
+     * The one that matters: the README has always said a script can overrule a region's deny by listening
+     * at a higher priority, and until the option existed it could not — every script listener went in at
+     * NORMAL, which runs <em>before</em> the HIGH the core enforces its rules at. This models that exactly:
+     * a HIGH listener cancels the way a region does, and the script has the last word.
+     */
+    @Test
+    void aScriptAtHighestOverrulesTheCoresOwnEnforcement(@TempDir Path dir) {
+        EventBus bus = new EventBus();
+        bus.register(PlayerChatEvent.class, EventPriority.HIGH, e -> e.setCancelled(true)); // "a region"
+        PluginManager plugins = manager(bus, dir);
+        plugins.loadSource("override.js",
+                "events.on('PlayerChat', function (e) { e.setCancelled(false); },"
+              + " {priority: 'HIGHEST'});", 1L);
+
+        assertFalse(bus.post(new PlayerChatEvent(newPlayer(), "hi")).isCancelled(),
+                "the script ran after the enforcement and took it back");
+    }
+
+    @Test
+    void andAtTheDefaultPriorityItCannot(@TempDir Path dir) {
+        EventBus bus = new EventBus();
+        bus.register(PlayerChatEvent.class, EventPriority.HIGH, e -> e.setCancelled(true));
+        PluginManager plugins = manager(bus, dir);
+        plugins.loadSource("tooearly.js",
+                "events.on('PlayerChat', function (e) { e.setCancelled(false); });", 1L);
+
+        assertTrue(bus.post(new PlayerChatEvent(newPlayer(), "hi")).isCancelled(),
+                "NORMAL runs first and is then overruled — which is why the option had to exist");
+    }
+
+    @Test
+    void ignoreCancelledSkipsAListenerOnceSomethingHasCancelled(@TempDir Path dir) {
+        EventBus bus = new EventBus();
+        bus.register(PlayerChatEvent.class, EventPriority.LOW, e -> e.setCancelled(true));
+        PluginManager plugins = manager(bus, dir);
+        plugins.loadSource("skip.js",
+                "events.on('PlayerChat', function (e) { e.setMessage('ran'); },"
+              + " {ignoreCancelled: true});", 1L);
+
+        PlayerChatEvent event = bus.post(new PlayerChatEvent(newPlayer(), "untouched"));
+        assertEquals("untouched", event.getMessage(), "cancelled before it, so it never ran");
+    }
+
+    @Test
+    void aScriptCanStopListeningWithoutReloadingItself(@TempDir Path dir) {
+        EventBus bus = new EventBus();
+        CommandManager cm = new CommandManager(null);
+        PluginManager plugins = manager(bus, dir, cm);
+        plugins.loadSource("sub.js",
+                "var seen = 0;\n"
+              + "var sub = events.on('PlayerChat', function (e) { seen++; });\n"
+              + "commands.register('stop', function (p, a) { sub.remove(); p.sendMessage('seen=' + seen); });\n"
+              + "commands.register('count', function (p, a) { p.sendMessage('seen=' + seen); });", 1L);
+
+        CapturingConnection conn = new CapturingConnection();
+        CorePlayer player = new CorePlayer(UUID.randomUUID(), "T", conn,
+                world, world.getSpawnLocation(), GameMode.SURVIVAL);
+
+        bus.post(new PlayerChatEvent(player, "one"));
+        cm.dispatch(player, "/stop");
+        assertEquals("seen=1", conn.lastMessage);
+
+        bus.post(new PlayerChatEvent(player, "two"));
+        cm.dispatch(player, "/count");
+        assertEquals("seen=1", conn.lastMessage, "removed means removed");
+    }
+
+    @Test
+    void onceFiresOnceAndThenIsGone(@TempDir Path dir) {
+        EventBus bus = new EventBus();
+        CommandManager cm = new CommandManager(null);
+        PluginManager plugins = manager(bus, dir, cm);
+        plugins.loadSource("once.js",
+                "var seen = 0;\n"
+              + "events.once('PlayerChat', function (e) { seen++; });\n"
+              + "commands.register('count', function (p, a) { p.sendMessage('seen=' + seen); });", 1L);
+
+        CapturingConnection conn = new CapturingConnection();
+        CorePlayer player = new CorePlayer(UUID.randomUUID(), "T", conn,
+                world, world.getSpawnLocation(), GameMode.SURVIVAL);
+
+        bus.post(new PlayerChatEvent(player, "one"));
+        bus.post(new PlayerChatEvent(player, "two"));
+        cm.dispatch(player, "/count");
+
+        assertEquals("seen=1", conn.lastMessage);
+        assertFalse(bus.hasListeners(PlayerChatEvent.class), "and it took itself off the bus");
+    }
+
+    @Test
+    void aThrowingOnceHandlerStillDoesNotFireTwice(@TempDir Path dir) {
+        EventBus bus = new EventBus();
+        PluginManager plugins = manager(bus, dir);
+        plugins.loadSource("boom.js",
+                "events.once('PlayerChat', function (e) { throw new Error('boom'); });", 1L);
+
+        bus.post(new PlayerChatEvent(newPlayer(), "one"));
+
+        assertFalse(bus.hasListeners(PlayerChatEvent.class),
+                "removal happens before the handler body, so a throw cannot leave it armed");
+    }
+
+    @Test
+    void aMisspeltOptionIsRefusedRatherThanQuietlyMeaningTheDefault(@TempDir Path dir) {
+        PluginManager plugins = manager(new EventBus(), dir);
+        plugins.loadSource("typo.js",
+                "events.on('PlayerChat', function (e) {}, {priorty: 'HIGHEST'});", 1L);
+        assertTrue(plugins.pluginNames().isEmpty(), "an unknown option key fails the load");
+
+        plugins.loadSource("badvalue.js",
+                "events.on('PlayerChat', function (e) {}, {priority: 'VERYHIGH'});", 1L);
+        assertTrue(plugins.pluginNames().isEmpty(), "and so does a priority that isn't one");
+    }
+
+    @Test
+    void priorityOrdersCustomEventsToo(@TempDir Path dir) {
+        CommandManager cm = new CommandManager(null);
+        PluginManager plugins = manager(new EventBus(), dir, cm);
+        // Registered in the wrong order on purpose: priority, not registration, decides who runs last.
+        plugins.loadSource("order.js",
+                "events.on('note', function (e) { e.getData().log += 'highest '; }, {priority: 'HIGHEST'});\n"
+              + "events.on('note', function (e) { e.getData().log += 'lowest '; }, {priority: 'LOWEST'});\n"
+              + "events.on('note', function (e) { e.getData().log += 'normal '; });\n"
+              + "commands.register('fire', function (p, a) {\n"
+              + "  p.sendMessage(events.emit('note', {log: ''}).getData().log);\n"
+              + "});", 1L);
+
+        CapturingConnection conn = new CapturingConnection();
+        CorePlayer player = new CorePlayer(UUID.randomUUID(), "T", conn,
+                world, world.getSpawnLocation(), GameMode.SURVIVAL);
+        cm.dispatch(player, "/fire");
+
+        assertEquals("lowest normal highest ", conn.lastMessage,
+                "a script cannot tell a custom name from a built-in one, so the option must mean the "
+                        + "same thing on both");
+    }
+
+    @Test
+    void everyBuiltInEventNameIsListable(@TempDir Path dir) {
+        CommandManager cm = new CommandManager(null);
+        PluginManager plugins = manager(new EventBus(), dir, cm);
+        plugins.loadSource("names.js",
+                "commands.register('names', function (p, a) {\n"
+              + "  var n = events.names();\n"
+              + "  p.sendMessage(n.length + ' ' + (n.indexOf('PlayerJoin') >= 0));\n"
+              + "});", 1L);
+
+        CapturingConnection conn = new CapturingConnection();
+        CorePlayer player = new CorePlayer(UUID.randomUUID(), "T", conn,
+                world, world.getSpawnLocation(), GameMode.SURVIVAL);
+        cm.dispatch(player, "/names");
+
+        assertEquals(EventTypes.names().size() + " true", conn.lastMessage);
     }
 
     @Test

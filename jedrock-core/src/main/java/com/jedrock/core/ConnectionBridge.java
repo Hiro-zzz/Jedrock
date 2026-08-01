@@ -12,6 +12,7 @@ import com.jedrock.api.event.player.PlayerPickupItemEvent;
 import com.jedrock.api.event.player.PlayerQuitEvent;
 import com.jedrock.api.event.player.PlayerToggleSneakEvent;
 import com.jedrock.api.event.player.PlayerToggleSprintEvent;
+import com.jedrock.api.event.player.PlayerSwingArmEvent;
 import com.jedrock.api.event.player.PlayerUseItemEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
@@ -507,6 +508,13 @@ final class ConnectionBridge implements ConnectionListener {
     public void onSwingArm(PlayerConnection connection) {
         CorePlayer player = playerRegistry.getByConnectionOrNull(connection);
         if (player == null) {
+            return;
+        }
+        // Gated like every other hot-path event: a client swings once per tick while it is digging, so an
+        // unlistened server must not build an object for it. Cancelling suppresses the relay only — the
+        // swinger's own client drew the animation before the packet left.
+        if (eventBus.hasListeners(PlayerSwingArmEvent.class)
+                && eventBus.post(new PlayerSwingArmEvent(player)).isCancelled()) {
             return;
         }
         broadcast.swing(player);

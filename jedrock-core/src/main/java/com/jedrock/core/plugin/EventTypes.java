@@ -4,7 +4,11 @@ import com.jedrock.api.event.Event;
 import com.jedrock.api.event.block.BlockBreakEvent;
 import com.jedrock.api.event.block.BlockPlaceEvent;
 import com.jedrock.api.event.block.PlayerInteractBlockEvent;
+import com.jedrock.api.event.player.ContainerCloseEvent;
+import com.jedrock.api.event.player.ContainerOpenEvent;
 import com.jedrock.api.event.player.GameModeChangeEvent;
+import com.jedrock.api.event.player.PlayerSwingArmEvent;
+import com.jedrock.api.event.player.PuppetInteractEvent;
 import com.jedrock.api.event.player.PlayerChatEvent;
 import com.jedrock.api.event.player.PlayerCommandEvent;
 import com.jedrock.api.event.player.PlayerDamageEvent;
@@ -51,6 +55,8 @@ public final class EventTypes {
     private EventTypes() {}
 
     private static final Map<String, Class<? extends Event>> BY_NAME = new LinkedHashMap<>();
+    /** The names as written below — the lookup key is normalised, and this is not, so it reads back nicely. */
+    private static final java.util.List<String> DECLARED = new java.util.ArrayList<>();
 
     static {
         register("PlayerLogin", PlayerLoginEvent.class);
@@ -73,6 +79,10 @@ public final class EventTypes {
         register("PlayerToggleSneak", PlayerToggleSneakEvent.class);
         register("PlayerToggleSprint", PlayerToggleSprintEvent.class);
         register("PlayerUseItem", PlayerUseItemEvent.class);
+        register("PlayerSwingArm", PlayerSwingArmEvent.class);
+        register("ContainerOpen", ContainerOpenEvent.class);
+        register("ContainerClose", ContainerCloseEvent.class);
+        register("PuppetInteract", PuppetInteractEvent.class);
         register("GameModeChange", GameModeChangeEvent.class);
         register("BlockBreak", BlockBreakEvent.class);
         register("BlockPlace", BlockPlaceEvent.class);
@@ -88,6 +98,7 @@ public final class EventTypes {
 
     private static void register(String name, Class<? extends Event> type) {
         BY_NAME.put(key(name), type);
+        DECLARED.add(name);
     }
 
     private static String key(String name) {
@@ -98,5 +109,10 @@ public final class EventTypes {
     /** The event class for a script name, or {@code null} if it isn't a known event. */
     public static Class<? extends Event> byName(String name) {
         return name == null ? null : BY_NAME.get(key(name));
+    }
+
+    /** Every built-in name, in the order declared above — what {@code events.names()} hands a script. */
+    public static java.util.List<String> names() {
+        return java.util.List.copyOf(DECLARED);
     }
 }

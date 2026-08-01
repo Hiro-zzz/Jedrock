@@ -8,6 +8,21 @@ unstable — anything may change between entries.
 
 ### Fixed
 
+- **A script could not overrule a region, though the docs said it could.** The README has always described
+  regions as enforced by cancelling the events the core already routes decisions through, "so a script can
+  overrule one by listening at a higher priority". It could not: `events.on(name, fn)` registered every
+  script listener at `NORMAL`, and the enforcement — regions, and custom-item behaviour with it — runs at
+  `HIGH`. `NORMAL` runs *first*, so a script that un-cancelled was simply cancelled again a moment later,
+  with nothing to see. The bus had priorities, `ignoreCancelled` and a removal handle all along; none of
+  the three was reachable from JavaScript.
+
+  `events.on(name, fn, {priority: 'HIGHEST', ignoreCancelled: true})` now exposes them, `on` and `once`
+  hand back a handle whose `remove()` stops one listener without reloading the plugin, and an unknown
+  option key or a priority that isn't one is refused rather than ignored — a misspelt `priorty` quietly
+  meaning "the default" is the same silent failure in a new costume. Priority applies to script-defined
+  custom events too: the name is all a script has to go on, and an option that worked on half of them
+  would be worse than none.
+
 - **A custom item lost its name the moment a player moved it.** Identity was written onto a stack by
   whoever created it and read back wherever it happened to still be sitting — but nothing in between
   carried it. `Cursor` held a state and a count and no key at all, so picking a frostblade up and putting
@@ -56,6 +71,18 @@ unstable — anything may change between entries.
   used one* does not, and lives on the registry, so saving a plugin no longer hands every player a fresh
   wand. The per-player bookkeeping is forgotten when they leave, through a listener registered only while
   some item actually cools, so a server with no cooldowns pays nothing for them.
+
+- **Four more events, all of them things the server already knew and wasn't saying.**
+  **`PlayerSwingArm`** is the nearest thing here to "left-clicked": every edition reports the swing and the
+  server has always relayed it as an animation, but it was never offered as an input, which left scripts
+  with only the right-click half of the mouse and nothing at all for a swing that hit nothing. Read it as
+  an animation rather than an intent — a digging client swings every tick — and prefer the specific event
+  where one exists. **`ContainerOpen`** / **`ContainerClose`** are the one place both routes to a window
+  meet, the chest somebody right-clicked and the menu a script raised; a lock or an audit log that had to
+  hook two paths would eventually hook only one. **`PuppetInteract`** is the resolved form of
+  `PlayerInteractEntity`: that one carries a raw entity id and fires for players too, so a script watching
+  puppets it did not spawn had to identify them itself. Cancelling it stops that puppet's own
+  `onInteract`, which is how one script overrules an NPC another installed.
 
 - **Puppets can glance.** `setHeadYaw` / `glanceAt` turn an entity's head while its body stays where it
   stands — a guard who watches you cross the room without shuffling round to follow. Every edition here

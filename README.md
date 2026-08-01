@@ -400,7 +400,11 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   fourteen globals — `server` / `events` / `scheduler` /
   `commands` / `packets` / `world` / `worlds` / `entities` / `regions` / `items` / `permissions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
-  name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
+  name (35 of them, listed by `events.names()`), at a **priority** of its choosing — which is what lets a
+  script overrule the core's own rules, since regions and item behaviours are enforced at `HIGH` and a
+  listener has to run later than that to have the last word. `on` / `once` hand back a handle, so a
+  listener can stop without the plugin reloading. Scripts can also `events.emit` their own custom events
+  (priority applies there too), register real `/slash` commands, schedule
   work (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too
   — `player.isOp()`, `player.hasPermission('node')`, `player.getPrefix()`. What a script may touch is a
   **written contract**: `player` and `server` arrive as `ScriptPlayer` / `ScriptServer` wherever they cross

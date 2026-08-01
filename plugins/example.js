@@ -39,10 +39,13 @@
 //                written straight to permissions.txt — a script no longer builds /perm command strings.
 //   storage    — the only thing that survives a restart: get / set / has / remove / keys / size / clear,
 //                plus forPlayer(p) for per-player state. Strings, numbers, booleans, objects and arrays.
-//   events     — events.on(name, fn): subscribe to a built-in event (31 of them) OR a custom, script-defined
-//                one (any other name). Built-in handlers get the real Java event (getters/setters, cancel);
-//                custom handlers get {getName, getData, cancel, isCancelled}. events.emit(name, data) fires a
-//                custom event to every listener and returns it (read data / isCancelled back).
+//   events     — events.on(name, fn): subscribe to a built-in event (35 of them; events.names() lists them)
+//                OR a custom, script-defined one (any other name). Built-in handlers get the real Java event
+//                (getters/setters, cancel); custom handlers get {getName, getData, cancel, isCancelled}.
+//                events.emit(name, data) fires a custom event to every listener and returns it (read data /
+//                isCancelled back). A third argument sets {priority, ignoreCancelled} — the core enforces
+//                regions and item behaviour at HIGH, so overruling one needs {priority: 'HIGHEST'}. on/once
+//                return a handle with .remove(). See /override.
 //   scheduler  — run code later, in ticks (20/sec): run / runLater / runTimer, each returning a handle with
 //                .cancel(). setTimeout / setInterval / clearTimeout / clearInterval work too (milliseconds).
 //   commands   — commands.register(name, fn)  OR  register({name, aliases, description, usage, execute, complete}).
@@ -469,6 +472,47 @@ commands.register('zone', function (player, args) {
     permissions.forPlayer(player).add(zone.getBypassPermission('build'));
     player.sendMessage('{gray}You are exempt from its build rule; others are not.');
     player.sendMessage('{gray}Try breaking a block inside it. {white}/region info demo{gray} lists the nodes.');
+});
+
+// /override — the other way to beat a region, and the reason event PRIORITY is worth knowing about.
+//
+// The core enforces region flags by cancelling the same events scripts listen to, and it does that at
+// HIGH. A listener at the default NORMAL runs BEFORE that, so un-cancelling there achieves nothing — the
+// region simply cancels afterwards. HIGHEST runs last and has the final say.
+//
+// Note this is a blunter instrument than the bypass permission above: it is a script deciding, in code,
+// that a rule does not apply. Prefer the permission when the answer is "who"; use this when the answer is
+// "when", which permissions can't express.
+var overrideUntil = 0;
+var overrideSub = events.on('BlockBreak', function (e) {
+    if (Date.now() < overrideUntil) {
+        e.setCancelled(false);                       // …even if a region already said no
+    }
+}, {priority: 'HIGHEST'});
+
+commands.register('override', function (player, args) {
+    if (args.length > 0 && args[0] === 'off') {
+        overrideSub.remove();                        // a handle: stop listening without reloading the file
+        player.sendMessage('{gray}Override listener removed until the next reload.');
+        return;
+    }
+    overrideUntil = Date.now() + 30000;
+    player.sendMessage('{green}Region build rules suspended for 30s. {gray}(/override off unhooks it.)');
+});
+
+// events.once — fires at most once and takes itself off the bus, which is what a one-shot greeting or the
+// reply to a request actually wants. Here: say something the first time ANY player swings an arm.
+events.once('PlayerSwingArm', function (e) {
+    console.log(e.getPlayer().getName() + ' was the first to swing at something');
+});
+
+// A container opening is one fact with two routes — a chest somebody clicked and a menu a script raised.
+// Cancelling shuts the window before it is shown; say something when you do, or it reads as a bug.
+events.on('ContainerOpen', function (e) {
+    if (e.getType() == Packages.com.jedrock.api.event.player.ContainerType.CHEST && e.getY() > 200) {
+        e.getPlayer().sendMessage('{red}That chest is sealed.');
+        e.setCancelled(true);
+    }
 });
 
 // The crossings. Fired once per region actually entered or left, not per movement packet — so this is the
