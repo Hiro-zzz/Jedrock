@@ -51,6 +51,11 @@ public final class MsgCommand implements Command {
             sender.sendMessage("{red}Usage: " + usage());
             return;
         }
+        // Checked after the usage line, not before: a muted player who mistyped the command
+        // should be told they mistyped it, and a caller with no server yet still gets that far.
+        if (server.getModeration().silence(sender)) {
+            return;
+        }
         Optional<Player> found = server.getPlayer(args[0]);
         if (found.isEmpty() || !(found.get() instanceof CorePlayer target)) {
             sender.sendMessage("{red}Player not found: {white}" + ChatText.escape(args[0]));

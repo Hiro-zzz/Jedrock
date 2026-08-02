@@ -96,6 +96,79 @@ public final class ScriptCustomItem {
         return hook(CoreCustomItem.Trigger.HOLD, handler);
     }
 
+    // ===== Cooldown =====
+
+    /**
+     * Make the item wait {@code millis} between uses, per player. {@code 0} removes the wait.
+     *
+     * <pre>{@code
+     *   items.define('bomb', Blocks.state(46, 0))
+     *        .setCooldown(5000)
+     *        .onUse(function (player) { world.spawnParticle('explode', …); return true; })
+     *        .onCooldown(function (player, ctx) {
+     *            player.sendActionBar('{gray}Ready in ' + Math.ceil(ctx.getRemaining() / 1000) + 's');
+     *            return true;                    // …and swallow the click while it recharges
+     *        });
+     * }</pre>
+     *
+     * <p>It gates {@code onUse}, {@code onBreak} and {@code onHit} — not {@code onHold}, since taking an
+     * item into your hand isn't an act the item gets to refuse. The clock starts when the behaviour
+     * <em>runs</em>, whatever it returns; {@link #clearCooldown} takes it back if a script decides that
+     * particular use didn't count.
+     *
+     * <p>No client here draws the vanilla cooldown sweep for a server-side item, so <b>nothing shows on
+     * screen</b> unless the script says something — which is what {@link #onCooldown} is for.
+     */
+    public ScriptCustomItem setCooldown(double millis) {
+        item.setCooldownMillis((long) millis);
+        registry.hooksChanged(); // gaining a cooldown is what arms the per-player cleanup
+        return this;
+    }
+
+    /** How long this item makes a player wait, in milliseconds; {@code 0} = no wait. */
+    public double getCooldown() {
+        return item.getCooldownMillis();
+    }
+
+    /**
+     * Called <em>instead of</em> the behaviour when the item is still cooling down. {@code ctx.getRemaining()}
+     * is the milliseconds left; return {@code true} to consume the action anyway, {@code false} (or no hook
+     * at all) to let it fall through and behave as the vanilla item it is drawn as.
+     */
+    public ScriptCustomItem onCooldown(Function handler) {
+        return hook(CoreCustomItem.Trigger.COOLDOWN, handler);
+    }
+
+    /** How long {@code player} must still wait for this item, in milliseconds; {@code 0} = ready. */
+    public double cooldownFor(Object player) {
+        return registry.cooldownRemaining(requirePlayer(player), item.getKey());
+    }
+
+    /** Whether this item will answer {@code player} right now. */
+    public boolean isReadyFor(Object player) {
+        return cooldownFor(player) <= 0;
+    }
+
+    /** End this item's cooldown for one player. Returns this item, so calls chain. */
+    public ScriptCustomItem clearCooldown(Object player) {
+        registry.clearCooldown(requirePlayer(player), item.getKey());
+        return this;
+    }
+
+    /** Start it by hand, as though the item had just been used. */
+    public ScriptCustomItem startCooldown(Object player) {
+        registry.startCooldown(requirePlayer(player), item.getKey());
+        return this;
+    }
+
+    private static com.jedrock.api.player.Player requirePlayer(Object player) {
+        com.jedrock.api.player.Player target = ScriptWrapFactory.unwrapPlayer(player);
+        if (target == null) {
+            throw new IllegalArgumentException("a cooldown is per player — pass one");
+        }
+        return target;
+    }
+
     private ScriptCustomItem hook(CoreCustomItem.Trigger trigger, Function handler) {
         if (handler == null) {
             item.setHook(trigger, null);

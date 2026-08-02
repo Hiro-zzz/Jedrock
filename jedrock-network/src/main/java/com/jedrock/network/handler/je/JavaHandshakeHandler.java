@@ -87,12 +87,21 @@ public final class JavaHandshakeHandler implements JavaProtocol {
         if (id == 0x00) {
             // Request → Response. Echo the client's own protocol number so it renders as compatible.
             int online = connection.getListener() != null ? connection.getListener().getOnlinePlayerCount() : 0;
+            // Assembled first, then offered to the core, then serialized — so a script can rewrite the
+            // MOTD or the counts without this handler knowing anything about scripts.
+            com.jedrock.api.ServerPing ping = new com.jedrock.api.ServerPing(
+                    String.valueOf(connection.getRemoteAddress()), clientProtocol, false,
+                    connection.getServerProperties().motd(),
+                    online, connection.getServerProperties().maxPlayers());
+            if (connection.getListener() != null) {
+                connection.getListener().onPing(ping);
+            }
             connection.send(ClientboundStatusResponse.of(
                     clientVersionName,
                     clientProtocol,
-                    connection.getServerProperties().maxPlayers(),
-                    online,
-                    connection.getServerProperties().motd()));
+                    ping.getMaxPlayers(),
+                    ping.getOnlinePlayers(),
+                    ping.getMotd()));
         } else if (id == ServerboundStatusPing.PACKET_ID) {
             // Ping → Pong: echo the client's opaque long; the client then closes the connection.
             ServerboundStatusPing ping = lazy.materialize(ServerboundStatusPing::fromBuffer);

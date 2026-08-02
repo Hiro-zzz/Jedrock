@@ -231,6 +231,18 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void moveEntity(long entityId, double x, double y, double z,
+                           float bodyYaw, float pitch, float headYaw) {
+        protocolHandler.moveEntity(this, entityId, x, y, z, bodyYaw, pitch, headYaw);
+    }
+
+    @Override
+    public void setEntityHeadYaw(long entityId, double x, double y, double z,
+                                 float bodyYaw, float pitch, float headYaw) {
+        protocolHandler.setEntityHeadYaw(this, entityId, x, y, z, bodyYaw, pitch, headYaw);
+    }
+
+    @Override
     public void removeEntity(long entityId) {
         protocolHandler.removeEntity(this, entityId);
     }

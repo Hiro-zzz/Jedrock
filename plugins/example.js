@@ -29,18 +29,26 @@
 // script contract — the methods below and nothing else. The server's internals are not reachable, and
 // neither is a player's connection; player.getVersion() gives the edition string that used to need it.
 //                onClick + button(slot,item,label) makes a button menu; setItem alone is a storage chest.
-//   items      — custom items: define(key, state) → setName / setLore / onUse / onHit / onBreak / onHold;
-//                give(player, key, n) / set / heldKey / count. A stack carries the KEY, so a hot reload
-//                re-points every existing stack at the new definition. See /forge.
+//   items      — custom items: define(key, state) → setName / setLore / onUse / onHit / onBreak / onHold /
+//                setCooldown(ms) + onCooldown; give(player, key, n) / set / heldKey / count. A stack
+//                carries the KEY, so a hot reload re-points every existing stack at the new definition —
+//                and its OWN state (heldData / setHeldData / dataAt), which is where "this particular
+//                wand's charges" lives, since a definition is shared by every stack. See /forge, /wand.
 //   permissions— groups and rights: createGroup(n) → .add(node) / .inherit(g) / .setPrefix(s);
 //                forPlayer(p or 'Name') → .addGroup / .add(node) / .has / .isOp / .setOp. Server state,
 //                written straight to permissions.txt — a script no longer builds /perm command strings.
+//   punishments— ban / banIp / mute / kick / pardon, and isBanned / isMuted / info / list to ASK. Plus
+//                whitelist() and lastSeen(). Durations are '2d', a number of ms, or nothing for permanent.
+//                Server state, like permissions: not undone by a reload. See /antispam.
 //   storage    — the only thing that survives a restart: get / set / has / remove / keys / size / clear,
 //                plus forPlayer(p) for per-player state. Strings, numbers, booleans, objects and arrays.
-//   events     — events.on(name, fn): subscribe to a built-in event (31 of them) OR a custom, script-defined
-//                one (any other name). Built-in handlers get the real Java event (getters/setters, cancel);
-//                custom handlers get {getName, getData, cancel, isCancelled}. events.emit(name, data) fires a
-//                custom event to every listener and returns it (read data / isCancelled back).
+//   events     — events.on(name, fn): subscribe to a built-in event (40 of them; events.names() lists them)
+//                OR a custom, script-defined one (any other name). Built-in handlers get the real Java event
+//                (getters/setters, cancel); custom handlers get {getName, getData, cancel, isCancelled}.
+//                events.emit(name, data) fires a custom event to every listener and returns it (read data /
+//                isCancelled back). A third argument sets {priority, ignoreCancelled} — the core enforces
+//                regions and item behaviour at HIGH, so overruling one needs {priority: 'HIGHEST'}. on/once
+//                return a handle with .remove(). See /override.
 //   scheduler  — run code later, in ticks (20/sec): run / runLater / runTimer, each returning a handle with
 //                .cancel(). setTimeout / setInterval / clearTimeout / clearInterval work too (milliseconds).
 //   commands   — commands.register(name, fn)  OR  register({name, aliases, description, usage, execute, complete}).
@@ -95,7 +103,7 @@ commands.register('forget', function (player, args) {
 function bump(name) { stats.events[name] = (stats.events[name] || 0) + 1; }
 
 // ============================================================================
-//  EVENTS — all 23. Each bumps a counter; most also log or act.
+//  EVENTS — events.names() has the current list. Each bumps a counter; most also log or act.
 // ============================================================================
 
 // --- Connection lifecycle ---
@@ -114,6 +122,26 @@ events.on('PlayerJoin', function (e) {                  // joinMessage is the br
 events.on('PlayerQuit', function (e) {                  // quitMessage is the broadcast announcement
     bump('PlayerQuit');
     e.setQuitMessage('{gray}- ' + e.getPlayer().getName());
+});
+
+// The one event with no player on it at all: a client refreshing its multiplayer list. Answered on a
+// network thread before anyone has said who they are, and for BOTH editions from this one listener.
+// Everything changeable is on the ping object, which the network reads back after we are done with it.
+events.on('ServerListPing', function (e) {
+    bump('ServerListPing');
+    var ping = e.getPing();
+    ping.setMotd(ping.isBedrock() ? '{aqua}Jedrock {gray}(pocket)' : '{aqua}Jedrock {gray}(desktop)');
+    // Keep the work here tiny — a busy server answers this once per client per list refresh.
+});
+
+// Health, in both directions and from every source: damage, healing, /heal, a script's setHealth.
+// PlayerDamage still comes first on a hit and is where a hit is vetoed; this is the number settling.
+events.on('PlayerHealthChange', function (e) {
+    bump('PlayerHealthChange');
+    if (e.isDamage() && e.getNewHealth() <= 4) {
+        e.getPlayer().sendActionBar('{red}You are badly hurt');
+    }
+    // e.setNewHealth(e.getOldHealth());   // …would make them unkillable. Both a feature and a footgun.
 });
 
 // --- Chat & commands ---
@@ -223,6 +251,27 @@ events.on('ServerStart', function (e) { bump('ServerStart'); console.log('server
 events.on('ServerStop',  function (e) { bump('ServerStop');  console.log('server stopping'); });
 events.on('ServerTick',  function (e) { bump('ServerTick'); });   // e.getTick(); fires 20×/sec — counted only
 events.on('WorldSave',   function (e) { bump('WorldSave'); console.log('world saved:', e.getWorld().getName()); });
+
+// WorldCreate fires ONCE in a world's life, right after its terrain is baked — the only safe place to
+// carve something permanent in. WorldLoad fires every boot, so doing it there would re-cut whatever
+// players had built over it since. That distinction is the whole reason these are two events.
+events.on('WorldCreate', function (e) {
+    bump('WorldCreate');
+    console.log('a brand-new world:', e.getWorld().getName(), 'from template', e.getTemplate());
+    // e.getWorld().fill(...) — an arena, a spawn platform, a starting structure.
+});
+
+events.on('WorldLoad', function (e) {
+    bump('WorldLoad');
+    console.log('world available:', e.getWorld().getName(), e.isCreated() ? '(just made)' : '(from disk)');
+});
+
+// Unloading is not deleting — the folder stays and the world comes back on the next request. Cancelling
+// keeps it in memory, which is what to do if you have state tied to it that isn't ready to be dropped.
+events.on('WorldUnload', function (e) {
+    bump('WorldUnload');
+    console.log('world unloading:', e.getWorld().getName());
+});
 
 var Weather = Packages.com.jedrock.api.world.Weather;   // the enum itself, for reading and redirecting
 
@@ -469,6 +518,92 @@ commands.register('zone', function (player, args) {
     player.sendMessage('{gray}Try breaking a block inside it. {white}/region info demo{gray} lists the nodes.');
 });
 
+// /antispam — the shape the `punishments` global exists for. Note what a command string could not do:
+// ASK whether somebody is already muted. Building '/mute ' + name + ' ...' for dispatchCommand can hand
+// out a punishment but can never answer a question, and it breaks the moment a name has a space in it.
+//
+// These are SERVER state: the mute below outlives this script, a hot reload and a restart, exactly like a
+// region or a permission. That is deliberate — a punishment that a plugin edit quietly undid would be
+// worse than no punishment at all.
+var chatTimes = {};
+var antispam = false;
+
+commands.register('antispam', function (player, args) {
+    antispam = !antispam;
+    player.sendMessage(antispam ? '{green}Anti-spam on {gray}(6 lines in 5s = a 10m mute)'
+                                : '{gray}Anti-spam off.');
+});
+
+events.on('PlayerChat', function (e) {
+    if (!antispam) return;
+    var name = e.getPlayer().getName();
+    var now = Date.now();
+    chatTimes[name] = (chatTimes[name] || []).filter(function (t) { return now - t < 5000; });
+    chatTimes[name].push(now);
+    if (chatTimes[name].length > 5 && !punishments.isMuted(e.getPlayer())) {
+        punishments.mute(e.getPlayer(), 'Flooding chat', '10m');
+        console.warn('muted ' + name + ' for flooding');
+    }
+});
+
+// /rapsheet — reading the same lists /banlist and /playerinfo read.
+commands.register('rapsheet', function (player, args) {
+    var who = args.length > 0 ? args[0] : player.getName();
+    ['ban', 'ip', 'mute'].forEach(function (kind) {
+        var found = punishments.info(who, kind);
+        if (found) {
+            player.sendMessage('{red}' + kind + '{gray}: ' + found.getReason()
+                + ' {dark_gray}(by ' + found.getIssuer()
+                + ', ' + (found.isPermanent() ? 'permanent'
+                        : Math.round(found.getRemaining() / 60000) + 'm left') + ')');
+        }
+    });
+    player.sendMessage('{gray}Banned: {white}' + punishments.isBanned(who)
+        + '{gray}, muted: {white}' + punishments.isMuted(who)
+        + '{gray}, bans in force: {white}' + punishments.list('ban').length);
+});
+
+// /override — the other way to beat a region, and the reason event PRIORITY is worth knowing about.
+//
+// The core enforces region flags by cancelling the same events scripts listen to, and it does that at
+// HIGH. A listener at the default NORMAL runs BEFORE that, so un-cancelling there achieves nothing — the
+// region simply cancels afterwards. HIGHEST runs last and has the final say.
+//
+// Note this is a blunter instrument than the bypass permission above: it is a script deciding, in code,
+// that a rule does not apply. Prefer the permission when the answer is "who"; use this when the answer is
+// "when", which permissions can't express.
+var overrideUntil = 0;
+var overrideSub = events.on('BlockBreak', function (e) {
+    if (Date.now() < overrideUntil) {
+        e.setCancelled(false);                       // …even if a region already said no
+    }
+}, {priority: 'HIGHEST'});
+
+commands.register('override', function (player, args) {
+    if (args.length > 0 && args[0] === 'off') {
+        overrideSub.remove();                        // a handle: stop listening without reloading the file
+        player.sendMessage('{gray}Override listener removed until the next reload.');
+        return;
+    }
+    overrideUntil = Date.now() + 30000;
+    player.sendMessage('{green}Region build rules suspended for 30s. {gray}(/override off unhooks it.)');
+});
+
+// events.once — fires at most once and takes itself off the bus, which is what a one-shot greeting or the
+// reply to a request actually wants. Here: say something the first time ANY player swings an arm.
+events.once('PlayerSwingArm', function (e) {
+    console.log(e.getPlayer().getName() + ' was the first to swing at something');
+});
+
+// A container opening is one fact with two routes — a chest somebody clicked and a menu a script raised.
+// Cancelling shuts the window before it is shown; say something when you do, or it reads as a bug.
+events.on('ContainerOpen', function (e) {
+    if (e.getType() == Packages.com.jedrock.api.event.player.ContainerType.CHEST && e.getY() > 200) {
+        e.getPlayer().sendMessage('{red}That chest is sealed.');
+        e.setCancelled(true);
+    }
+});
+
 // The crossings. Fired once per region actually entered or left, not per movement packet — so this is the
 // hook to hang scripted content on, rather than polling positions on a timer.
 events.on('PlayerRegionEnter', function (e) {
@@ -512,6 +647,42 @@ commands.register('forge', function (player, args) {
     var given = items.give(player, 'frostblade');
     player.sendMessage(given ? '{green}Forged. {gray}Hold it and right-click.'
                              : '{red}No room in your inventory.');
+});
+
+// /wand — the two things a definition alone cannot say: how long the item makes you wait, and what has
+// happened to THIS ONE. The definition is shared by every wand in the world, so 'charges' cannot live on
+// it; it goes on the stack, where it persists in a chest and does not merge two wands that disagree.
+items.define('wand', Blocks.state(280, 0))
+    .setName('{light_purple}Spark Wand')
+    .setLore(['{gray}Three charges. Right-click to spend one.'])
+    .setCooldown(2000)                     // per player, in milliseconds
+    .onUse(function (player, ctx) {
+        var state = items.heldData(player) || {charges: 3};
+        if (state.charges <= 0) {
+            player.sendActionBar('{dark_gray}The wand is spent.');
+            return true;
+        }
+        state.charges--;
+        items.setHeldData(player, state);  // this wand, not every wand
+        var at = player.getLocation();
+        world.spawnParticle('villager_happy', at.x(), at.y() + 1, at.z(), 8, 0.4);
+        player.sendActionBar('{light_purple}' + state.charges + ' charge(s) left');
+        return true;
+    })
+    .onCooldown(function (player, ctx) {
+        // Fired INSTEAD of onUse while the wand is warm. No client here draws the vanilla cooldown
+        // sweep for a server-side item, so without this nothing at all would happen and the player
+        // would think the wand was broken.
+        player.sendActionBar('{gray}Recharging… ' + Math.ceil(ctx.getRemaining() / 1000) + 's');
+        return true;                       // and swallow the click meanwhile
+    });
+
+commands.register('wand', function (player, args) {
+    if (items.give(player, 'wand')) {
+        player.sendMessage('{green}A wand. {gray}Spend it, drop it in a chest, come back tomorrow.');
+    } else {
+        player.sendMessage('{red}No room in your inventory.');
+    }
 });
 
 // /bag — the OTHER menu shape: a storage chest with no onClick, backed by no world block. The player
@@ -744,8 +915,14 @@ commands.register('guard', function (player, args) {
     guard.onTick(function (e) {
         var target = e.nearestPlayer(12);
         if (target) {
-            e.lookAt(target);
-            if (e.distanceTo(target) > 2.5) e.moveToward(target.getLocation(), 0.12);
+            // glanceAt turns the head and leaves the body facing its post — the difference between a
+            // guard watching you and a guard swivelling to follow you. lookAt turns both.
+            if (e.distanceTo(target) > 2.5) {
+                e.lookAt(target);
+                e.moveToward(target.getLocation(), 0.12);
+            } else {
+                e.glanceAt(target);
+            }
         } else {
             e.moveToward(e.get('home'), 0.08);   // drift back to its post
         }

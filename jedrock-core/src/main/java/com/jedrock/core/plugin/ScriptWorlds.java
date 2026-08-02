@@ -32,29 +32,36 @@ public final class ScriptWorlds {
 
     private final Server server;
     private final PluginManager manager;
+    /** The owning plugin's scope, carried into every view this hands out. See {@link ScriptWorld}. */
+    private final org.mozilla.javascript.Scriptable scope;
 
     ScriptWorlds(Server server, PluginManager manager) {
+        this(server, manager, null);
+    }
+
+    ScriptWorlds(Server server, PluginManager manager, org.mozilla.javascript.Scriptable scope) {
         this.server = server;
         this.manager = manager;
+        this.scope = scope;
     }
 
     /** Every loaded world, the default first. */
     public ScriptWorld[] all() {
         List<ScriptWorld> out = new ArrayList<>();
         for (World world : server.getWorlds()) {
-            out.add(new ScriptWorld(manager, world));
+            out.add(new ScriptWorld(manager, world, scope));
         }
         return out.toArray(new ScriptWorld[0]);
     }
 
     /** A world by name (case-insensitive), or {@code null}. */
     public ScriptWorld get(String name) {
-        return server.getWorld(name).map(w -> new ScriptWorld(manager, w)).orElse(null);
+        return server.getWorld(name).map(w -> new ScriptWorld(manager, w, scope)).orElse(null);
     }
 
     /** The world players join into. */
     public ScriptWorld getDefault() {
-        return new ScriptWorld(manager, server.getDefaultWorld());
+        return new ScriptWorld(manager, server.getDefaultWorld(), scope);
     }
 
     /** The names of every loaded world. */
@@ -85,12 +92,12 @@ public final class ScriptWorlds {
      *                 {@code 'nether_small'}, {@code 'bare'}, or one {@link #defineTemplate} registered
      */
     public ScriptWorld create(String name, String template) {
-        return new ScriptWorld(manager, server.createWorld(name, template, null));
+        return new ScriptWorld(manager, server.createWorld(name, template, null), scope);
     }
 
     /** As {@link #create}, from an explicit seed — the same seed always grows the same world. */
     public ScriptWorld create(String name, String template, double seed) {
-        return new ScriptWorld(manager, server.createWorld(name, template, (long) seed));
+        return new ScriptWorld(manager, server.createWorld(name, template, (long) seed), scope);
     }
 
     /** Load it if it is already there, create it from the template if it isn't — what a script wants at load. */
@@ -173,7 +180,7 @@ public final class ScriptWorlds {
         if (target == null) {
             throw new IllegalArgumentException("worlds.of expects a player");
         }
-        return new ScriptWorld(manager, target.getWorld());
+        return new ScriptWorld(manager, target.getWorld(), scope);
     }
 
     private static Dimension dimensionOf(String kind) {

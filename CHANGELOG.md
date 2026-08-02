@@ -4,6 +4,151 @@ All notable changes to Jedrock are recorded here. This is an internal project lo
 loosely follows [Keep a Changelog](https://keepachangelog.com/). The project is pre-1.0 and
 unstable — anything may change between entries.
 
+## [Unreleased]
+
+### Added
+
+- **Moderation: bans, ip-bans, mutes, a whitelist, and the commands to run them.** `/ban`, `/ban-ip`,
+  `/kick`, `/mute`, `/pardon`, `/banlist`, `/whitelist`, `/seen` and `/playerinfo`. `/kick` is the one that
+  was simply missing — the console has had it since it existed, so an operator standing next to the problem
+  had to go and find a terminal.
+
+  Almost none of this needed new machinery. A ban **is** a cancelled `PlayerLoginEvent`, which is what that
+  event was built for and says so in its own documentation, and a mute is a suppressed chat line — so the
+  two decisions sit at points the core already routed through, and a script can watch or overrule either at
+  a higher priority like any other rule here. A punishment carries an expiry, which is why there is no
+  `/tempban`: `/ban alice 2d spam` is the same command. Expiry is lazy — a lapsed entry reads as absent and
+  is dropped the next time the file is written, because a punishment running out is not an event anybody is
+  waiting for.
+
+  Two decisions worth stating. **Targets are names**, matching `ops.txt`: this server has no Mojang
+  authentication at all, a 0.14 client picks whatever name it likes, and a ban has to work on somebody who
+  has never connected — so a uuid would be a weaker identity here, not a stronger one. The cost is that a
+  rename walks around a ban, which is what `/ban-ip` is for and why it exists despite being the blunter
+  instrument. And this goes through **`DataStore`** rather than into its own text file, unlike `ops.txt` and
+  `permissions.txt`: those two stay text because an administrator edits them by hand, while a ban list is
+  written by commands and read by the gate — and it is the one piece of server state whose obvious next want
+  is sharing, which is the case that storage layer exists for. It inherits the jdbc backend for nothing.
+
+  A mute covers `/me`, `/msg` and `/say` as well as plain chat, because a rule anybody steps around in one
+  keystroke is not a rule. The whitelist waives itself for operators — one that can lock the administrator
+  out of their own server the moment they enable it is a foot-gun — but a ban is not waived, since a ban is
+  a decision somebody made and the console can always lift it.
+
+- **The `punishments` script global.** `ban` / `banIp` / `mute` / `kick` / `pardon` / `isBanned` /
+  `isMuted` / `info` / `list`, plus the whitelist and `lastSeen`. Here for the reason the `permissions`
+  global was: without it a script had to build a `'/ban ' + name + ' ' + reason` string for
+  `dispatchCommand`, which breaks the moment a reason contains a space and cannot answer a question at all —
+  an anti-spam script wants to *ask* whether somebody is already muted.
+
+### Fixed
+
+- **A script could not overrule a region, though the docs said it could.** The README has always described
+  regions as enforced by cancelling the events the core already routes decisions through, "so a script can
+  overrule one by listening at a higher priority". It could not: `events.on(name, fn)` registered every
+  script listener at `NORMAL`, and the enforcement — regions, and custom-item behaviour with it — runs at
+  `HIGH`. `NORMAL` runs *first*, so a script that un-cancelled was simply cancelled again a moment later,
+  with nothing to see. The bus had priorities, `ignoreCancelled` and a removal handle all along; none of
+  the three was reachable from JavaScript.
+
+  `events.on(name, fn, {priority: 'HIGHEST', ignoreCancelled: true})` now exposes them, `on` and `once`
+  hand back a handle whose `remove()` stops one listener without reloading the plugin, and an unknown
+  option key or a priority that isn't one is refused rather than ignored — a misspelt `priorty` quietly
+  meaning "the default" is the same silent failure in a new costume. Priority applies to script-defined
+  custom events too: the name is all a script has to go on, and an option that worked on half of them
+  would be worse than none.
+
+- **A custom item lost its name the moment a player moved it.** Identity was written onto a stack by
+  whoever created it and read back wherever it happened to still be sitting — but nothing in between
+  carried it. `Cursor` held a state and a count and no key at all, so picking a frostblade up and putting
+  it down again was enough to turn it into the ordinary diamond sword it is merely drawn as; the same went
+  for every shift-click, every chest transfer on the 1.1.5 click-transfer path, and every slot a Bedrock
+  client reported after moving something in its own window. What made it hard to see is that nothing
+  breaks: you get a perfectly good sword back, just not yours. The level file has carried these keys since
+  v4, so the persistence everyone tested worked — there was simply nothing left to persist by the time a
+  player had touched it.
+
+  The fix is mostly a distinction the code was missing. `Container.set(slot, state, count)` means "put an
+  ordinary item here", and half its callers meant "the same stack, fewer of them" — that is now
+  `setCount`, which leaves identity alone, and the moves that really are moves pass the key and data
+  along. Two stacks merge only when their state, key **and** per-stack data agree, so a named sword still
+  never dissolves into a plain one. On the Bedrock side the client owns the window and reports only an id,
+  a meta and a count, so a drag is rescued by a `CustomStackTrail`: the report that empties a slot leaves
+  what it displaced behind, and the report that fills another claims it — paired by time, the same
+  reasoning `SlotEchoGuard` already uses on the same wire, because content genuinely cannot tell those two
+  reports apart. A chest window now also names what is in it, which it never did.
+
+- **A refused armor change put back a lookalike.** Cancelling a `PlayerArmorChangeEvent` restored the
+  piece's *state*, which was all the snapshot held — so refusing to let someone take off an enchanted
+  helmet gave them an ordinary one.
+
+### Added
+
+- **Per-stack state — what happened to *this* sword, not to every sword named like it.** A definition is
+  shared by every stack that carries its key, which left nowhere to put "this particular wand has one
+  charge left"; scripts kept it in `storage` under a key they invented, which worked until two of the
+  wand existed. A stack now carries its own opaque string beside its key, reachable as
+  `items.heldData(player)` / `setHeldData` (and `dataAt` / `setDataAt` for a slot, `chest.getData` /
+  `setData` for a chest). Strings, numbers and booleans go in as themselves; an object or array goes
+  through the script's own `JSON.stringify` and comes back through `JSON.parse`, so what you get back is a
+  value and not text that looks like one — the same courtesy `storage` already did, now in one place both
+  use. Two stacks with different data do not merge, which is the whole point: a spent wand and a full one
+  are different objects and behave like it. It persists in the level file (**format v6**, which loads a
+  v2–v5 world in place and rewrites it on the next save). Note where it does *not* live: a player's
+  inventory has never survived a logout here, so neither does the data on a stack in it.
+
+- **A cooldown primitive for custom items.** Every `onUse` that wanted one wrote the same twenty lines,
+  because the shape never varies. `setCooldown(ms)` on a definition, and the item stops answering that
+  player until it elapses; `onCooldown(player, ctx)` fires in its place with `ctx.getRemaining()`, and
+  returning `true` swallows the action while returning nothing lets it fall through as the vanilla item.
+  It gates `onUse`, `onBreak` and `onHit` but not `onHold` — taking something into your hand is not an act
+  an item gets to refuse. How long an item makes you wait belongs to the item; *when a given player last
+  used one* does not, and lives on the registry, so saving a plugin no longer hands every player a fresh
+  wand. The per-player bookkeeping is forgotten when they leave, through a listener registered only while
+  some item actually cools, so a server with no cooldowns pays nothing for them.
+
+- **`PlayerHealthChange`, the three world-lifecycle events, and `ServerListPing`.**
+  **Health** had an event for damage and nothing at all for healing, so anything reacting to the number
+  itself — a regeneration system, a bar over a name tag — had to poll. Every route to a player's health now
+  passes through one point that announces the change and lets a listener rewrite or refuse it. Writing
+  health from inside that event is the obvious way for somebody to spell "keep them alive", so it works:
+  the nested write is applied without announcing itself, and wins, because it is a later decision than the
+  change being settled. (It didn't, at first. The test caught it.)
+
+  **`WorldCreate` / `WorldLoad` / `WorldUnload`** split the two things a world arriving can mean. Created
+  fires once in a world's life, right after the bake — the only safe moment to carve an arena in, since
+  doing it on load would re-cut it over whatever players had built there since. Loaded fires every boot and
+  carries `isCreated()` for anyone who wants both. Unload is cancellable, which is the reason to announce
+  it: the server already refuses to unload the default world or one with somebody standing in it, and this
+  is the same veto offered to whoever else has a stake.
+
+  **`ServerListPing`** is answered from one listener for all three sockets. The network assembles what it
+  was going to say, hands the `ServerPing` round, and serializes whatever it reads back — so a rotating
+  MOTD, a maintenance notice or a count that hides staff is one line. No player, no connection, and an I/O
+  thread: it is the one event here with nobody on the other end, because a ping is answered and the socket
+  closes before anyone has said who they are.
+
+- **Four more events, all of them things the server already knew and wasn't saying.**
+  **`PlayerSwingArm`** is the nearest thing here to "left-clicked": every edition reports the swing and the
+  server has always relayed it as an animation, but it was never offered as an input, which left scripts
+  with only the right-click half of the mouse and nothing at all for a swing that hit nothing. Read it as
+  an animation rather than an intent — a digging client swings every tick — and prefer the specific event
+  where one exists. **`ContainerOpen`** / **`ContainerClose`** are the one place both routes to a window
+  meet, the chest somebody right-clicked and the menu a script raised; a lock or an audit log that had to
+  hook two paths would eventually hook only one. **`PuppetInteract`** is the resolved form of
+  `PlayerInteractEntity`: that one carries a raw entity id and fires for players too, so a script watching
+  puppets it did not spawn had to identify them itself. Cancelling it stops that puppet's own
+  `onInteract`, which is how one script overrules an NPC another installed.
+
+- **Puppets can glance.** `setHeadYaw` / `glanceAt` turn an entity's head while its body stays where it
+  stands — a guard who watches you cross the room without shuffling round to follow. Every edition here
+  has carried the two angles separately all along (Java has a whole packet for the head alone; both
+  Bedrock eras put a head yaw inside the move), and the server was writing the body yaw into that field
+  twice, which is why nothing could ever look anywhere but forwards. Pitch still moves with a glance —
+  there is nowhere else on an entity to put it — and how far a neck bends is the client's opinion, not
+  ours. A `PLAYER` puppet is deliberately excluded: it borrows a real player's rendering, and a real
+  player reports one yaw.
+
 ## [0.2.0] — 2026-07-29
 
 ### Fixed

@@ -22,7 +22,7 @@ That is a complete plugin.
 ## Contents
 
 - [The basics](#the-basics) · [The JavaScript dialect](#the-javascript-dialect) · [Blocks and items are numbers](#blocks-and-items-are-numbers) · [Text markup](#text-markup)
-- Globals: [`events`](#events) · [`commands`](#commands) · [`server`](#server) · [`world`](#world) · [`worlds`](#worlds) · [`entities`](#entities) · [`scheduler`](#scheduler) · [`storage`](#storage) · [`regions`](#regions) · [`permissions`](#permissions) · [`items`](#items) · [`menus`](#menus) · [`packets`](#packets) · [`console`](#console)
+- Globals: [`events`](#events) · [`commands`](#commands) · [`server`](#server) · [`world`](#world) · [`worlds`](#worlds) · [`entities`](#entities) · [`scheduler`](#scheduler) · [`storage`](#storage) · [`regions`](#regions) · [`permissions`](#permissions) · [`punishments`](#punishments) · [`items`](#items) · [`menus`](#menus) · [`packets`](#packets) · [`console`](#console)
 - [Every event](#every-event) · [Custom events](#custom-events) · [Limits worth knowing](#limits-worth-knowing)
 
 ---
@@ -134,9 +134,19 @@ Colours are `{black}` `{dark_blue}` `{dark_green}` `{dark_aqua}` `{dark_red}` `{
 ## `events`
 
 ```js
-events.on(name, handler)          // subscribe; the handler takes one event object
-events.emit(name)                 // fire a custom event
-events.emit(name, data)           // …with a payload
+events.on(name, handler)                    // subscribe; the handler takes one event object
+events.on(name, handler, options)           // …with {priority, ignoreCancelled}
+events.once(name, handler[, options])       // fires at most once, then unsubscribes itself
+events.emit(name)                           // fire a custom event
+events.emit(name, data)                     // …with a payload
+events.names()                              // every built-in event name
+```
+
+`on` and `once` hand back a handle, so a listener no longer has to live as long as the plugin:
+
+```js
+const sub = events.on('PlayerMove', watchThem);
+scheduler.runLater(function () { sub.remove(); }, 20 * 60);   // …for a minute
 ```
 
 Every event object has `getName()`. Most carry a player — reached with `getPlayer()`, as every accessor
@@ -152,6 +162,35 @@ events.on('BlockBreak', function (event) {
 
 A cancelled event means "this did not happen": the block is not broken, the message is not sent, the
 teleport does not occur. See [Every event](#every-event) for what each one carries.
+
+### Priority — who gets the last word
+
+Listeners run in order: `LOWEST`, `LOW`, `NORMAL` (the default), `HIGH`, `HIGHEST`, `MONITOR`. Earlier
+ones **propose**, later ones **decide**.
+
+This is not decoration, because the core's own rules sit on that scale. **Regions enforce their flags at
+`HIGH`**, and custom items dispatch their behaviours there too. So a script that wants to *overrule* one
+has to ask for `HIGHEST`:
+
+```js
+// Let this one player build inside a no-build region after all.
+events.on('BlockBreak', function (e) {
+    if (e.getPlayer().getName() === 'Alice') { e.setCancelled(false); }
+}, {priority: 'HIGHEST'});
+```
+
+At the default `NORMAL` that listener runs *before* the region and is then overruled by it — which is
+what happened to every script that tried, for as long as this option didn't exist.
+
+`{ignoreCancelled: true}` skips the listener once something has cancelled the event. The default is to
+run anyway, which is exactly what makes the un-cancel above possible. Use `MONITOR` for watching only:
+by the time it runs the outcome is settled and something may have acted on it.
+
+Priority means the same thing for [custom events](#custom-events) — the name is all you have to go on,
+and nothing about `'shop:buy'` says which side of the built-in line it falls on.
+
+An unknown option key or a priority that isn't one is **refused**, not ignored: a misspelt `priorty`
+silently meaning "the default" is the failure this option exists to end.
 
 ---
 
@@ -302,7 +341,9 @@ guard.setNameTag('{red}Guard');
 guard.setHeldItem(276);
 guard.setArmor('helmet', 306);
 guard.setFlag('invisible', false);   // also 'on_fire', 'sneaking'
-guard.lookAt(player);                  // or a location
+guard.lookAt(player);                  // or a location — turns the whole body
+guard.glanceAt(player);                // …or just the head, body stays put
+guard.setHeadYaw(90);  guard.getHeadYaw();
 guard.moveToward(player.getLocation(), 0.2);
 guard.set('mood', 'angry');            // per-entity state, yours
 guard.onTick(function () { … });       // called every tick while it lives
@@ -416,6 +457,52 @@ holds every node.
 
 ---
 
+## `punishments`
+
+Bans, ip-bans, mutes and the whitelist — the same state `/ban` and `/whitelist` write, so a script and an
+operator are editing one list.
+
+```js
+punishments.ban(player, 'Broke spawn', '3d');   // '3d', 30000 (ms), or nothing for permanent
+punishments.banIp(player, 'Evading');
+punishments.mute('loud', 'Caps', '30m');
+punishments.kick(player, 'Take five');          // records nothing — a kick is not a ban
+
+punishments.pardon('griefer');                  // every kind at once
+punishments.pardon('griefer', 'mute');          // …or one
+
+if (punishments.isMuted(player)) { … }
+punishments.info('griefer', 'ban').getRemaining();     // ms left, -1 if permanent
+punishments.list('ban');                               // everything in force
+punishments.lastSeen('griefer');                       // ms since the epoch, 0 if never
+
+punishments.whitelist().add('alice');
+punishments.whitelist().setEnabled(true);
+```
+
+**This is server state**, like regions and permissions: written immediately and *not* torn down when your
+plugin reloads. A script that bans somebody on Tuesday has banned them.
+
+Targets are **names** (an ip ban's is an address), because there is no authentication on this server and a
+ban has to work on somebody who has never connected. A player object works anywhere a name does.
+
+An anti-spam script is the shape this exists for — it needs to *ask* whether somebody is already muted,
+which building a `/mute …` string for `dispatchCommand` could never do:
+
+```js
+const recent = {};
+events.on('PlayerChat', function (e) {
+    const name = e.getPlayer().getName();
+    const now = Date.now();
+    recent[name] = (recent[name] || []).filter(t => now - t < 5000).concat(now);
+    if (recent[name].length > 5 && !punishments.isMuted(e.getPlayer())) {
+        punishments.mute(e.getPlayer(), 'Flooding chat', '10m');
+    }
+});
+```
+
+---
+
 ## `items`
 
 A custom item is a **name, lore and behaviour hung on an ordinary block or item state**. There is no
@@ -436,8 +523,64 @@ items.heldKey(player);               // the key of what they're holding, or null
 ```
 
 **Identity is the key.** A stack carries `'frostblade'`, not a copy of the definition — so editing this
-code and saving changes every existing one. State per *stack* (this particular sword's charges) has
-nowhere to live yet; keep it in [`storage`](#storage) against the player.
+code and saving changes every existing one.
+
+### Per-stack state
+
+A definition is shared by every stack that names it, so it is the wrong place for anything that happened
+to *one* of them. That goes on the stack:
+
+```js
+items.define('wand', 280).setCooldown(2000).onUse(function (player) {
+    const state = items.heldData(player) || {charges: 3};
+    if (state.charges <= 0) { player.sendMessage('{gray}Spent.'); return true; }
+    state.charges--;
+    items.setHeldData(player, state);         // this wand, not every wand
+    player.sendActionBar('{aqua}' + state.charges + ' left');
+    return true;
+});
+```
+
+| Call | What it does |
+|------|--------------|
+| `items.heldData(player)` | the held stack's own state, or `null` |
+| `items.setHeldData(player, value)` | put state on it; `null` clears it |
+| `items.dataAt(player, slot)` / `setDataAt(player, slot, value)` | the same for one inventory slot (0–35) |
+| `chest.getData(slot)` / `chest.setData(slot, value)` | and for a stack in a world chest |
+| `chest.getKey(slot)` | which custom item is in a chest slot, or `null` |
+
+Strings, numbers and booleans go in as themselves; an object or array goes through `JSON.stringify` and
+comes back through `JSON.parse`, so what you read is a real value and not text that looks like one.
+
+Two stacks merge only when their item, their key **and** their data all match — so a spent wand never
+dissolves into a full one, and a named sword never stacks with an ordinary one. Data persists in the level
+file wherever the stack does; **a player's inventory is not persisted at all here**, so a stack in a
+backpack loses its state at logout along with the stack. For anything that must outlive a session, keep it
+in [`storage`](#storage) against the player.
+
+### Cooldowns
+
+```js
+items.define('bomb', 46)
+     .setCooldown(5000)                       // per player, in milliseconds
+     .onUse(function (player) { world.spawnParticle('explode', …); return true; })
+     .onCooldown(function (player, ctx) {
+         player.sendActionBar('{gray}Ready in ' + Math.ceil(ctx.getRemaining() / 1000) + 's');
+         return true;                         // …and swallow the click meanwhile
+     });
+```
+
+`onCooldown` runs **instead of** the behaviour while the item is warm. Returning `true` consumes the
+action; returning nothing (or having no such hook) lets it fall through, so the item behaves as the
+vanilla one it is drawn as. It gates `onUse`, `onBreak` and `onHit` — not `onHold`, since taking something
+into your hand isn't an act an item gets to refuse.
+
+The clock starts when the behaviour *runs*, whatever it returns. Also on the item:
+`cooldownFor(player)` (ms left), `isReadyFor(player)`, `clearCooldown(player)`, `startCooldown(player)`.
+
+No client here draws the vanilla cooldown sweep for a server-side item, so **nothing appears on screen**
+unless your script says something. A cooldown survives a hot reload — it belongs to the server, not to the
+definition your file rebuilds every time you save.
 
 ---
 
@@ -493,7 +636,22 @@ Prefixed with your file name, and written to `logs/latest.log` like everything e
 
 ## Every event
 
-Subscribe by name. **Cancellable** means `event.cancel()` prevents it.
+Subscribe by name. **Cancellable** means `event.cancel()` prevents it. `events.names()` returns this list
+at runtime, which is the copy that cannot go stale.
+
+Three of these have no player at all: the two `World*` lifecycle ones and `ServerListPing`. The last is
+also the only one that runs on a network I/O thread, before any player state exists:
+
+```js
+events.on('ServerListPing', function (e) {
+    const ping = e.getPing();
+    ping.setMotd(maintenance ? '{red}Down for maintenance' : '{green}Open — come in');
+    ping.setOnlinePlayers(server.getOnlinePlayers().length);   // hide staff, inflate, whatever you like
+});
+```
+
+It answers for **both editions** from one listener. Keep the work in it tiny: a popular server answers
+this once per client per list refresh.
 
 | Event | Cancellable | Carries |
 |-------|:-----------:|---------|
@@ -508,7 +666,8 @@ Subscribe by name. **Cancellable** means `event.cancel()` prevents it.
 | `PlayerWorldChange` | ✅ | `player`, from world, destination |
 | `PlayerRespawn` | — | `player` |
 | `PlayerDeath` | — | `player`; `setDeathMessage(…)` |
-| `PlayerDamage` | ✅ | `player`, amount, cause |
+| `PlayerDamage` | ✅ | `player`, amount, cause — where a hit is vetoed or rescaled, and the only one that knows *why* |
+| `PlayerHealthChange` | ✅ | `player`, old / new health, `isDamage()`. **Any** change from any source, damage and healing alike; `setNewHealth(…)` rewrites the number. Fires after `PlayerDamage` on a hit. Cancelling on a lethal blow makes them unkillable — that is the feature and the footgun |
 | `PlayerPickupItem` | ✅ | `player`, state |
 | `PlayerUseItem` | ✅ | `player`, state |
 | `PlayerHeldItemChange` | ✅ | `player`, slot |
@@ -516,16 +675,24 @@ Subscribe by name. **Cancellable** means `event.cancel()` prevents it.
 | `PlayerInteractBlock` | ✅ | `player`, position |
 | `PlayerInteractEntity` | ✅ | `player`, target |
 | `PlayerToggleSneak` / `PlayerToggleSprint` | ✅ | `player`, the new state |
+| `PlayerSwingArm` | ✅ | `player` — the nearest thing to "left-clicked". Fires often (a digging client swings every tick) and says only that an arm moved; cancelling suppresses the relay to others, not the swing on their own screen |
 | `PlayerRegionEnter` / `PlayerRegionLeave` | ✅ | `player`, region |
+| `PuppetInteract` | ✅ | `player`, the puppet — resolved, unlike `PlayerInteractEntity`'s raw id, and only for puppets. Cancel to stop that puppet's own `onInteract` |
+| `ContainerOpen` | ✅ | `player`, type (`CHEST` / `MENU`), title, position, size. Both routes to a window pass through it; cancel and nothing opens |
+| `ContainerClose` | — | `player`, type — where a chest's contents have settled |
 | `InventoryClick` | ✅ | `player`, slot, button |
 | `GameModeChange` | ✅ | `player`, old / new mode |
 | `BlockBreak` | ✅ | `player`, position, state |
 | `BlockPlace` | ✅ | `player`, position, state |
 | `WeatherChange` | ✅ | world, new weather |
 | `WorldSave` | — | world |
+| `WorldCreate` | — | world, template — fires **once ever** for that world, right after its terrain is baked. The only safe place to carve something in |
+| `WorldLoad` | — | world, `isCreated()` — every time a world becomes available, including just after a create |
+| `WorldUnload` | ✅ | world — before anything is torn down; cancel to keep it loaded. Unloading is not deleting |
 | `ServerStart` | — | everything is up; do one-time setup here |
 | `ServerStop` | — | the world and players are still alive |
 | `ServerTick` | — | every tick. Built only when something listens — an idle server pays nothing |
+| `ServerListPing` | — | `getPing()`: MOTD and the two counts, rewritable in place. Both editions, no player, on an I/O thread |
 
 ---
 
@@ -554,10 +721,14 @@ if (!event.isCancelled()) { … }
 - **Forms are out on both Bedrock eras** — those clients predate them. A menu is a window or a list.
 - **No mob AI, pathfinding, redstone or crafting** — by design. A puppet does what your `onTick` says and
   nothing else; that is the point of the primitive.
-- **Entities can't be posed finely**: no armour stands on Bedrock, no per-entity scale, no limb posing,
-  and head yaw isn't split from body yaw. A 0.14 client renders only the mobs it is old enough to know.
+- **Entities can't be posed finely**: no armour stands on Bedrock, no per-entity scale, no limb posing. A
+  head *can* turn on its own now, but how far is the client's opinion, a `player` puppet can't glance at
+  all, and on Bedrock a glance costs a whole move packet. A 0.14 client renders only the mobs it is old
+  enough to know.
 - **Scenes cost packets, not ticks.** A static prop runs no logic, but every joining player pays one spawn
   packet for it.
-- **Per-stack item state has nowhere to live yet** — a custom item definition is shared by every stack that
-  names it.
+- **Per-stack state lives as long as the stack.** It persists in a chest and dies with a logout in a
+  backpack, because a player's inventory isn't persisted at all. On Bedrock, a *swap* inside the client's
+  own window can drop one of the two stacks' identity — that client reports only an id and a count, and
+  only one move at a time can be paired up.
 - **Your handler is on the server's thread.** Blocking blocks everyone.

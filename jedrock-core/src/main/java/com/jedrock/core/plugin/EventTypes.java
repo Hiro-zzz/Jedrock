@@ -4,7 +4,11 @@ import com.jedrock.api.event.Event;
 import com.jedrock.api.event.block.BlockBreakEvent;
 import com.jedrock.api.event.block.BlockPlaceEvent;
 import com.jedrock.api.event.block.PlayerInteractBlockEvent;
+import com.jedrock.api.event.player.ContainerCloseEvent;
+import com.jedrock.api.event.player.ContainerOpenEvent;
 import com.jedrock.api.event.player.GameModeChangeEvent;
+import com.jedrock.api.event.player.PlayerSwingArmEvent;
+import com.jedrock.api.event.player.PuppetInteractEvent;
 import com.jedrock.api.event.player.PlayerChatEvent;
 import com.jedrock.api.event.player.PlayerCommandEvent;
 import com.jedrock.api.event.player.PlayerDamageEvent;
@@ -27,11 +31,16 @@ import com.jedrock.api.event.player.PlayerWorldChangeEvent;
 import com.jedrock.api.event.player.PlayerToggleSneakEvent;
 import com.jedrock.api.event.player.PlayerToggleSprintEvent;
 import com.jedrock.api.event.player.PlayerUseItemEvent;
+import com.jedrock.api.event.player.PlayerHealthChangeEvent;
+import com.jedrock.api.event.server.ServerListPingEvent;
 import com.jedrock.api.event.server.ServerStartEvent;
 import com.jedrock.api.event.server.ServerStopEvent;
 import com.jedrock.api.event.server.ServerTickEvent;
 import com.jedrock.api.event.world.WeatherChangeEvent;
+import com.jedrock.api.event.world.WorldCreateEvent;
+import com.jedrock.api.event.world.WorldLoadEvent;
 import com.jedrock.api.event.world.WorldSaveEvent;
+import com.jedrock.api.event.world.WorldUnloadEvent;
 
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -51,6 +60,8 @@ public final class EventTypes {
     private EventTypes() {}
 
     private static final Map<String, Class<? extends Event>> BY_NAME = new LinkedHashMap<>();
+    /** The names as written below — the lookup key is normalised, and this is not, so it reads back nicely. */
+    private static final java.util.List<String> DECLARED = new java.util.ArrayList<>();
 
     static {
         register("PlayerLogin", PlayerLoginEvent.class);
@@ -73,21 +84,31 @@ public final class EventTypes {
         register("PlayerToggleSneak", PlayerToggleSneakEvent.class);
         register("PlayerToggleSprint", PlayerToggleSprintEvent.class);
         register("PlayerUseItem", PlayerUseItemEvent.class);
+        register("PlayerSwingArm", PlayerSwingArmEvent.class);
+        register("ContainerOpen", ContainerOpenEvent.class);
+        register("ContainerClose", ContainerCloseEvent.class);
+        register("PuppetInteract", PuppetInteractEvent.class);
         register("GameModeChange", GameModeChangeEvent.class);
         register("BlockBreak", BlockBreakEvent.class);
         register("BlockPlace", BlockPlaceEvent.class);
         register("PlayerInteractBlock", PlayerInteractBlockEvent.class);
         register("PlayerArmorChange", PlayerArmorChangeEvent.class);
         register("PlayerHeldItemChange", PlayerHeldItemChangeEvent.class);
+        register("PlayerHealthChange", PlayerHealthChangeEvent.class);
         register("ServerStart", ServerStartEvent.class);
         register("ServerStop", ServerStopEvent.class);
         register("ServerTick", ServerTickEvent.class);
+        register("ServerListPing", ServerListPingEvent.class);
         register("WeatherChange", WeatherChangeEvent.class);
         register("WorldSave", WorldSaveEvent.class);
+        register("WorldCreate", WorldCreateEvent.class);
+        register("WorldLoad", WorldLoadEvent.class);
+        register("WorldUnload", WorldUnloadEvent.class);
     }
 
     private static void register(String name, Class<? extends Event> type) {
         BY_NAME.put(key(name), type);
+        DECLARED.add(name);
     }
 
     private static String key(String name) {
@@ -98,5 +119,10 @@ public final class EventTypes {
     /** The event class for a script name, or {@code null} if it isn't a known event. */
     public static Class<? extends Event> byName(String name) {
         return name == null ? null : BY_NAME.get(key(name));
+    }
+
+    /** Every built-in name, in the order declared above — what {@code events.names()} hands a script. */
+    public static java.util.List<String> names() {
+        return java.util.List.copyOf(DECLARED);
     }
 }

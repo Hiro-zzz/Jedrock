@@ -374,14 +374,23 @@ public final class Mcpe014Packets {
 
     /** Move an entity (avatar). {@code y} must be EYE-level (feet + {@link #EYE_HEIGHT}). */
     public static void moveEntity(ByteBuf b, long eid, float x, float y, float z, float yaw, float pitch) {
+        moveEntity(b, eid, x, y, z, yaw, pitch, yaw);
+    }
+
+    /**
+     * As above, with the head aimed separately from the body. The head-yaw float has been in this packet
+     * since long before 0.14 — it was simply being handed the body yaw twice.
+     */
+    public static void moveEntity(ByteBuf b, long eid, float x, float y, float z,
+                                  float bodyYaw, float pitch, float headYaw) {
         b.writeByte(ID_MOVE_ENTITY);
         b.writeInt(1);             // entity count
         b.writeLong(eid);
         b.writeFloat(x);
         b.writeFloat(y);
         b.writeFloat(z);
-        b.writeFloat(yaw);
-        b.writeFloat(yaw);         // head yaw
+        b.writeFloat(bodyYaw);
+        b.writeFloat(headYaw);     // head yaw
         b.writeFloat(pitch);
     }
 

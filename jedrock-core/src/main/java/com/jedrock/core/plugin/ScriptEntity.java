@@ -135,6 +135,34 @@ public final class ScriptEntity {
         }
     }
 
+    /**
+     * Aim the <b>head</b> at something, leaving the body facing where it stands — a guard who watches you
+     * cross the room without turning to follow.
+     *
+     * <pre>{@code
+     *   e.onTick(function () {
+     *       var p = e.nearestPlayer(12);
+     *       if (p) { e.glanceAt(p); }        // …and the guard keeps facing its post
+     *   });
+     * }</pre>
+     */
+    public void glanceAt(Object target) {
+        Location at = locationOf(target);
+        if (at != null) {
+            puppet.glanceAt(at);
+        }
+    }
+
+    /** Where the head is aimed, in degrees. */
+    public double getHeadYaw() {
+        return puppet.getHeadYaw();
+    }
+
+    /** Turn the head alone. How far a neck bends is the client's opinion, not the server's. */
+    public void setHeadYaw(double headYaw) {
+        puppet.setHeadYaw((float) headYaw);
+    }
+
     // ===== Looks =====
 
     /** Floating text above the entity, in the unified {@code {color}} markup; null or empty removes it. */

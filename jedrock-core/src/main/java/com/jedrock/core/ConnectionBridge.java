@@ -10,9 +10,11 @@ import com.jedrock.api.event.player.PlayerLoginEvent;
 import com.jedrock.api.event.player.PlayerMoveEvent;
 import com.jedrock.api.event.player.PlayerPickupItemEvent;
 import com.jedrock.api.event.player.PlayerQuitEvent;
+import com.jedrock.api.event.player.PlayerSwingArmEvent;
 import com.jedrock.api.event.player.PlayerToggleSneakEvent;
 import com.jedrock.api.event.player.PlayerToggleSprintEvent;
 import com.jedrock.api.event.player.PlayerUseItemEvent;
+import com.jedrock.api.event.server.ServerListPingEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.player.PlayerConnection;
@@ -131,6 +133,16 @@ final class ConnectionBridge implements ConnectionListener {
     @Override
     public int getOnlinePlayerCount() {
         return playerRegistry.size();
+    }
+
+    @Override
+    public void onPing(com.jedrock.api.ServerPing ping) {
+        // The network has already written the honest answer into `ping`; this only offers it around.
+        // Gated, because a popular server answers this often and an unlistened one should allocate
+        // nothing beyond the ping object the network needed anyway.
+        if (eventBus.hasListeners(ServerListPingEvent.class)) {
+            eventBus.post(new ServerListPingEvent(ping));
+        }
     }
 
     // ===== Lifecycle =====
@@ -509,6 +521,13 @@ final class ConnectionBridge implements ConnectionListener {
         if (player == null) {
             return;
         }
+        // Gated like every other hot-path event: a client swings once per tick while it is digging, so an
+        // unlistened server must not build an object for it. Cancelling suppresses the relay only — the
+        // swinger's own client drew the animation before the packet left.
+        if (eventBus.hasListeners(PlayerSwingArmEvent.class)
+                && eventBus.post(new PlayerSwingArmEvent(player)).isCancelled()) {
+            return;
+        }
         broadcast.swing(player);
     }
 
@@ -599,6 +618,17 @@ final class ConnectionBridge implements ConnectionListener {
             }
             commandManager.dispatch(sender, "/" + command);
             return;
+        }
+        // Muted: the line stops here and only the speaker is told, since a broadcast saying somebody was
+        // silenced is a worse punishment than the silence. Checked before the chat event so a listener
+        // sees only lines that were actually going somewhere.
+        if (server != null && server.getModeration() != null) {
+            com.jedrock.core.moderation.Punishment mute =
+                    server.getModeration().muteFor(sender.getName());
+            if (mute != null) {
+                sender.sendMessage(server.getModeration().muteNotice(mute));
+                return;
+            }
         }
         // Let listeners edit or veto the line before it goes out (cancel suppresses it). Only built when a
         // listener wants it — with none, the default format applies and no event is allocated.

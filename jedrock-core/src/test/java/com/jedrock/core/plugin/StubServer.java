@@ -93,6 +93,9 @@ final class StubServer implements com.jedrock.api.Server {
         @Override public void teleport(Location to) { this.at = to; }
         @Override public void setRotation(float yaw, float pitch) { }
         @Override public void lookAt(Location target) { }
+        @Override public float getHeadYaw() { return 0f; }
+        @Override public void setHeadYaw(float headYaw) { }
+        @Override public void glanceAt(Location target) { }
         @Override public boolean hasFlag(PuppetFlag flag) { return false; }
         @Override public void setFlag(PuppetFlag flag, boolean on) { }
         @Override public void setHeldItem(int state) { }

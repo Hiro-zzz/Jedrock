@@ -210,6 +210,20 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     }
 
     @Override
+    public void moveEntity(long entityId, double x, double y, double z,
+                           float bodyYaw, float pitch, float headYaw) {
+        sendWrapped(b -> Mcpe014Packets.moveEntity(b, entityId,
+                (float) x, (float) y + EYE_HEIGHT, (float) z, bodyYaw, pitch, headYaw));
+    }
+
+    @Override
+    public void setEntityHeadYaw(long entityId, double x, double y, double z,
+                                 float bodyYaw, float pitch, float headYaw) {
+        // As on 1.1.5: this era has no head-only packet either, so a glance restates the whole pose.
+        moveEntity(entityId, x, y, z, bodyYaw, pitch, headYaw);
+    }
+
+    @Override
     public void removeEntity(long entityId) {
         sendWrapped(b -> Mcpe014Packets.removeEntity(b, entityId));
     }

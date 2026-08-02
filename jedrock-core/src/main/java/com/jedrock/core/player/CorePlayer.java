@@ -2,6 +2,7 @@ package com.jedrock.core.player;
 
 import com.jedrock.api.event.EventBus;
 import com.jedrock.api.event.player.PlayerArmorChangeEvent;
+import com.jedrock.api.event.player.PlayerHealthChangeEvent;
 import com.jedrock.api.event.player.PlayerKickEvent;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
@@ -11,6 +12,7 @@ import com.jedrock.api.world.World;
 import com.jedrock.core.entity.EntityIds;
 import com.jedrock.core.inventory.Container;
 import com.jedrock.core.inventory.Cursor;
+import com.jedrock.core.inventory.CustomStackTrail;
 import com.jedrock.core.inventory.SlotEchoGuard;
 import com.jedrock.core.permission.OpList;
 import com.jedrock.core.permission.PermissionManager;
@@ -270,6 +272,16 @@ public final class CorePlayer implements Player {
         return inventory.give(state, 0, STORAGE_SLOTS);
     }
 
+    /**
+     * As {@link #addToInventory(int)}, but for a stack that is <em>something</em> — a custom item, and
+     * whatever has happened to that particular one. Everything moving an existing stack into a player's
+     * inventory goes through this rather than the plain form, or the stack arrives as the ordinary item
+     * it is merely drawn as.
+     */
+    public int addToInventory(int state, String customKey, String customData) {
+        return inventory.give(state, 0, STORAGE_SLOTS, customKey, customData);
+    }
+
     /** Give one {@code state} and refresh that slot on the client. @return true if it fit. (api {@link Player}) */
     @Override
     public boolean giveItem(int state) {
@@ -331,7 +343,15 @@ public final class CorePlayer implements Player {
 
     /** The display for one slot: the custom item's name and lore, or {@code null} for an ordinary stack. */
     private com.jedrock.api.item.ItemDisplay displayAt(int slot) {
-        String key = inventory.customKeyAt(slot);
+        return displayForKey(inventory.customKeyAt(slot));
+    }
+
+    /**
+     * How a stack carrying {@code key} should be named and described, or {@code null} if it is an ordinary
+     * one. Public because a chest window is filled by {@code ContainerService} out of somebody else's
+     * container, and a named sword should read the same whichever box it is sitting in.
+     */
+    public com.jedrock.api.item.ItemDisplay displayForKey(String key) {
         if (key == null) {
             return null; // the overwhelmingly common case — no lookup, no allocation
         }
@@ -387,6 +407,7 @@ public final class CorePlayer implements Player {
      */
     public void syncInventory() {
         slotEchoGuard.armAll(System.nanoTime());
+        stackTrail.clear(); // the client is about to be told everything — no half-move is outstanding
         connection.setInventory(inventory.states(), inventory.counts(), inventoryDisplay());
         heldItemMayHaveChanged();
         armorMayHaveChanged();
@@ -399,9 +420,20 @@ public final class CorePlayer implements Player {
      */
     private final SlotEchoGuard slotEchoGuard = new SlotEchoGuard(INV_SLOTS);
 
+    /**
+     * Carries a custom stack's identity across a drag the client made and only reported afterwards — the
+     * other half of the same problem. See {@link CustomStackTrail}.
+     */
+    private final CustomStackTrail stackTrail = new CustomStackTrail();
+
     /** True while {@code slot} is still inside the echo window of a server-authored push. */
     public boolean isSlotEchoGuarded(int slot) {
         return slotEchoGuard.isGuarded(slot, System.nanoTime());
+    }
+
+    /** The trail of the last stack a client report displaced — read and written by {@code ContainerService}. */
+    public CustomStackTrail getStackTrail() {
+        return stackTrail;
     }
 
     // ===== Inventory API (scripting-facing; operates on the 36 storage slots 0-35) =====
@@ -500,7 +532,7 @@ public final class CorePlayer implements Player {
      * funnel syncs the resulting health itself. @return the new health.
      */
     public int damage(int amount) {
-        health = Math.max(0, health - Math.max(0, amount));
+        health = settle(health - Math.max(0, amount));
         return health;
     }
 
@@ -510,9 +542,59 @@ public final class CorePlayer implements Player {
      */
     @Override
     public void setHealth(int value) {
-        health = Math.max(0, Math.min(MAX_HEALTH, value));
+        health = settle(value);
         connection.setHealth(health);
     }
+
+    /**
+     * The one place a health number is decided: clamp it, offer it to listeners, clamp whatever they say
+     * back, and hand over the result. Both ways in go through this, which is the point — a script that
+     * wants to know when somebody's health moved should not have to know how it moved.
+     *
+     * <p>Re-entrancy is the trap here: a listener calling {@code setHealth} from inside the event would
+     * come straight back round. A flag holds the door — while a change is settling, a nested one is
+     * applied plainly, without announcing itself.
+     */
+    private int settle(int proposed) {
+        int clamped = Math.max(0, Math.min(MAX_HEALTH, proposed));
+        EventBus bus = eventBus;
+        if (bus == null || !bus.hasListeners(PlayerHealthChangeEvent.class)) {
+            return clamped;
+        }
+        // Checked before "did anything change", because the outer call has not written its own value yet:
+        // to a listener calling setHealth from inside the event, health still reads as it did before the
+        // change being settled, and comparing values here would miss the write entirely.
+        if (settlingHealth) {
+            // Don't announce it — that is the loop — but do record it. What the listener wrote is a later
+            // decision than the one being settled, and the caller must not overwrite it with a proposal
+            // made before the listener ran.
+            nestedHealthWrite = true;
+            return clamped;
+        }
+        if (clamped == health) {
+            return clamped; // "health changed" has to mean it changed
+        }
+        settlingHealth = true;
+        nestedHealthWrite = false;
+        PlayerHealthChangeEvent event;
+        try {
+            event = bus.post(new PlayerHealthChangeEvent(this, health, clamped));
+        } finally {
+            settlingHealth = false;
+        }
+        if (nestedHealthWrite) {
+            return health; // last write wins: setHealth inside the handler beats setNewHealth on it
+        }
+        if (event.isCancelled()) {
+            return health; // left exactly where it was
+        }
+        return Math.max(0, Math.min(MAX_HEALTH, event.getNewHealth()));
+    }
+
+    /** True while {@link #settle} is inside a listener — see its note on re-entrancy. */
+    private volatile boolean settlingHealth;
+    /** Set when a listener changed health directly, so the settling call knows not to undo it. */
+    private volatile boolean nestedHealthWrite;
 
     /** Vanilla-style post-hit invulnerability window (half a second) for melee, in nanoseconds. */
     private static final long HURT_COOLDOWN_NANOS = 500_000_000L;

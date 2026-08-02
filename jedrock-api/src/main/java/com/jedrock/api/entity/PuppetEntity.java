@@ -52,6 +52,30 @@ public interface PuppetEntity extends Entity {
      */
     void lookAt(Location target);
 
+    /**
+     * Where the puppet's <b>head</b> is aimed, in degrees. Equal to the body's yaw until something turns
+     * one without the other — {@link #setRotation} moves both, as a puppet that only ever swivelled on
+     * the spot always did.
+     */
+    float getHeadYaw();
+
+    /**
+     * Turn the head alone, leaving the body where it stands. A guard that watches you cross the room
+     * without shuffling round to follow, which is the difference between a statue and somebody standing
+     * still.
+     *
+     * <p>How far a head may turn is the client's business, not the server's: every edition here clamps a
+     * head that has been twisted past its neck, and none of them tells us where that limit is. Ask for
+     * 180° behind and you get whatever that client thinks a neck does.
+     */
+    void setHeadYaw(float headYaw);
+
+    /**
+     * Aim the head at a point without turning the body — {@link #lookAt} for the head only. Pitch is part
+     * of looking, so it does move; there is nowhere else on an entity to put it.
+     */
+    void glanceAt(Location target);
+
     /** Whether {@code flag} is currently set. */
     boolean hasFlag(PuppetFlag flag);
 

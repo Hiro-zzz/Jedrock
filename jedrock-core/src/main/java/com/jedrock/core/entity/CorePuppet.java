@@ -50,6 +50,7 @@ public final class CorePuppet implements PuppetEntity {
         this.name = name;
         this.world = world;
         this.location = location;
+        this.headYaw = location.yaw(); // a puppet that has never glanced looks where its body faces
         this.director = director;
         this.itemState = itemState;
     }
@@ -137,6 +138,11 @@ public final class CorePuppet implements PuppetEntity {
 
     @Override
     public void teleport(Location to) {
+        // A move that also turns the puppet turns its head with it — being carried round to face a new way
+        // is not a glance. A move that keeps the same facing leaves an aimed head where it was aimed.
+        if (to.yaw() != location.yaw()) {
+            this.headYaw = to.yaw();
+        }
         setLocation(to);
         director.movePuppet(this, to); // relays the move to every viewer
     }
@@ -144,19 +150,57 @@ public final class CorePuppet implements PuppetEntity {
     @Override
     public void setRotation(float yaw, float pitch) {
         Location at = location;
+        this.headYaw = yaw; // turning on the spot turns the whole puppet, head included
         teleport(new Location(at.world(), at.x(), at.y(), at.z(), yaw, pitch));
     }
 
     @Override
     public void lookAt(Location target) {
         Location at = location;
-        double dx = target.x() - at.x();
-        double dy = target.y() - (at.y() + NOMINAL_EYE_HEIGHT);
-        double dz = target.z() - at.z();
-        double flat = Math.sqrt(dx * dx + dz * dz);
-        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        float pitch = (float) Math.toDegrees(-Math.atan2(dy, flat));
-        setRotation(yaw, pitch);
+        setRotation(yawTo(at, target), pitchTo(at, target));
+    }
+
+    /**
+     * Where the head is aimed. Its own field rather than the {@link Location}'s yaw, because a location is
+     * where something <em>is</em> and this is where it is <em>looking</em> — the two are the same number
+     * only for as long as nothing has glanced. A plain {@code float}, not a nullable box: a puppet that
+     * watches somebody sets this every tick, and "has it ever glanced?" is not worth an allocation each
+     * time. It starts at the body's yaw and only parts from it when something aims it.
+     */
+    private volatile float headYaw;
+
+    @Override
+    public float getHeadYaw() {
+        return headYaw;
+    }
+
+    @Override
+    public void setHeadYaw(float headYaw) {
+        this.headYaw = headYaw;
+        director.relayHeadYaw(this);
+    }
+
+    @Override
+    public void glanceAt(Location target) {
+        Location at = location;
+        float pitch = pitchTo(at, target);
+        this.headYaw = yawTo(at, target);
+        // Pitch lives on the body's rotation on every edition here, so aiming up or down is a pose change
+        // and not a glance. The body's yaw is deliberately left alone — that is the whole point.
+        this.location = new Location(at.world(), at.x(), at.y(), at.z(), at.yaw(), pitch);
+        director.relayHeadYaw(this);
+    }
+
+    /** The yaw that points from {@code from} at {@code target}, in the degrees every edition speaks. */
+    private static float yawTo(Location from, Location target) {
+        return (float) Math.toDegrees(Math.atan2(-(target.x() - from.x()), target.z() - from.z()));
+    }
+
+    private static float pitchTo(Location from, Location target) {
+        double dx = target.x() - from.x();
+        double dy = target.y() - (from.y() + NOMINAL_EYE_HEIGHT);
+        double dz = target.z() - from.z();
+        return (float) Math.toDegrees(-Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
     }
 
     @Override

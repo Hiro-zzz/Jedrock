@@ -197,11 +197,27 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   Bedrock is handed an `AvailableCommands` manifest so its client parses the line and sends it back. The
   built-in set: `/help [cmd]`, `/list`, `/tps`, `/say`, `/me`, `/msg`, `/gamemode`, `/tp`, `/tphere`,
   `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/op`, `/deop`, `/perm`, `/region`, `/world`, `/pick`,
-  `/puppet`, `/hologram`. A deliberately minimal **survival inventory** (36 slots)
+  `/puppet`, `/hologram`, plus the [moderation set](#moderation). A deliberately minimal **survival inventory** (36 slots)
   tracks only what a survival player mines and places: mining a block drops it into the hotbar, placing
   consumes it, and the changed slot is pushed live so the HUD refreshes. On PE 1.1.5 the player window is
   serialized PMMP-exact (45 slots + a 9-entry hotbar-link array), without which mined items filled storage
   but the on-screen hotbar stayed empty.
+- ✅ <a id="moderation"></a>**Moderation — bans, ip-bans, mutes and a whitelist.** `/ban`, `/ban-ip`,
+  `/kick`, `/mute`, `/pardon` (every kind at once, or one named), `/banlist`, `/whitelist`, `/seen` and
+  `/playerinfo`. Almost none of it is new machinery: a ban **is** a cancelled `PlayerLoginEvent`, which is
+  what that event was built for, and a mute is a suppressed chat line — so both decisions are made at
+  points the core already routes through, and a script can watch or overrule either at a higher priority
+  like any other rule here. A punishment carries an **expiry**, so there is no `/tempban`:
+  `/ban alice 2d spam` is the same command, and a duration needs a unit precisely so
+  `/ban alice 30 spam` cannot silently mean thirty of something. Expiry is lazy — a lapsed entry reads as
+  absent and is dropped on the next write, with nothing ticking.
+  **Targets are names**, like `ops.txt`: there is no Mojang authentication here (a 0.14 client picks its
+  own name), and a ban has to work on somebody who has never connected, so a uuid would be the weaker
+  identity. The cost is that a rename walks around one — which is what `/ban-ip` is for, and why it exists
+  despite catching whole households. State goes through the [storage layer](#storage) rather than into its
+  own text file, so a network of servers can share one ban list; `ops.txt` and `permissions.txt` stay text
+  because those two are the ones edited by hand. A mute covers `/me`, `/msg` and `/say` as well as chat,
+  and the whitelist waives itself for operators (a ban does not).
 - ✅ **One command surface, unified console and permissions.** A command is written against a
   `CommandSender` — a player *or* the server console — so the same command runs from chat and from stdin:
   type `op alice` or `gamemode creative bob` straight into the console (it acts as an operator), and a
@@ -284,8 +300,10 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   armor and off-hand slots. **Chests** are a placeable block (right-click to open) backed by a 27-slot
   container: move items in and out, shift to quick-transfer, in survival <em>and</em> creative (the
   creative inventory is mirrored server-side so the chest's player half is tracked). Chest contents
-  **persist** in the level file (format v4, which loads a v2 or v3 world in place and rewrites it on the
-  next save; v3 added chests, v4 the custom-item key each stack carries). Wired for JE 1.12.2 and 1.8.
+  **persist** in the level file (format v6, which loads a v2–v5 world in place and rewrites it on the
+  next save; v3 added chests, v4 the custom-item key each stack carries, v6 that stack's own data).
+  A custom item keeps its name, its lore and its own state through every one of those moves, and the
+  window draws the name. Wired for JE 1.12.2 and 1.8.
   True to the model, the server only <em>stores and moves</em> items — no crafting or smelting simulation,
   no item entities (a dropped / overflow item simply vanishes).
 - ✅ **Chests on Bedrock 1.1.5 — click-transfer.** The retail 1.1.5 client crashes on a real chest window,
@@ -298,7 +316,9 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   (`SlotEchoGuard`), so a deposit→withdraw cycle can't duplicate items and a rearranged inventory still
   sticks.
 - ✅ **Puppets and holograms — visuals the server drives, cross-edition.** A **puppet** is a mob / NPC the
-  server puppeteers and never simulates: spawn it, move it, turn it to face a player (`lookAt`), give it a
+  server puppeteers and never simulates: spawn it, move it, turn it to face a player (`lookAt`) or just
+  **glance** at one with its head while its body stays put (`glanceAt` / `setHeadYaw` — every edition has
+  carried the two angles separately all along), give it a
   floating **name tag**, set it alight / invisible / crouching, make it swing or flinch — and hitting one
   fires an interaction callback. A **hologram** is the same idea with the body removed: floating lines of
   text, authored once in the shared markup, rendered on Java as an invisible marker armor stand and on
@@ -357,11 +377,21 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   cancelling the event the core already routes that decision through.
   Identity is the **key**, and a stack carries the key rather than a copy of the definition. That is what
   makes a custom item survive what a reference could not: a hot reload re-points every existing stack at
-  the new definition, the level file (v4) restores a chest full of them long before any plugin exists, and
+  the new definition, the level file (v6) restores a chest full of them long before any plugin exists, and
   an item whose plugin was removed simply behaves as the vanilla one it is drawn as until its script comes
   back. A custom stack never merges with an ordinary one of the same state. Dispatch listeners are
   registered only while some item actually has a behaviour, so a purely cosmetic item — or none at all —
   costs nothing. Try `/forge` in `plugins/example.js`.
+  **A stack also carries its own state** — `items.heldData(player)` / `setHeldData` — because a definition
+  is shared by every stack that names it and has nowhere to put "this particular wand has one charge
+  left". Strings and numbers go in as themselves; an object goes through the script's own `JSON` and comes
+  back as a value rather than as text that looks like one. Two stacks whose data differs do not merge, so
+  a spent wand never dissolves into a full one, and it persists in the level file beside the key. And the
+  item itself can carry a **cooldown**: `setCooldown(ms)` and it stops answering that player until it
+  elapses, with an optional `onCooldown` hook fired in the behaviour's place (`ctx.getRemaining()`) whose
+  `true` swallows the action and whose absence lets it fall through as the vanilla item. The wait belongs
+  to the item; *when a given player last used one* belongs to the server, so editing a plugin no longer
+  hands everyone a fresh wand.
   **The name and lore reach the client on all four protocols**, as item NBT in the Slot's own NBT field —
   two dialects: **Java** is big-endian named NBT written inline (plain §-coded strings, since text
   components in `Name` arrived in 1.13), and **both Bedrock eras** are length-prefixed *little-endian* NBT.
@@ -369,7 +399,7 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   is *network* NBT (varint lengths, zigzag ints), an item's is not. Getting that backwards cost one client
   test: the 1.1.5 client neither crashed nor complained, it just kept showing the vanilla name. An ordinary
   item still writes the exact bytes it always did, so nothing changed for a server that defines no items.
-  **Confirmed on a real 1.1.5 client**; Java is still unverified.
+  **Confirmed on a real client on every one of the four**, which is what it took to trust either dialect.
 
 - ✅ **Permissions from a script.** A script could always *read* rights (`player.hasPermission`); now it can
   set them. The **`permissions`** global builds groups (`createGroup(n).inherit('default').add(node)
@@ -386,7 +416,11 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   fourteen globals — `server` / `events` / `scheduler` /
   `commands` / `packets` / `world` / `worlds` / `entities` / `regions` / `items` / `permissions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
-  name; scripts can also `events.emit` their own custom events, register real `/slash` commands, schedule
+  name (40 of them, listed by `events.names()`), at a **priority** of its choosing — which is what lets a
+  script overrule the core's own rules, since regions and item behaviours are enforced at `HIGH` and a
+  listener has to run later than that to have the last word. `on` / `once` hand back a handle, so a
+  listener can stop without the plugin reloading. Scripts can also `events.emit` their own custom events
+  (priority applies there too), register real `/slash` commands, schedule
   work (`setTimeout` / `runTimer`), and tap raw packets on every protocol. Permission state is reachable too
   — `player.isOp()`, `player.hasPermission('node')`, `player.getPrefix()`. What a script may touch is a
   **written contract**: `player` and `server` arrive as `ScriptPlayer` / `ScriptServer` wherever they cross
@@ -638,7 +672,9 @@ another.
 | `Region` / `RegionManager` | api / core | Named boxes with rules **in one world**; flags enforced by cancelling the events the core already routes decisions through, and registered only while a region exists |
 | `CustomItem` / `ItemRegistry` | api / core | A name, lore and behaviour on a vanilla item state; a stack carries the **key**, the registry gives that key meaning |
 | `ItemDisplay` | api | The only part of a custom item the client learns — name + lore, legacy-rendered, `null` for an ordinary stack |
+| `ItemCooldowns` | core/item | The half of a cooldown that isn't the item's: when each player last used each key. On the registry, so a hot reload doesn't reset it |
 | `SlotEchoGuard` | core/inventory | Tells a Bedrock client's own inventory move from its echo of one the server made — by timing, since the two are identical in content |
+| `CustomStackTrail` | core/inventory | Carries a stack's identity across a drag that client made and only reported afterwards — the same wire, the same reason, one stack deep |
 | `ScriptEntity` / `ScriptEntities` | core/plugin | That primitive as scripts see it: movement, state, spatial queries and an `onTick` brain, owned per plugin |
 | `EntityTypeIds` / `EntityFlagIds` | network | The entity counterpart of the block palette: canonical type / flag → each edition's wire ids |
 | `CommandManager` / `CommandSender` | core | One command surface for players and the console, gated by `PermissionManager` (groups, wildcards, deny-wins) |
@@ -757,7 +793,8 @@ someone else chose.
 
 ### Storage
 
-The server's small persistent facts — today, which world each player was last in — go through a
+The server's small persistent facts — which world each player was last in, the ban / ip-ban / mute lists,
+the whitelist, and when each player was last seen — go through a
 `DataStore` with two backends. **`flatfile`** is the default and writes the same `key=value` files in
 `data/` it always did: a few kilobytes, editable in any text editor, nothing to run. **`jdbc`** is there
 for whoever wants them in a database instead — a network of servers sharing one account of who is where,
@@ -782,7 +819,10 @@ level is a 400 KB DEFLATE blob, and a table has nothing to offer it.
 A few knobs stay `-D`-only, since they exist to be turned down rather than tuned:
 `-Djedrock.pe.raknetProtocolVersion=N` (default `8` = MCPE 1.1.5, for other client builds),
 `-Djedrock.pe.slotEchoGuardMs=<ms>` (default `750`, `0` = off — how long after the server pushes an
-inventory slot a Bedrock client's report of it is read as a stale echo), and the 1.1.5 block-edit debounce
+inventory slot a Bedrock client's report of it is read as a stale echo),
+`-Djedrock.pe.stackTrailMs=<ms>` (default `750`, `0` = off — how long a custom stack a Bedrock client
+picked up stays claimable by the report that puts it down, which is what carries a named item across a
+drag), and the 1.1.5 block-edit debounce
 windows (`-Djedrock.pe.placeBurstMs`, `placeSameCellMs`, `breakSameCellMs`).
 
 ### Console & diagnostics
@@ -861,9 +901,25 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   was the only honest option before items had names; now that they do, it's simply not wired up yet.
 - **Forms are out on both PE eras** — the legacy clients predate them, so a menu is a window (Java) or a
   list (Bedrock) and nothing richer.
-- **Entities can't be posed finely.** No armor stands in either PE era, no per-entity scale, no limb
-  posing, and head yaw isn't split from body yaw yet. 0.14 renders only the mobs it is old enough to
-  know; anything younger silently doesn't appear.
+- **Entities can't be posed finely.** No armor stands in either PE era, no per-entity scale and no limb
+  posing. Head yaw *is* now separate from body yaw, but how far a neck may turn is the client's opinion
+  and none of them tells us where the limit is — ask for 180° behind and you get whatever that client
+  thinks a neck does. A `PLAYER` puppet can't glance at all, because it borrows a real player's rendering
+  and a real player reports one yaw. On both PE eras a glance is a whole `MoveEntity` (there is no
+  head-only packet on that wire), so a puppet that follows somebody every tick costs a move every tick
+  there and one small packet on Java. 0.14 renders only the mobs it is old enough to know; anything
+  younger silently doesn't appear.
+- **Per-stack state lives exactly as long as the stack does.** A wand's remaining charges persist in a
+  chest, because chests are in the level file; the same wand in a player's backpack loses them at logout,
+  because a player's inventory has never been persisted here at all. Nothing is lost that wasn't already
+  — the wand goes with it — but it is worth knowing before designing around it. For anything that must
+  outlive a session, `storage.forPlayer` is still the right place.
+- **A Bedrock client's drag is rescued one stack at a time.** That client owns its window and reports
+  only an id, a meta and a count, so a custom item's identity is carried across a move by pairing the
+  report that empties a slot with the one that fills another. A straight drag works. A *swap* displaces
+  two stacks and there is only one trail, so one of the two arrives as the ordinary item it is drawn as
+  — as does anything moved faster than the pairing window (`-Djedrock.pe.stackTrailMs`, default 750).
+  Java's window is server-authoritative and has none of this problem.
 - **Scenes cost packets, not ticks.** A static prop runs no logic, but every joining player pays one
   spawn packet for it. A 0.14 client will find that ceiling first — it's the number to watch as a scene
   grows.
@@ -872,9 +928,9 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
 - **A nether looks like an overworld on 0.14.** That era has no dimension packet this project has
   ground-truthed, and it is the client that crashes on a guessed id — so a world switch there is a chunk
   resend and nothing more. The blocks, the biome tint and the spawn are the destination's; the sky, the
-  fog and the compass are not. On **1.1.5** the ChangeDimension packet *is* sent, and is unverified like
-  everything else new on that wire: `-Djedrock.pe.changeDimension=false` falls back to 0.14's behaviour if
-  it turns out to hang a client on a loading screen.
+  fog and the compass are not. On **1.1.5** the ChangeDimension packet *is* sent and does work on a real
+  client; `-Djedrock.pe.changeDimension=false` stays as an escape hatch back to 0.14's behaviour, since a
+  packet that can hang a client on a loading screen is worth a switch even once it is known good.
 - **Travel is API and command only.** `/world tp`, `worlds.send`, or a teleport to a `Location` in another
   world. There is no portal block, and there isn't going to be one: noticing a player standing in a frame
   means checking positions every tick, which is the shape of simulation this server doesn't do.
@@ -883,11 +939,15 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   happens when the ground under it was dug away or the world shrank around it, and this server models no
   falling. On **0.14** the rejoin has the destination's blocks, spawn and biome tint under an overworld
   sky, for the same reason travel there does.
-- **Parts of the PE wire have never met a real client.** Join, movement, chat, edits and inventories
-  have; the newer illusions largely haven't. Everything ground-truthed against PocketMine is byte-tested,
-  but a byte test only proves the encoder agrees with itself — the item-NBT dialect passed its own tests
-  and still failed on a real client. Where a client is the only other judge, read "tested" as "not yet
-  disproven".
+- **On the PE wire, a byte test is not the last word.** The surface itself has been walked through with
+  real clients on both eras and works — join, movement, chat, edits, inventories, the illusion toolkit —
+  apart from the 1.1.5 client bugs listed above, which are the client's and not this server's. What
+  stays true is the epistemics: everything ground-truthed against PocketMine is byte-tested, and a byte
+  test only proves the encoder agrees with itself. The item-NBT dialect passed its own tests and still
+  showed the vanilla name on a real client. So anything *newly* added to that wire is unverified until
+  somebody logs in — which right now means the head/body yaw split (0.14's field order is the
+  serializer's own note rather than a fresh reading of PocketMine) and carrying a custom item's identity
+  through a drag inside a Bedrock client's own window.
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
   runtime world simulation or physics, no 1.13+ flattening. Knockback is excluded for the same reason —
   the server simulates no physics. Custom logic that wants any of these lives in a script as an
@@ -903,18 +963,15 @@ smaller by nature — a missing convenience on a surface that already exists, a 
 verification run, and packaging the whole thing so it can be handed to someone. Nothing here is
 promised; it's the list of what would be worth doing next, roughly in the order it would pay off.
 
-- **Small additions to the script API.** A **cooldown** primitive for custom items (every `onUse` script
-  writes its own today), and per-*stack* state — there is nowhere to put "this particular sword's
-  remaining charges", since a definition is shared by every stack that names it. Regions want a
-  **greeting / farewell** message and a **priority** escape hatch for the case deny-wins can't express:
-  an allow island inside a deny. And the `/pick` storage list should show the names custom items now
-  have, instead of a slot number and a raw state.
+- **Small additions to the script API.** Regions want a **greeting / farewell** message and a
+  **priority** escape hatch for the case deny-wins can't express: an allow island inside a deny. And the
+  `/pick` storage list should show the names custom items now have, instead of a slot number and a raw
+  state.
 - **What worlds still want.** **Deleting** one, which is deliberately absent — unloading leaves the folder,
   and removing it is a decision that belongs to whoever can see the filesystem, not to a script. A
   **portal** is not on this list: noticing a player standing in a frame is the shape of simulation this
   server doesn't do, and travel already has a command, an api and a script call.
-- **Polish on what's already there.** Split **head yaw from body yaw** on puppets (the packets exist; a
-  puppet just can't glance without turning). A **sharper judge** — per-axis movement limits and a real
+- **Polish on what's already there.** A **sharper judge** — per-axis movement limits and a real
   interaction ray-cast, still cheap, still approximate. And the illusion toolkit (sidebar, boss bar,
   menus) wants a **real-client pass on Bedrock 1.1.5**, which is the only way anything on that wire
   becomes true.
@@ -922,10 +979,6 @@ promised; it's the list of what would be worth doing next, roughly in the order 
   decoration is built where it's seen rather than written blind and reloaded.
 - **A scripting reference generated from the contract** rather than kept in step by hand, since
   `plugins/example.js` is currently both the reference and the test.
-- **The parked multiversion framework.** `feature/multiversion-framework` carries a generalized
-  version-dispatch layer plus a JE **1.20.4** target, deliberately not merged onto the legacy path — the
-  1.13+ flattening it implies is a non-goal for the world model as it stands. It stays on the branch
-  until there's a reason strong enough to pay for it.
 
 ---
 

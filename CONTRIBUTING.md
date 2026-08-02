@@ -78,9 +78,11 @@ Four protocols are supported and each has an era-specific handler. If you're tou
   a wiki. Say in the commit where a format came from.
 - **A guess can crash a client.** The older Bedrock clients crash on an unknown id rather than ignoring it,
   which is why 0.14's creative palette is a hard-coded list and why its dimension byte is left alone.
-- **Say what hasn't met a real client.** Plenty of this wire is byte-tested and unverified against a live
-  client; that gets said out loud rather than implied. If yours is unverified, mark it, and where the risk
-  is a hung client, put it behind a flag.
+- **Say what hasn't met a real client.** The wire as it stands has been through a verification pass on
+  both PE eras, so what is written down as working is working; the point of that is only worth anything
+  if the next addition is held to it too. A byte test proves the encoder agrees with itself and nothing
+  more — the item-NBT dialect passed its own and still failed on a client. So if yours is unverified,
+  say so out loud rather than implying it, and where the risk is a hung client, put it behind a flag.
 
 ## Commits
 

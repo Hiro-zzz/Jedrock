@@ -361,6 +361,20 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     }
 
     @Override
+    public void moveEntity(long entityId, double x, double y, double z,
+                           float bodyYaw, float pitch, float headYaw) {
+        sendGameBatch(b -> McpePackets.moveEntity(b, entityId, x, y, z, bodyYaw, pitch, headYaw));
+    }
+
+    @Override
+    public void setEntityHeadYaw(long entityId, double x, double y, double z,
+                                 float bodyYaw, float pitch, float headYaw) {
+        // No head-only packet on this wire: the glance is a move that happens not to move anything, which
+        // is why this is handed the pose it must restate rather than just the angle.
+        moveEntity(entityId, x, y, z, bodyYaw, pitch, headYaw);
+    }
+
+    @Override
     public void removeEntity(long entityId) {
         sendGameBatch(b -> McpePackets.removeEntity(b, entityId));
     }

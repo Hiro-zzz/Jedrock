@@ -160,6 +160,12 @@ public final class EntityDirector {
         if (puppet.getFlags() != 0) {
             conn.setEntityFlags(puppet.getEntityId(), puppet.getFlags());
         }
+        // A spawn packet carries one yaw for both, so a puppet that has glanced arrives facing its body's
+        // way and needs telling. Only when the two differ — which on most puppets they never will.
+        if (puppet.getHeadYaw() != loc.yaw()) {
+            conn.setEntityHeadYaw(puppet.getEntityId(), loc.x(), loc.y(), loc.z(),
+                    loc.yaw(), loc.pitch(), puppet.getHeadYaw());
+        }
         String nameTag = puppet.getNameTag();
         if (nameTag != null && !nameTag.isEmpty()) {
             conn.setEntityNameTag(puppet.getEntityId(), ChatText.toLegacy(nameTag));
@@ -238,12 +244,33 @@ public final class EntityDirector {
     public void movePuppet(CorePuppet puppet, Location to) {
         boolean asPlayer = puppet.getEntityType().isPlayer();
         long entityId = puppet.getEntityId();
+        float headYaw = puppet.getHeadYaw();
         for (CorePlayer p : players.online()) {
             if (asPlayer) {
+                // A player avatar's head and body are one angle on this path — the client reports one yaw
+                // for a real player, and a PLAYER puppet borrows a real player's whole rendering.
                 p.getConnection().moveAvatar(entityId, to.x(), to.y(), to.z(), to.yaw(), to.pitch());
             } else {
-                p.getConnection().moveEntity(entityId, to.x(), to.y(), to.z(), to.yaw(), to.pitch());
+                p.getConnection().moveEntity(entityId, to.x(), to.y(), to.z(),
+                        to.yaw(), to.pitch(), headYaw);
             }
+        }
+    }
+
+    /**
+     * Relay a puppet's glance — the head moving without the body. Called by {@link CorePuppet#setHeadYaw}
+     * and {@link CorePuppet#glanceAt}.
+     */
+    public void relayHeadYaw(CorePuppet puppet) {
+        if (puppet.getEntityType().isPlayer()) {
+            return; // see movePuppet: an avatar has one angle, and it is the one the body is turned to
+        }
+        Location at = puppet.getLocation();
+        long entityId = puppet.getEntityId();
+        float headYaw = puppet.getHeadYaw();
+        for (CorePlayer p : players.online()) {
+            p.getConnection().setEntityHeadYaw(entityId, at.x(), at.y(), at.z(),
+                    at.yaw(), at.pitch(), headYaw);
         }
     }
 

@@ -250,13 +250,13 @@ public final class PluginManager {
                         Context.javaToJS(new ScriptPackets(this, plugin), scope));
                 if (server != null) { // headless tests run without a server (and thus without a world)
                     ScriptableObject.putProperty(scope, "world",
-                            Context.javaToJS(new ScriptWorld(this, server.getDefaultWorld()), scope));
+                            Context.javaToJS(new ScriptWorld(this, server.getDefaultWorld(), scope), scope));
                     ScriptableObject.putProperty(scope, "entities",
                             Context.javaToJS(new ScriptEntities(this, plugin), scope));
                     // Worlds are server-owned like regions: this global is a view onto the server's set,
                     // not a set of the plugin's own, so a reload doesn't unmake a world a script created.
                     ScriptableObject.putProperty(scope, "worlds",
-                            Context.javaToJS(new ScriptWorlds(server, this), scope));
+                            Context.javaToJS(new ScriptWorlds(server, this, scope), scope));
                     // Regions are server-owned (like scenes), so this global isn't torn down with the
                     // plugin — it is a view onto the server's set, not a set of the plugin's own.
                     if (server instanceof JedrockServer js) {
@@ -267,6 +267,12 @@ public final class PluginManager {
                         ScriptableObject.putProperty(scope, "permissions",
                                 Context.javaToJS(new ScriptPermissions(js.getPermissions(), js.getOpList()),
                                         scope));
+                        // Server state too, and for the same reason permissions is: without it a script
+                        // that wants to ban somebody has to build a command string, and one that wants to
+                        // ASK whether they are banned cannot.
+                        ScriptableObject.putProperty(scope, "punishments",
+                                Context.javaToJS(
+                                        new ScriptPunishments(js.getModeration(), server, name), scope));
                     }
                 }
                 // menus needs no server to be built (only open() does, which guards for one), so it is
@@ -276,7 +282,7 @@ public final class PluginManager {
                 // items likewise: a registry needs only the event bus, and a script declares its items at
                 // load time — so this must exist even headless, or a plugin that defines one can't load.
                 ScriptableObject.putProperty(scope, "items",
-                        Context.javaToJS(new ScriptItems(this, plugin, items()), scope));
+                        Context.javaToJS(new ScriptItems(this, plugin, items(), scope), scope));
                 ScriptableObject.putProperty(scope, "storage",
                         Context.javaToJS(new ScriptStorage(storage, name, scope), scope));
                 ScriptableObject.putProperty(scope, "console",
@@ -648,6 +654,12 @@ public final class PluginManager {
 
         /** The other player this was about ({@code hit}), else {@code null}. */
         public Object getTarget() { return context.target(); }
+
+        /**
+         * In an {@code onCooldown} hook, the milliseconds still to wait; 0 everywhere else. The rest of
+         * the context is the refused action's own, so a cooling {@code onBreak} still knows which block.
+         */
+        public double getRemaining() { return context.remainingMillis(); }
     }
 
     /** Open a virtual menu to a player through the server (a no-op returning false without a live server). */

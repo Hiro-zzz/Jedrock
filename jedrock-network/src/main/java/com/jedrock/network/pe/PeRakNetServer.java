@@ -102,13 +102,22 @@ public final class PeRakNetServer {
             // server's own bind port — `address` here is the pinging client, not us.
             int port = PeRakNetServer.this.address.getPort();
             int online = listener != null ? listener.getOnlinePlayerCount() : 0;
+            // The same answer the Java status request assembles, offered to the core the same way — one
+            // listener covers both editions, which is the point of it being a ping rather than a packet.
+            // This query carries no client version, so the protocol reported is the one we speak.
+            com.jedrock.api.ServerPing ping = new com.jedrock.api.ServerPing(
+                    String.valueOf(address), protocol.getProtocolNumber(), true,
+                    properties.motd(), online, properties.maxPlayers());
+            if (listener != null) {
+                listener.onPing(ping);
+            }
             String motd = String.join(";",
                     "MCPE",
-                    properties.motd(),                              // MOTD line 1
+                    ping.getMotd(),                                 // MOTD line 1
                     Integer.toString(protocol.getProtocolNumber()), // MCPE protocol (113 for 1.1.5)
                     protocol.getVersionName(),                      // "1.1.5"
-                    Integer.toString(online),                       // online players
-                    Integer.toString(properties.maxPlayers()),      // max players
+                    Integer.toString(ping.getOnlinePlayers()),      // online players
+                    Integer.toString(ping.getMaxPlayers()),         // max players
                     Long.toString(raknet.getGuid()),                // server GUID
                     properties.name(),                              // MOTD line 2 (world/sub-title)
                     "Survival",                                     // game mode

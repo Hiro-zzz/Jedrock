@@ -382,6 +382,31 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     }
 
     @Override
+    public void moveEntity(JedrockConnection c, long entityId, double x, double y, double z,
+                           float bodyYaw, float pitch, float headYaw) {
+        double bodyY = wornProps.contains(entityId) ? y - propOffset(entityId) : y;
+        send(c, CB_ENTITY_TELEPORT, b -> {
+            ByteBufUtils.writeVarInt(b, (int) entityId);
+            b.writeInt(fixed(x)); b.writeInt(fixed(bodyY)); b.writeInt(fixed(z));
+            b.writeByte(angle(bodyYaw)); b.writeByte(angle(pitch));
+            b.writeBoolean(true);                            // on ground
+        });
+        sendHeadRotation(c, entityId, headYaw);
+    }
+
+    @Override
+    public void setEntityHeadYaw(JedrockConnection c, long entityId, double x, double y, double z,
+                                 float bodyYaw, float pitch, float headYaw) {
+        sendHeadRotation(c, entityId, headYaw);
+    }
+
+    /** Entity Head Look (0x19 at 1.8): entity id (varint) + one byte-angle. The whole glance. */
+    private static void sendHeadRotation(JedrockConnection c, long entityId, float headYaw) {
+        send(c, CB_ENTITY_HEAD_ROTATION,
+                b -> { ByteBufUtils.writeVarInt(b, (int) entityId); b.writeByte(angle(headYaw)); });
+    }
+
+    @Override
     public void showArmor(JedrockConnection c, long entityId,
                           int helmet, int chestplate, int leggings, int boots) {
         // At 1.8 the Entity Equipment slots run 0 = held, then 1-4 feet-to-head. (1.9 inserted the
@@ -503,7 +528,7 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
             b.writeByte(angle(yaw)); b.writeByte(angle(pitch));
             b.writeBoolean(true);                            // on ground
         });
-        send(c, CB_ENTITY_HEAD_ROTATION, b -> { ByteBufUtils.writeVarInt(b, (int) entityId); b.writeByte(angle(yaw)); });
+        sendHeadRotation(c, entityId, yaw); // an avatar's head and body are one angle: the client reports one
     }
 
     @Override

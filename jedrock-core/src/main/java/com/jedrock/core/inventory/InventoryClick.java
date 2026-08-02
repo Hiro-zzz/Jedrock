@@ -17,6 +17,8 @@ public final class InventoryClick {
     public static void normal(Container c, Cursor cur, int slot, boolean right) {
         int sState = c.stateAt(slot);
         int sCount = c.countAt(slot);
+        String sKey = c.customKeyAt(slot);
+        String sData = c.customDataAt(slot);
 
         if (cur.isEmpty()) {
             if (sState == 0) {
@@ -24,10 +26,10 @@ public final class InventoryClick {
             }
             if (right) {
                 int take = (sCount + 1) / 2;          // pick up half (rounded up)
-                cur.set(sState, take);
-                c.set(slot, sState, sCount - take);
+                cur.set(sState, take, sKey, sData);   // a split leaves both halves the same item
+                c.setCount(slot, sCount - take);
             } else {
-                cur.set(sState, sCount);              // pick up the whole stack
+                cur.set(sState, sCount, sKey, sData); // pick up the whole stack
                 c.clear(slot);
             }
             return;
@@ -36,24 +38,27 @@ public final class InventoryClick {
         // Cursor holds items.
         if (sState == 0) {                             // place into an empty slot
             if (right) {
-                c.set(slot, cur.state(), 1);
-                cur.set(cur.state(), cur.count() - 1);
+                c.set(slot, cur.state(), 1, cur.customKey(), cur.customData());
+                cur.setCount(cur.count() - 1);
             } else {
-                c.set(slot, cur.state(), cur.count());
+                c.set(slot, cur.state(), cur.count(), cur.customKey(), cur.customData());
                 cur.clear();
             }
-        } else if (sState == cur.state()) {            // same item — merge up to a full stack
+        } else if (sState == cur.state() && c.sameStack(slot, cur.customKey(), cur.customData())) {
+            // The same item in every sense that matters — merge up to a full stack. A named sword does
+            // not merge into an ordinary one drawn the same way, nor a spent charge into a full one:
+            // those fall through to the swap below, which is what they look like to a player.
             int space = Container.MAX_STACK - sCount;
             if (space <= 0) {
                 return; // slot already full — a no-op (don't swap identical items)
             }
             int move = right ? 1 : Math.min(space, cur.count());
             move = Math.min(move, Math.min(space, cur.count()));
-            c.set(slot, sState, sCount + move);
-            cur.set(cur.state(), cur.count() - move);
+            c.setCount(slot, sCount + move);
+            cur.setCount(cur.count() - move);
         } else {                                       // different item — swap slot and cursor
-            c.set(slot, cur.state(), cur.count());
-            cur.set(sState, sCount);
+            c.set(slot, cur.state(), cur.count(), cur.customKey(), cur.customData());
+            cur.set(sState, sCount, sKey, sData);
         }
     }
 
@@ -75,9 +80,11 @@ public final class InventoryClick {
         if (state == 0) {
             return;
         }
-        while (count > 0 && dst.give(state, from, to) >= 0) {
+        String key = src.customKeyAt(slot);
+        String data = src.customDataAt(slot);
+        while (count > 0 && dst.give(state, from, to, key, data) >= 0) {
             count--;
         }
-        src.set(slot, state, count); // whatever didn't fit stays
+        src.setCount(slot, count); // whatever didn't fit stays, as the item it already was
     }
 }
