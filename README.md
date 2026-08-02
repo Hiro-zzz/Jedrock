@@ -413,8 +413,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
 
 - ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
   backend, not the compiled core — see the **[scripting reference](docs/SCRIPTING.md)**. A script gets
-  fourteen globals — `server` / `events` / `scheduler` /
-  `commands` / `packets` / `world` / `worlds` / `entities` / `regions` / `items` / `permissions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
+  sixteen globals — `server` / `events` / `scheduler` /
+  `commands` / `packets` / `world` / `worlds` / `entities` / `regions` / `items` / `permissions` / `menus` / `punishments` / `http` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
   name (40 of them, listed by `events.names()`), at a **priority** of its choosing — which is what lets a
   script overrule the core's own rules, since regions and item behaviours are enforced at `HIGH` and a

@@ -96,10 +96,36 @@ public record ServerProperties(
      * @param enabled       whether {@code plugins/} is read at all — off is a server with no scripting
      * @param hotReload     whether a saved edit is picked up without a restart
      * @param reloadMillis  how often the plugins folder is polled for changes, when hot reload is on
+     * @param http          whether scripts may reach the network, and how far
      */
-    public record Plugins(boolean enabled, boolean hotReload, long reloadMillis) {
+    public record Plugins(boolean enabled, boolean hotReload, long reloadMillis, Http http) {
         public static Plugins defaults() {
-            return new Plugins(true, true, 1000L);
+            return new Plugins(true, true, 1000L, Http.defaults());
+        }
+    }
+
+    /**
+     * Outbound HTTP for scripts — the {@code http} global.
+     *
+     * <p><b>Off by default</b>, and that is the interesting decision. Everything else a plugin can do
+     * stays inside this process; this is the one capability that lets a script talk to the outside world,
+     * and therefore the one that can carry what happens on the server somewhere else. Turning it on is a
+     * choice the person running the server should make deliberately, not one they discover a plugin made
+     * for them.
+     *
+     * @param enabled     whether the {@code http} global exists at all
+     * @param allowedHosts comma-separated hosts a request may go to; empty means any. A host matches
+     *                     itself and its subdomains, so {@code discord.com} covers
+     *                     {@code discord.com} and {@code api.discord.com} but not {@code notdiscord.com}
+     * @param timeoutMillis how long one request may take before it is abandoned
+     * @param maxResponseBytes most bytes a response body may be, so a large or hostile reply cannot
+     *                     decide how much memory this process uses
+     * @param maxConcurrent how many requests may be in flight at once across every plugin
+     */
+    public record Http(boolean enabled, String allowedHosts, long timeoutMillis,
+                       int maxResponseBytes, int maxConcurrent) {
+        public static Http defaults() {
+            return new Http(false, "", 10_000L, 1024 * 1024, 8);
         }
     }
 

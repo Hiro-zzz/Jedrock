@@ -580,6 +580,9 @@ public class JedrockServer implements Server {
         // Load script plugins before ServerStartEvent, so a plugin can subscribe to it. A background
         // watcher (off the game-loop thread — the poll blocks on disk I/O) hot-reloads a saved edit.
         if (config.plugins().enabled()) {
+            // Before loadAll: a plugin that wants to call out on its very first line must find the global
+            // already there. Does nothing unless plugins.http.enabled says otherwise.
+            plugins.enableHttp(config.plugins().http());
             plugins.loadAll();
             if (config.plugins().hotReload()) {
                 plugins.startWatching(config.plugins().reloadMillis());
@@ -628,6 +631,9 @@ public class JedrockServer implements Server {
         // (their onDisable runs, their listeners are removed) before the world and loop go away.
         eventBus.post(new ServerStopEvent());
         plugins.unloadAll();
+        // After unloadAll, so an onDisable may still fire its last webhook; the pool is daemon-threaded,
+        // so an in-flight request that outlives this cannot hold the process open either way.
+        plugins.closeHttp();
         // After onDisable, so a script's last-moment write is included.
         plugins.storage().saveIfDirty(pluginStorageFile);
         scenes.saveIfDirty(sceneFile());

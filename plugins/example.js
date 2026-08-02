@@ -56,6 +56,9 @@
 //                `complete(player, args)` returns tab-completion candidates (Java clients) — see /kit.
 //   packets    — the raw cross-edition wire tap: onReceive(fn) / onSend(fn) see every packet
 //                ({getId, getBytes, getLength, getProtocol, getPlayer, cancel}); send(player, id, bytes) injects.
+//   http       — the only way out of this process: get / post / put / del / request, all ASYNCHRONOUS.
+//                Defined only when plugins.http.enabled=true, so check `typeof http !== 'undefined'`.
+//                A failure is a result (res.isOk() / res.getError()), not a throw. See /webhook.
 //   console    — console.log / .warn / .error, prefixed with this file's name.
 //
 // Java enums are reached through `Packages`; shortcuts up front:
@@ -516,6 +519,47 @@ commands.register('zone', function (player, args) {
     permissions.forPlayer(player).add(zone.getBypassPermission('build'));
     player.sendMessage('{gray}You are exempt from its build rule; others are not.');
     player.sendMessage('{gray}Try breaking a block inside it. {white}/region info demo{gray} lists the nodes.');
+});
+
+// /webhook — the one capability that leaves this process. Off unless plugins.http.enabled=true, and the
+// global is then simply absent, which is why this checks rather than try/catches.
+//
+// Everything here is ASYNCHRONOUS and there is no synchronous form to reach for. That is deliberate: every
+// script callback runs under one shared lock and ServerTick is posted from the game-loop thread, so a call
+// that waited for a reply would freeze every other plugin — and from a tick handler, the tick. A webhook
+// having a slow afternoon would look exactly like a laggy server.
+//
+// The callback comes back on an HTTP thread, not the loop. Everything on this API is safe to call from
+// one; if you want the loop, hand it to scheduler.run.
+if (typeof http === 'undefined') {
+    console.log('http is off (plugins.http.enabled=false) — /webhook will say so');
+}
+
+commands.register('webhook', function (player, args) {
+    if (typeof http === 'undefined') {
+        player.sendMessage('{red}Networking is off. {gray}Set plugins.http.enabled=true to try this.');
+        return;
+    }
+    var url = args.length > 0 ? args[0] : 'https://example.com/hook';
+
+    // A JS object body goes as JSON, with the content type set for you unless you set one.
+    http.post(url, { content: player.getName() + ' pressed the button' }, function (res) {
+        if (res.isOk()) {
+            player.sendMessage('{green}Delivered {gray}(' + res.getStatus() + ')');
+        } else {
+            // A timeout, a host that isn't on the allowlist and a 500 all land here — getError() is set
+            // for the first two and null for the third, because "didn't arrive" and "arrived, refused"
+            // are different things worth telling apart.
+            player.sendMessage('{red}Failed: {gray}' + (res.getError() || 'HTTP ' + res.getStatus()));
+        }
+    });
+
+    http.get(url, function (res) {
+        var parsed = res.json();          // null if the body isn't JSON — not an error
+        console.log('GET ' + url + ' → ' + res.getStatus()
+            + ' type=' + res.getHeader('Content-Type')
+            + (parsed ? ' (parsed as JSON)' : ''));
+    });
 });
 
 // /antispam — the shape the `punishments` global exists for. Note what a command string could not do:

@@ -4,6 +4,32 @@ All notable changes to Jedrock are recorded here. This is an internal project lo
 loosely follows [Keep a Changelog](https://keepachangelog.com/). The project is pre-1.0 and
 unstable — anything may change between entries.
 
+## [Unreleased]
+
+### Added
+
+- **Outbound HTTP for scripts — the `http` global.** Until now everything a plugin could do stayed inside
+  this process; this is the one capability that reaches out, which is why it is **off by default**
+  (`plugins.http.enabled`) and why the global is simply *absent* when off rather than present and throwing —
+  a script can then check `typeof http === 'undefined'` and degrade.
+
+  **There is no synchronous form, deliberately.** Every script callback here runs under one shared lock and
+  `ServerTickEvent` is posted from the game-loop thread, so a call that waited for a reply would hold up
+  every other plugin and, from a tick handler, the tick itself. A webhook having a slow afternoon would
+  present as a laggy server with nothing in the logs pointing at the cause. Given a pleasant API and one
+  that cannot do that, this takes the second: a request is fired and forgotten, or fired with a callback,
+  and there is nothing to wait on.
+
+  Bounded the way the packet guards are, and for the same reason — the other end decides the timing and the
+  size: a host allowlist (a host covers its subdomains, matched on a label boundary so `discord.com` does
+  not also allow `notdiscord.com`), a timeout, a ceiling on the body, and a cap on requests in flight past
+  which a request is refused rather than queued. A failure is a *result* (`isOk()` / `getError()`) rather
+  than an exception, since a timeout, a refused host and a 500 all have to be handled anyway. A reply that
+  lands after its plugin has been reloaded is dropped.
+
+  Note what did **not** change: the script sandbox. Scripts never name a `java.net` class — they call a
+  `com.jedrock` object that does — so the ClassShutter allowlist stayed exactly as narrow as it was.
+
 ## [0.2.1] — 2026-08-02
 
 ### Fixed

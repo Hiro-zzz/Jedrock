@@ -99,6 +99,28 @@ public final class PluginManager {
 
     /** What plugins keep between restarts; shared by every script, bucketed per plugin name. */
     private final PluginStorage storage = new PluginStorage();
+    /** Outbound HTTP, or null when {@code plugins.http.enabled} is off — which is the default. */
+    private volatile ScriptHttpClient httpClient;
+
+    /**
+     * Turn on the {@code http} global. Called by the server once it has read its config; a manager nobody
+     * calls this on (a headless test) simply has no such global, which is the same state an operator who
+     * left it off gets.
+     */
+    public void enableHttp(com.jedrock.api.config.ServerProperties.Http settings) {
+        if (httpClient == null && settings != null && settings.enabled()) {
+            httpClient = new ScriptHttpClient(settings);
+        }
+    }
+
+    /** Release the HTTP pool. Called at shutdown, beside everything else the manager owns. */
+    public void closeHttp() {
+        ScriptHttpClient open = httpClient;
+        httpClient = null;
+        if (open != null) {
+            open.close();
+        }
+    }
 
     public PluginManager(EventBus eventBus, Server server, Scheduler scheduler, CommandManager commandManager,
                          PacketTapRegistry packetTaps, Path pluginsDir) {
@@ -287,6 +309,12 @@ public final class PluginManager {
                         Context.javaToJS(new ScriptStorage(storage, name, scope), scope));
                 ScriptableObject.putProperty(scope, "console",
                         Context.javaToJS(new ScriptConsole(name), scope));
+                // Defined only when the operator turned it on, rather than defined and throwing: a script
+                // can then check `typeof http === 'undefined'` and degrade, which beats a stack trace.
+                if (httpClient != null) {
+                    ScriptableObject.putProperty(scope, "http",
+                            Context.javaToJS(new ScriptHttp(this, plugin, httpClient), scope));
+                }
 
                 // Define setTimeout/setInterval on top of `scheduler`, in its own eval so the script's own
                 // line numbers stay correct, then run the script itself.
@@ -398,6 +426,36 @@ public final class PluginManager {
             }
         } catch (RuntimeException e) {
             LOGGER.error("Plugin " + plugin.name() + " listener threw: " + e.getMessage());
+        } finally {
+            scriptLock.unlock();
+        }
+    }
+
+    /**
+     * Invoke a one-argument callback that arrives from somewhere other than an event — today, an HTTP
+     * reply landing on its own thread. Same lock, context and swallow-and-log as {@link #callHandler}.
+     *
+     * <p>The check that matters is the first one: a reply can arrive after its plugin has been reloaded
+     * or unloaded, and running a callback belonging to a scope that has been thrown away would either
+     * throw or, worse, quietly edit the state of a plugin that no longer exists. A late reply for a
+     * plugin that has moved on is dropped, which is the only honest thing to do with it.
+     */
+    void callScriptCallback(ScriptPlugin plugin, Function callback, Object argument) {
+        scriptLock.lock();
+        try {
+            if (plugins.get(plugin.name()) != plugin) {
+                LOGGER.debug(() -> "Dropping a callback for " + plugin.name() + " — it has been reloaded");
+                return;
+            }
+            Context cx = contextFactory.enterContext();
+            try {
+                Scriptable scope = plugin.scope();
+                callback.call(cx, scope, scope, new Object[]{Context.javaToJS(argument, scope)});
+            } finally {
+                Context.exit();
+            }
+        } catch (RuntimeException e) {
+            LOGGER.error("Plugin " + plugin.name() + " callback threw: " + e.getMessage());
         } finally {
             scriptLock.unlock();
         }
