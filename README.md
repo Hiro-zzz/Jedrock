@@ -743,6 +743,17 @@ two things from that same build: **`jedrock.jar` attached to the release**, for 
 run a server, and **the modules published to GitHub Packages**, for anything that wants to build against
 `jedrock-api`. One build, so the two can never disagree about what they are.
 
+> **Run the latest release, not an older one and not `main`.** This is a pre-1.0 project and the honest
+> reason is not that new versions have more features: it is that they have fewer *defects*. What gets
+> fixed between releases is disproportionately the invisible kind — a race that only shows up under a hot
+> reload, a section of world that could be read as air, a leak that costs you memory for every player who
+> has ever logged in, a duplication bug in an inventory. Those cost you nothing to pick up and are
+> genuinely awkward to live with, so an old release is not a "stable" one here; it is one with more of
+> them still in it. Read the [changelog](CHANGELOG.md) if you want to know which.
+>
+> A branch build is the other end of that. `test` is where things are tried and may be broken on purpose;
+> `main` is clean but is whatever landed most recently, without the release's build and test run behind it.
+
 To depend on the api, add the repository and the module (GitHub Packages requires authentication even to
 read a public package — that is their policy, not this project's, so you will need a token with
 `read:packages` in your `~/.m2/settings.xml`):
@@ -756,7 +767,7 @@ read a public package — that is their policy, not this project's, so you will 
 <dependency>
     <groupId>com.jedrock</groupId>
     <artifactId>jedrock-api</artifactId>
-    <version>0.2.0</version>
+    <version>0.2.1</version>
 </dependency>
 ```
 

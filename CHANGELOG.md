@@ -4,44 +4,10 @@ All notable changes to Jedrock are recorded here. This is an internal project lo
 loosely follows [Keep a Changelog](https://keepachangelog.com/). The project is pre-1.0 and
 unstable — anything may change between entries.
 
-## [Unreleased]
-
-### Added
-
-- **Moderation: bans, ip-bans, mutes, a whitelist, and the commands to run them.** `/ban`, `/ban-ip`,
-  `/kick`, `/mute`, `/pardon`, `/banlist`, `/whitelist`, `/seen` and `/playerinfo`. `/kick` is the one that
-  was simply missing — the console has had it since it existed, so an operator standing next to the problem
-  had to go and find a terminal.
-
-  Almost none of this needed new machinery. A ban **is** a cancelled `PlayerLoginEvent`, which is what that
-  event was built for and says so in its own documentation, and a mute is a suppressed chat line — so the
-  two decisions sit at points the core already routed through, and a script can watch or overrule either at
-  a higher priority like any other rule here. A punishment carries an expiry, which is why there is no
-  `/tempban`: `/ban alice 2d spam` is the same command. Expiry is lazy — a lapsed entry reads as absent and
-  is dropped the next time the file is written, because a punishment running out is not an event anybody is
-  waiting for.
-
-  Two decisions worth stating. **Targets are names**, matching `ops.txt`: this server has no Mojang
-  authentication at all, a 0.14 client picks whatever name it likes, and a ban has to work on somebody who
-  has never connected — so a uuid would be a weaker identity here, not a stronger one. The cost is that a
-  rename walks around a ban, which is what `/ban-ip` is for and why it exists despite being the blunter
-  instrument. And this goes through **`DataStore`** rather than into its own text file, unlike `ops.txt` and
-  `permissions.txt`: those two stay text because an administrator edits them by hand, while a ban list is
-  written by commands and read by the gate — and it is the one piece of server state whose obvious next want
-  is sharing, which is the case that storage layer exists for. It inherits the jdbc backend for nothing.
-
-  A mute covers `/me`, `/msg` and `/say` as well as plain chat, because a rule anybody steps around in one
-  keystroke is not a rule. The whitelist waives itself for operators — one that can lock the administrator
-  out of their own server the moment they enable it is a foot-gun — but a ban is not waived, since a ban is
-  a decision somebody made and the console can always lift it.
-
-- **The `punishments` script global.** `ban` / `banIp` / `mute` / `kick` / `pardon` / `isBanned` /
-  `isMuted` / `info` / `list`, plus the whitelist and `lastSeen`. Here for the reason the `permissions`
-  global was: without it a script had to build a `'/ban ' + name + ' ' + reason` string for
-  `dispatchCommand`, which breaks the moment a reason contains a space and cannot answer a question at all —
-  an anti-spam script wants to *ask* whether somebody is already muted.
+## [0.2.1] — 2026-08-02
 
 ### Fixed
+
 
 - **A script could not overrule a region, though the docs said it could.** The README has always described
   regions as enforced by cancelling the events the core already routes decisions through, "so a script can
@@ -82,7 +48,63 @@ unstable — anything may change between entries.
   piece's *state*, which was all the snapshot held — so refusing to let someone take off an enchanted
   helmet gave them an ordinary one.
 
+### Changed
+
+- **Docs: three claims that had gone stale.** The Known-limits entry saying large parts of the PE wire had
+  never met a live client was true when it was written and had not been for a while — both eras have been
+  walked through with real clients and work, apart from the protocol-113 client's own bugs, which are listed
+  separately. The two remaining "unverified" marks went the same way: 1.1.5's ChangeDimension and the
+  item-NBT dialect on Java have both been in front of a client since. What survives is the reasoning rather
+  than the verdict — a byte test only proves the encoder agrees with itself, which item NBT demonstrated by
+  passing its own and still showing the vanilla name — so the caveat now names what is actually new instead
+  of hanging over work that has been checked. A stale caveat costs more than none: it teaches the reader to
+  discount the real ones.
+
+- **The parked `feature/multiversion-framework` branch is gone**, and the README entry pointing at it with
+  it. Modern versions are still out of scope for the reason they always were — 1.13+ flattening inverts the
+  `(id << 4) | meta` world model everything here is built on — which the Multiversion section says without
+  needing a branch to point at.
+
+- **The README says which build to run.** Not the newest for its features, but for its *defects*: what gets
+  fixed between releases here is disproportionately the invisible kind — a race under a hot reload, a
+  section of world readable as air, a leak per player who ever logged in, a duplication bug in an inventory.
+
 ### Added
+
+
+- **Moderation: bans, ip-bans, mutes, a whitelist, and the commands to run them.** `/ban`, `/ban-ip`,
+  `/kick`, `/mute`, `/pardon`, `/banlist`, `/whitelist`, `/seen` and `/playerinfo`. `/kick` is the one that
+  was simply missing — the console has had it since it existed, so an operator standing next to the problem
+  had to go and find a terminal.
+
+  Almost none of this needed new machinery. A ban **is** a cancelled `PlayerLoginEvent`, which is what that
+  event was built for and says so in its own documentation, and a mute is a suppressed chat line — so the
+  two decisions sit at points the core already routed through, and a script can watch or overrule either at
+  a higher priority like any other rule here. A punishment carries an expiry, which is why there is no
+  `/tempban`: `/ban alice 2d spam` is the same command. Expiry is lazy — a lapsed entry reads as absent and
+  is dropped the next time the file is written, because a punishment running out is not an event anybody is
+  waiting for.
+
+  Two decisions worth stating. **Targets are names**, matching `ops.txt`: this server has no Mojang
+  authentication at all, a 0.14 client picks whatever name it likes, and a ban has to work on somebody who
+  has never connected — so a uuid would be a weaker identity here, not a stronger one. The cost is that a
+  rename walks around a ban, which is what `/ban-ip` is for and why it exists despite being the blunter
+  instrument. And this goes through **`DataStore`** rather than into its own text file, unlike `ops.txt` and
+  `permissions.txt`: those two stay text because an administrator edits them by hand, while a ban list is
+  written by commands and read by the gate — and it is the one piece of server state whose obvious next want
+  is sharing, which is the case that storage layer exists for. It inherits the jdbc backend for nothing.
+
+  A mute covers `/me`, `/msg` and `/say` as well as plain chat, because a rule anybody steps around in one
+  keystroke is not a rule. The whitelist waives itself for operators — one that can lock the administrator
+  out of their own server the moment they enable it is a foot-gun — but a ban is not waived, since a ban is
+  a decision somebody made and the console can always lift it.
+
+- **The `punishments` script global.** `ban` / `banIp` / `mute` / `kick` / `pardon` / `isBanned` /
+  `isMuted` / `info` / `list`, plus the whitelist and `lastSeen`. Here for the reason the `permissions`
+  global was: without it a script had to build a `'/ban ' + name + ' ' + reason` string for
+  `dispatchCommand`, which breaks the moment a reason contains a space and cannot answer a question at all —
+  an anti-spam script wants to *ask* whether somebody is already muted.
+
 
 - **Per-stack state — what happened to *this* sword, not to every sword named like it.** A definition is
   shared by every stack that carries its key, which left nowhere to put "this particular wand has one
