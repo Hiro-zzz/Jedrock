@@ -7,7 +7,7 @@ package com.jedrock.api;
 public final class Jedrock {
 
     public static final String NAME = "Jedrock";
-    public static final String VERSION = "0.2.1";
+    public static final String VERSION = "0.2.2-SNAPSHOT";
 
     // Core philosophy markers
     public static final boolean LIGHTWEIGHT = true;
