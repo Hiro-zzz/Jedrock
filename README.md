@@ -979,10 +979,6 @@ promised; it's the list of what would be worth doing next, roughly in the order 
   decoration is built where it's seen rather than written blind and reloaded.
 - **A scripting reference generated from the contract** rather than kept in step by hand, since
   `plugins/example.js` is currently both the reference and the test.
-- **The parked multiversion framework.** `feature/multiversion-framework` carries a generalized
-  version-dispatch layer plus a JE **1.20.4** target, deliberately not merged onto the legacy path — the
-  1.13+ flattening it implies is a non-goal for the world model as it stands. It stays on the branch
-  until there's a reason strong enough to pay for it.
 
 ---
 
