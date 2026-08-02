@@ -282,6 +282,20 @@ final class McpePackets {
     }
 
     /** Despawn any entity (an avatar, a puppet or a prop) by runtime id. */
+    /**
+     * SetTime (0x0a): one signed VarInt, the time of day. Ground truth PocketMine-MP at 1.7dev-27
+     * (CURRENT_PROTOCOL 113), whose {@code encodePayload} is a single {@code putVarInt($this->time)} —
+     * and PMMP's {@code putVarInt} is the zigzag form, which is this codebase's writeSignedVarInt.
+     *
+     * <p>There is no "and keep counting" flag on this wire; the client advances the sky on its own and
+     * is corrected the next time it is told. Freezing therefore has to be re-sent, unlike on Java where
+     * a negative time says it once.
+     */
+    static void setTime(ByteBuf b, long timeOfDay) {
+        ByteBufUtils.writeVarInt(b, ID_SET_TIME);
+        ByteBufUtils.writeSignedVarInt(b, (int) timeOfDay);
+    }
+
     static void removeEntity(ByteBuf b, long entityId) {
         ByteBufUtils.writeVarInt(b, ID_REMOVE_ENTITY);
         ByteBufUtils.writeSignedVarLong(b, entityId);

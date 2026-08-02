@@ -269,6 +269,8 @@ world.getChest(x, y, z)           world.hasChest(x, y, z)
 world.playSound(name, x, y, z[, volume, pitch])
 world.spawnParticle(name, x, y, z[, count, spread])
 world.getWeather()                world.setWeather('rain' | 'thunder' | 'clear')
+world.getTime()                   world.setTime(ticks)        // 0 sunrise, 6000 noon, 18000 midnight
+world.isDaylightCycle()           world.setDaylightCycle(false)   // hold the sky where it is
 ```
 
 An edit lands in the shared world and reaches every client in it, cross-edition, as a single block update

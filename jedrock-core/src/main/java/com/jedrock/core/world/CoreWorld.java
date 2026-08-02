@@ -471,6 +471,9 @@ public final class CoreWorld implements World {
         if (weather != com.jedrock.api.world.Weather.CLEAR) {
             player.getConnection().sendWeather(weather);
         }
+        // …and into the same time of day. Sent unconditionally, unlike the weather: a client starts its
+        // own clock at whatever the join packets implied, so "the default" is not a thing we can skip.
+        sendTimeTo(player);
     }
 
     public void removePlayer(Player player) {
@@ -521,6 +524,69 @@ public final class CoreWorld implements World {
         this.weather = weather;
         for (Player p : players) {
             p.getConnection().sendWeather(weather);
+        }
+    }
+
+    // ===== Time of day =====
+    //
+    // Scenery, exactly like the weather above, and for the same reason: the server holds a number and the
+    // client animates the sky between updates. Nothing here ticks to make a day pass — the clients do it,
+    // which is why a world with no players costs nothing to keep the time of.
+
+    /** A Minecraft day, in ticks. Every edition here divides one this way; 0.14 rescales on the wire. */
+    public static final long DAY_TICKS = 24000L;
+
+    private volatile long timeOfDay;
+    private volatile boolean daylightCycle = true;
+    /** When the time was last set, so {@link #getTime} can answer what the clients are currently showing. */
+    private volatile long timeSetAtNanos = System.nanoTime();
+
+    @Override
+    public long getTime() {
+        if (!daylightCycle) {
+            return timeOfDay;
+        }
+        // The clients have been advancing it since we last told them, so the honest answer is what they
+        // are showing rather than what was last sent. 20 ticks a second, the same rate the loop runs at.
+        long elapsedTicks = (System.nanoTime() - timeSetAtNanos) / 50_000_000L;
+        return Math.floorMod(timeOfDay + elapsedTicks, DAY_TICKS);
+    }
+
+    @Override
+    public void setTime(long timeOfDay) {
+        this.timeOfDay = Math.floorMod(timeOfDay, DAY_TICKS);
+        this.timeSetAtNanos = System.nanoTime();
+        broadcastTime();
+    }
+
+    @Override
+    public boolean isDaylightCycle() {
+        return daylightCycle;
+    }
+
+    @Override
+    public void setDaylightCycle(boolean cycling) {
+        if (cycling == daylightCycle) {
+            return;
+        }
+        // Freezing has to pin the clock where the clients have it, not where it was last set, or the sky
+        // would jump backwards at the moment it stopped.
+        this.timeOfDay = getTime();
+        this.timeSetAtNanos = System.nanoTime();
+        this.daylightCycle = cycling;
+        broadcastTime();
+    }
+
+    /** Tell one client the time — what a joining player needs, since they missed every broadcast. */
+    public void sendTimeTo(Player player) {
+        player.getConnection().sendTime(getTime(), daylightCycle);
+    }
+
+    private void broadcastTime() {
+        long now = timeOfDay;
+        boolean cycling = daylightCycle;
+        for (Player p : players) {
+            p.getConnection().sendTime(now, cycling);
         }
     }
 }

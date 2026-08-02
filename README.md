@@ -197,7 +197,7 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   Bedrock is handed an `AvailableCommands` manifest so its client parses the line and sends it back. The
   built-in set: `/help [cmd]`, `/list`, `/tps`, `/say`, `/me`, `/msg`, `/gamemode`, `/tp`, `/tphere`,
   `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/op`, `/deop`, `/perm`, `/region`, `/world`, `/pick`,
-  `/puppet`, `/hologram`, plus the [moderation set](#moderation). A deliberately minimal **survival inventory** (36 slots)
+  `/puppet`, `/hologram`, `/pose`, `/time`, `/about`, plus the [moderation set](#moderation). A deliberately minimal **survival inventory** (36 slots)
   tracks only what a survival player mines and places: mining a block drops it into the hotbar, placing
   consumes it, and the changed slot is pushed live so the HUD refreshes. On PE 1.1.5 the player window is
   serialized PMMP-exact (45 slots + a 9-entry hotbar-link array), without which mined items filled storage
@@ -440,7 +440,7 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   bucketed per plugin name, so two scripts can both keep a `count` without meeting, and editing a script
   never costs it its memory. Written like the world is: a compact DEFLATE file (`plugin-storage.jdb`),
   atomic temp-and-move, a dirty flag that skips rewriting an untouched store, flushed by the same autosave
-  and once more at shutdown. Try `/seen` and `/forget` in `plugins/example.js`. It also closed a real
+  and once more at shutdown. Try `/visits` and `/forget` in `plugins/example.js`. It also closed a real
   scripting-layer bug on the way: a `String` returned *from Java* used to reach scripts wrapped, and a
   wrapper is never `===` a JS literal, so `player.getName() === 'Alice'` was silently false. Script scopes
   now hand Java strings, numbers and booleans over as JS primitives — which the command-args path had
@@ -465,6 +465,21 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   its equipment slots differently before and after 1.9, while both PE eras dress the avatar with a single
   `MobArmorEquipment`. Visual only — no protection is simulated. Try `/armor`.
 
+- ✅ **Time of day, cross-edition.** `/time set day|noon|night|midnight|<ticks>`, `add`, `query`, and
+  `freeze` / `resume` — or `world.setTime(6000)` from a script. Scenery in exactly the sense the weather
+  below is: the server holds a number and tells clients what it is, and the **client** animates the sun
+  between updates, so a day passes here with nothing on this side ticking to make it. Reading the time
+  answers what the clients are showing rather than what was last sent. Each world keeps its own hour, and
+  arriving in one means arriving at its hour. Freezing is the client's own mechanism where it has one —
+  Java reads a negative time as "stop counting", 0.14 has a flag — and 1.1.5, which has neither, is simply
+  told again. Not persisted, like the weather: a restart starts the morning over.
+- ✅ **Build a scene where you can see it — `/pose`.** Props go where a real block cannot: fractional
+  positions, unsupported, overlapping. Authoring that in a script means typing three coordinates, saving,
+  watching the reload and finding the lantern half inside the wall. `/pose new <name>`, then `block`,
+  `item`, `text` and `mob` drop props where you are standing, `nudge` and `rotate` adjust them, `undo`
+  takes one back, and `save` hands the arrangement to the same scene store a script's `group.save(name)`
+  writes — so the server stands it back up at every boot with no plugin involved. A scene authored by hand
+  and one authored in code are the same object.
 - ✅ **Weather, cross-edition.** `/weather clear|rain|thunder` (or `world.setWeather('rain')` from a
   script) changes the sky for every player — JE via Change Game State (+ the darkness fade for
   thunder), both PE eras via the LevelEvent 3001-series. Pure scenery: no timer, no simulation; a late
@@ -986,8 +1001,6 @@ promised; it's the list of what would be worth doing next, roughly in the order 
   interaction ray-cast, still cheap, still approximate. And the illusion toolkit (sidebar, boss bar,
   menus) wants a **real-client pass on Bedrock 1.1.5**, which is the only way anything on that wire
   becomes true.
-- **Authoring tools.** A `/pose` in-game editor that exports a scene as a committable file, so
-  decoration is built where it's seen rather than written blind and reloaded.
 - **A scripting reference generated from the contract** rather than kept in step by hand, since
   `plugins/example.js` is currently both the reference and the test.
 

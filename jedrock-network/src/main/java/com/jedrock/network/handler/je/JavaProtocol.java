@@ -111,6 +111,13 @@ public interface JavaProtocol extends ProtocolHandler {
     /** Despawn a puppet entity previously shown via {@link #spawnEntity}. */
     void removeEntity(JedrockConnection c, long entityId);
 
+    /**
+     * Time Update. Both Java versions carry {@code long worldAge, long timeOfDay} and both read a
+     * <b>negative</b> time of day as "this is the time, and stop advancing it" — which is how vanilla has
+     * always frozen the sun, and why freezing needs nothing sent afterwards.
+     */
+    default void sendTime(JedrockConnection c, long timeOfDay, boolean cycling) {}
+
     /** Set a puppet entity's floating name ({@code null} / empty hides it), in this version's metadata format. */
     void setEntityNameTag(JedrockConnection c, long entityId, String nameTag);
 

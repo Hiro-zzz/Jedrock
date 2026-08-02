@@ -286,6 +286,7 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     private static final int CB_TITLE = 0x48;
     private static final int CB_NAMED_SOUND = 0x19;      // named sound effect (name + category + pos*8 + volume + pitch)
     private static final int CB_WORLD_PARTICLES = 0x22;  // particle burst (same body as 1.8's 0x2a)
+    private static final int CB_TIME_UPDATE = 0x47;      // world age + time of day, both longs
     private static final int CB_ENTITY_EQUIPMENT = 0x3f; // eid (varint) + slot (varint, 0 = main hand) + item
     private static final int CB_SPAWN_OBJECT = 0x00;     // non-mob entities: item stacks, falling blocks…
 
@@ -415,6 +416,17 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
             b.writeInt((int) (z * 8.0));
             b.writeFloat(volume);
             b.writeFloat(pitch);
+        });
+    }
+
+    @Override
+    public void sendTime(JedrockConnection c, long timeOfDay, boolean cycling) {
+        // Time Update (0x47): world age, then time of day. A NEGATIVE time of day is the vanilla way of
+        // saying "it is this o'clock and stop counting" — the client takes its absolute value and holds
+        // the sun there, which is what makes freezing cost nothing after the one packet.
+        send(c, CB_TIME_UPDATE, b -> {
+            b.writeLong(timeOfDay);
+            b.writeLong(cycling ? timeOfDay : -timeOfDay);
         });
     }
 

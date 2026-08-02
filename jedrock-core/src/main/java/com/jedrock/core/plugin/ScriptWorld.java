@@ -197,6 +197,37 @@ public final class ScriptWorld {
         world.setWeather(parse(Weather.class, weather));
     }
 
+    /**
+     * The time of day in ticks (0–23999): 0 sunrise, 6000 noon, 12000 sunset, 18000 midnight.
+     *
+     * <p>Reading it answers what the <em>clients</em> are showing, not what was last set — they are the
+     * ones animating the sky, and the server only holds a number and a moment. Which is also why a day
+     * passes with nothing here ticking to make it happen.
+     */
+    public double getTime() {
+        return world.getTime();
+    }
+
+    /** Set the time of day. Every player in this world sees the sky move; later joiners arrive at it. */
+    public void setTime(double ticks) {
+        world.setTime((long) ticks);
+    }
+
+    /**
+     * Stop or restart the sun. {@code false} holds the sky exactly where it is — a lobby that is always
+     * noon, a horror map that is always midnight.
+     *
+     * <p>Freezing is the client's own mechanism on three of the four editions; on Bedrock 1.1.5 there is
+     * no flag for it on the wire, so the sky is held still by being told again rather than told to stop.
+     */
+    public void setDaylightCycle(boolean cycling) {
+        world.setDaylightCycle(cycling);
+    }
+
+    public boolean isDaylightCycle() {
+        return world.isDaylightCycle();
+    }
+
     /** Parse a case-insensitive enum name, failing with the full list of valid names — a script-friendly error. */
     static <E extends Enum<E>> E parse(Class<E> type, String name) {
         try {

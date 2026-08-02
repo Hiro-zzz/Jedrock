@@ -427,6 +427,16 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     }
 
     @Override
+    public void sendTime(JedrockConnection c, long timeOfDay, boolean cycling) {
+        // Identical body to 1.12.2's, at 1.8's own id — including the negative-means-frozen convention,
+        // which is old enough that both versions share it unchanged.
+        send(c, CB_TIME_UPDATE, b -> {
+            b.writeLong(timeOfDay);
+            b.writeLong(cycling ? timeOfDay : -timeOfDay);
+        });
+    }
+
+    @Override
     public void sendWeather(JedrockConnection c, com.jedrock.api.world.Weather weather) {
         // Change Game State (0x2B at 1.8): reason 1 = end rain, 2 = begin rain, then the strengths —
         // reason 7 is setRainStrength and 8 is setThunderStrength on the client, so full-strength

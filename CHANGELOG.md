@@ -8,6 +8,41 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Time of day — `/time`, and the whole notion of it.** There was none: the only clock anywhere was a
+  hardcoded zero 0.14 sends at spawn. A world now has an hour, `/time set|add|query|freeze|resume` moves
+  it, and `world.setTime(6000)` does the same from a script.
+
+  It is scenery in exactly the sense the weather is, and the reason that matters is what it buys: the
+  server holds a number and a moment, tells clients what it is, and the **client** animates the sun. A day
+  passes with nothing on this side ticking to make it, and a world with nobody in it costs nothing to keep
+  the time of. Reading it back answers what the clients are showing rather than what was last sent, which
+  is also why freezing has to pin the clock where they have it — pinning where it was last *set* would
+  make the sun jump backwards at the instant it stopped.
+
+  Four encoders, and the editions genuinely disagree. Java (both versions) reads a **negative** time of day
+  as "this is the hour, stop counting", which is how vanilla has frozen the sun since forever and why
+  freezing costs one packet and nothing after. 0.14 has a flag of its own — and a **19200-tick day** rather
+  than the 24000 everything else uses, so the same o'clock is a different number on that wire. 1.1.5 has
+  neither: PocketMine at protocol 113 sends `SetTime` (0x0a) as a lone signed varint, so a frozen sky there
+  is held still by being told again. Not persisted, like the weather — a restart starts the morning over.
+
+- **`/pose` — build a scene where you can see it.** The authoring tool the README has been listing as a
+  someday. Props go where a real block cannot — fractional positions, unsupported, overlapping — which is
+  the appeal and also why writing one in a script is miserable: you type three coordinates, save, watch the
+  reload, find the lantern half inside the wall, and type three more.
+
+  `/pose new <name>` opens a session; `block`, `item`, `text` and `mob` drop props exactly where you are
+  standing; `nudge` and `rotate` adjust; `undo` takes one back; `list` shows what you have. `save` hands
+  the props to the same `SceneManager` a script's `group.save(name)` writes to — no new format, no export
+  step, and the server stands the scene back up at every boot with no plugin involved. A scene authored by
+  hand and one authored in code are the same object. `cancel` takes the props away again, so an abandoned
+  session leaves the world as it was.
+
+- **`/about`** — version, the four protocols, TPS and MSPT, memory, uptime, players, worlds and plugins on
+  one screen. All of it existed in pieces (`/tps`, `/list`, the console banner nobody who joined later
+  saw); this is the piece that was missing, and the only command with no permission node, because "what is
+  this server" is a question a stranger should be able to ask.
+
 - **Outbound HTTP for scripts — the `http` global.** Until now everything a plugin could do stayed inside
   this process; this is the one capability that reaches out, which is why it is **off by default**
   (`plugins.http.enabled`) and why the global is simply *absent* when off rather than present and throwing —

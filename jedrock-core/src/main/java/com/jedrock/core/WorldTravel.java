@@ -102,6 +102,8 @@ final class WorldTravel {
         if (target.getWeather() != com.jedrock.api.world.Weather.CLEAR) {
             player.getConnection().sendWeather(target.getWeather());
         }
+        // Worlds keep their own time, so arriving in one means arriving at its hour, not carrying yours.
+        player.getConnection().sendTime(target.getTime(), target.isDaylightCycle());
 
         LOGGER.info(player.getName() + " travelled from '" + from.getName() + "' to '" + target.getName()
                 + "' (" + target.getDimension() + ")");

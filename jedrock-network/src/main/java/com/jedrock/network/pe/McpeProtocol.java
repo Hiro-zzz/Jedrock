@@ -24,6 +24,7 @@ final class McpeProtocol {
     static final int ID_ADD_ENTITY = 0x0D;        // outbound: spawn a non-player entity (a puppet)
     static final int ID_REMOVE_ENTITY = 0x0E;
     static final int ID_MOVE_ENTITY = 0x12;       // outbound: move a non-player entity
+    static final int ID_SET_TIME = 0x0a;          // outbound: time of day (PMMP 1.7dev-27, proto 113)
     static final int ID_MOVE_PLAYER = 0x13;
     static final int ID_UPDATE_BLOCK = 0x16;
     static final int ID_UPDATE_ATTRIBUTES = 0x1E; // outbound: movement-speed fix (PMMP 113: 0x1e — was 0x1D)
