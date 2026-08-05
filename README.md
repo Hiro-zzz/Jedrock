@@ -967,13 +967,14 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   sky, for the same reason travel there does.
 - **On the PE wire, a byte test is not the last word.** The surface itself has been walked through with
   real clients on both eras and works — join, movement, chat, edits, inventories, the illusion toolkit —
-  apart from the 1.1.5 client bugs listed above, which are the client's and not this server's. What
-  stays true is the epistemics: everything ground-truthed against PocketMine is byte-tested, and a byte
-  test only proves the encoder agrees with itself. The item-NBT dialect passed its own tests and still
-  showed the vanilla name on a real client. So anything *newly* added to that wire is unverified until
-  somebody logs in — which right now means the head/body yaw split (0.14's field order is the
-  serializer's own note rather than a fresh reading of PocketMine) and carrying a custom item's identity
-  through a drag inside a Bedrock client's own window.
+  apart from the 1.1.5 client bugs listed above, which are the client's and not this server's. Nothing is
+  waiting on a login right now: the head/body yaw split, a custom item's identity carried through a drag
+  inside a Bedrock client's own window, and the clock have each been in front of a real client since they
+  were written. What stays is the reasoning, because it applies to whatever is added next: everything
+  ground-truthed against PocketMine is byte-tested, and a byte test only proves the encoder agrees with
+  itself. The item-NBT dialect passed its own tests and still showed the vanilla name on a real client.
+  So anything newly added to that wire is unverified until somebody logs in, and this list being empty
+  today means only that somebody did.
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
   runtime world simulation or physics, no 1.13+ flattening. Knockback is excluded for the same reason —
   the server simulates no physics. Custom logic that wants any of these lives in a script as an

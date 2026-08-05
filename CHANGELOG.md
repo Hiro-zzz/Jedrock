@@ -69,6 +69,16 @@ unstable — anything may change between entries.
   Note what did **not** change: the script sandbox. Scripts never name a `java.net` class — they call a
   `com.jedrock` object that does — so the ClassShutter allowlist stayed exactly as narrow as it was.
 
+### Changed
+
+- **Docs: the PE wire has nothing left waiting on a login.** The Known-limits caveat named two things as
+  unverified — the head/body yaw split and a custom item's identity carried through a drag inside a Bedrock
+  client's own window — and both have been in front of a real client since, as the clock now has. What the
+  entry keeps is the reasoning rather than the roster, because the reasoning is what applies to whatever
+  goes on that wire next: a byte test only proves the encoder agrees with itself, which item NBT
+  demonstrated by passing its own and still showing the vanilla name. An empty list is a fact about today,
+  not a property of the wire.
+
 ## [0.2.1] — 2026-08-02
 
 ### Fixed
