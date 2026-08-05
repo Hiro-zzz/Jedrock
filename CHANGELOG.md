@@ -26,6 +26,10 @@ unstable — anything may change between entries.
   neither: PocketMine at protocol 113 sends `SetTime` (0x0a) as a lone signed varint, so a frozen sky there
   is held still by being told again. Not persisted, like the weather — a restart starts the morning over.
 
+  **Confirmed on a real client**, which for the two Bedrock eras is the only judge that counts: the
+  1.1.5 packet id and body came from PocketMine, but nothing in a byte test could have told us whether
+  the number was in the units that client expects.
+
 - **`/pose` — build a scene where you can see it.** The authoring tool the README has been listing as a
   someday. Props go where a real block cannot — fractional positions, unsupported, overlapping — which is
   the appeal and also why writing one in a script is miserable: you type three coordinates, save, watch the
