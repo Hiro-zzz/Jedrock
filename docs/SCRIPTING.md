@@ -22,7 +22,7 @@ That is a complete plugin.
 ## Contents
 
 - [The basics](#the-basics) · [The JavaScript dialect](#the-javascript-dialect) · [Blocks and items are numbers](#blocks-and-items-are-numbers) · [Text markup](#text-markup)
-- Globals: [`events`](#events) · [`commands`](#commands) · [`server`](#server) · [`world`](#world) · [`worlds`](#worlds) · [`entities`](#entities) · [`scheduler`](#scheduler) · [`storage`](#storage) · [`regions`](#regions) · [`permissions`](#permissions) · [`punishments`](#punishments) · [`items`](#items) · [`menus`](#menus) · [`packets`](#packets) · [`console`](#console)
+- Globals: [`events`](#events) · [`commands`](#commands) · [`server`](#server) · [`world`](#world) · [`worlds`](#worlds) · [`entities`](#entities) · [`scheduler`](#scheduler) · [`storage`](#storage) · [`regions`](#regions) · [`permissions`](#permissions) · [`punishments`](#punishments) · [`items`](#items) · [`menus`](#menus) · [`http`](#http) · [`packets`](#packets) · [`console`](#console)
 - [Every event](#every-event) · [Custom events](#custom-events) · [Limits worth knowing](#limits-worth-knowing)
 
 ---
@@ -269,6 +269,8 @@ world.getChest(x, y, z)           world.hasChest(x, y, z)
 world.playSound(name, x, y, z[, volume, pitch])
 world.spawnParticle(name, x, y, z[, count, spread])
 world.getWeather()                world.setWeather('rain' | 'thunder' | 'clear')
+world.getTime()                   world.setTime(ticks)        // 0 sunrise, 6000 noon, 18000 midnight
+world.isDaylightCycle()           world.setDaylightCycle(false)   // hold the sky where it is
 ```
 
 An edit lands in the shared world and reaches every client in it, cross-edition, as a single block update
@@ -604,6 +606,52 @@ how it arrives.
 
 ---
 
+## `http`
+
+The one thing a script can do that reaches outside this process. **Off unless
+`plugins.http.enabled=true`** — when it is off the global is not defined at all, so a script can check and
+degrade:
+
+```js
+if (typeof http === 'undefined') { console.warn('no network; skipping the webhook'); }
+```
+
+```js
+http.post('https://discord.com/api/webhooks/…', {content: 'Alice joined'});   // fire and forget
+
+http.get('https://api.example.com/motd', function (res) {
+    if (!res.isOk()) { console.warn('motd failed: ' + res.getError()); return; }
+    server.broadcast(res.getBody());
+});
+
+http.request({method: 'PATCH', url: …, body: {…}, headers: {…}}, function (res) { … });
+```
+
+A JS object body is sent as JSON, with `Content-Type: application/json` added unless you set one. On the
+response: `isOk()` (2xx and no error), `getStatus()`, `getBody()`, `getHeader(name)` (case-insensitive) and
+`json()`, which parses the body into a real JS value or returns `null` if it isn't JSON.
+
+**There is no synchronous form, and that is the whole design.** Every script callback here runs under one
+shared lock, and `ServerTick` is posted from the game-loop thread — so a call that waited for a reply
+would hold up every other plugin and, from a tick handler, the tick itself. A webhook having a slow
+afternoon would show up as a laggy server with nothing in the logs to explain it. So you get a callback or
+you get nothing to wait on.
+
+**The callback arrives on an HTTP thread**, not the game loop. That is the same deal packet taps and most
+events already make, and everything on this API is safe to call from one; hand it to `scheduler.run(...)`
+if you want it on the loop.
+
+**A failure is a result, not an exception.** A timeout, a refused host and a 500 all come back with
+`isOk()` false — `getError()` is non-null for the first two and null for the third, because the request
+succeeding and the server saying no are different things.
+
+Bounded by config, since the other end decides the timing and the size:
+`plugins.http.allowed-hosts` (a host covers its subdomains; empty means anywhere),
+`timeout-millis`, `max-response-bytes` (a longer body is cut, not refused) and `max-concurrent` (past it a
+request is refused rather than queued). A reply that lands after its plugin has been reloaded is dropped.
+
+---
+
 ## `packets`
 
 The escape hatch: raw bytes, on all four protocols, in and out.
@@ -727,6 +775,8 @@ if (!event.isCancelled()) { … }
   enough to know.
 - **Scenes cost packets, not ticks.** A static prop runs no logic, but every joining player pays one spawn
   packet for it.
+- **Scripts have no network unless you give them one.** `plugins.http.enabled` is off by default, and
+  there is no synchronous HTTP even when it is on — see [`http`](#http) for why.
 - **Per-stack state lives as long as the stack.** It persists in a chest and dies with a logout in a
   backpack, because a player's inventory isn't persisted at all. On Bedrock, a *swap* inside the client's
   own window can drop one of the two stacks' identity — that client reports only an id and a count, and

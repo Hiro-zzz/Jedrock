@@ -228,6 +228,19 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         sendWrapped(b -> Mcpe014Packets.removeEntity(b, entityId));
     }
 
+    /** A 0.14 day is 19200 ticks, not 24000 — the canonical time is rescaled on the way out. */
+    private static final int DAY_TICKS_014 = 19200;
+
+    @Override
+    public void sendTime(long timeOfDay, boolean cycling) {
+        // SetTime(0x94): int32 time, byte started. Ground truth PMMP at CURRENT_PROTOCOL 45, whose value
+        // is time/TIME_FULL*19200 — this era's day is shorter than the 24000 every other target uses, so
+        // the same o'clock is a different number here. The `started` byte is this wire's freeze switch,
+        // which is more than 1.1.5 offers and exactly what Java's negative time means.
+        int scaled = (int) (Math.floorMod(timeOfDay, 24000L) * DAY_TICKS_014 / 24000L);
+        sendWrapped(b -> Mcpe014Packets.setTime(b, scaled, cycling));
+    }
+
     @Override
     public void spawnTextLine(long entityId, UUID uuid, double x, double y, double z, String text) {
         sendWrapped(b -> Mcpe014Packets.addTextLine(b, entityId, (float) x, (float) y, (float) z, text));

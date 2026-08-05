@@ -169,6 +169,35 @@ public interface World {
     default void setWeather(Weather weather) {}
 
     /**
+     * The time of day, in the 0–23999 ticks a Minecraft day has run on since forever: 0 is sunrise,
+     * 6000 noon, 12000 sunset, 18000 midnight.
+     *
+     * <p>Like the weather, this is scenery rather than simulation. The server holds a number and tells
+     * clients what it is; the <em>client</em> is what animates the sun across the sky between updates,
+     * which is why a day passes here without anything on this side ticking to make it.
+     */
+    default long getTime() {
+        return 0L;
+    }
+
+    /** Set the time of day, wrapping into 0–23999. Every player in this world sees the sky move. */
+    default void setTime(long timeOfDay) {}
+
+    /**
+     * Whether the sun is moving. {@code false} freezes it where it is — for a lobby that is always noon,
+     * or a horror map that is always midnight.
+     *
+     * <p>Freezing is the client's own mechanism rather than something enforced here: every edition has a
+     * way of being told "this time, and stop counting", so the sky stops without the server sending
+     * anything further.
+     */
+    default boolean isDaylightCycle() {
+        return true;
+    }
+
+    default void setDaylightCycle(boolean cycling) {}
+
+    /**
      * Play a canonical {@link Sound} at a position, audible to every player in this world — each
      * client renders it in its own protocol. Volume and pitch are best-effort per edition (1 = normal).
      */

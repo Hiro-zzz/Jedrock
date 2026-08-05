@@ -332,6 +332,17 @@ public interface PlayerConnection {
     default void sendWeather(com.jedrock.api.world.Weather weather) {}
 
     /**
+     * Tell this client what time of day it is, in the 0–23999 ticks every edition's day has been divided
+     * into since Beta — except 0.14, whose day is 19200 long and which is handed the same number scaled.
+     *
+     * <p>{@code cycling} is whether the client should carry on advancing it by itself. That is how a day
+     * passes here at all: the server does not tick a clock, it says "it is now this o'clock, keep going",
+     * and the client animates the sun until told otherwise. Saying "keep going" is also what makes
+     * freezing possible — a client told to stop simply holds the sky where it is.
+     */
+    default void sendTime(long timeOfDay, boolean cycling) {}
+
+    /**
      * Send tab-completion matches for a partially typed command line — the completions the client offers
      * for the token under the cursor. Java sends a serverbound request and shows these; Bedrock completes
      * client-side from its command manifest and never asks, so this is a no-op there. Default no-op.

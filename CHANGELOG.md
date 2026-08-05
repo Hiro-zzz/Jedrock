@@ -4,6 +4,81 @@ All notable changes to Jedrock are recorded here. This is an internal project lo
 loosely follows [Keep a Changelog](https://keepachangelog.com/). The project is pre-1.0 and
 unstable — anything may change between entries.
 
+## [Unreleased]
+
+### Added
+
+- **Time of day — `/time`, and the whole notion of it.** There was none: the only clock anywhere was a
+  hardcoded zero 0.14 sends at spawn. A world now has an hour, `/time set|add|query|freeze|resume` moves
+  it, and `world.setTime(6000)` does the same from a script.
+
+  It is scenery in exactly the sense the weather is, and the reason that matters is what it buys: the
+  server holds a number and a moment, tells clients what it is, and the **client** animates the sun. A day
+  passes with nothing on this side ticking to make it, and a world with nobody in it costs nothing to keep
+  the time of. Reading it back answers what the clients are showing rather than what was last sent, which
+  is also why freezing has to pin the clock where they have it — pinning where it was last *set* would
+  make the sun jump backwards at the instant it stopped.
+
+  Four encoders, and the editions genuinely disagree. Java (both versions) reads a **negative** time of day
+  as "this is the hour, stop counting", which is how vanilla has frozen the sun since forever and why
+  freezing costs one packet and nothing after. 0.14 has a flag of its own — and a **19200-tick day** rather
+  than the 24000 everything else uses, so the same o'clock is a different number on that wire. 1.1.5 has
+  neither: PocketMine at protocol 113 sends `SetTime` (0x0a) as a lone signed varint, so a frozen sky there
+  is held still by being told again. Not persisted, like the weather — a restart starts the morning over.
+
+  **Confirmed on a real client**, which for the two Bedrock eras is the only judge that counts: the
+  1.1.5 packet id and body came from PocketMine, but nothing in a byte test could have told us whether
+  the number was in the units that client expects.
+
+- **`/pose` — build a scene where you can see it.** The authoring tool the README has been listing as a
+  someday. Props go where a real block cannot — fractional positions, unsupported, overlapping — which is
+  the appeal and also why writing one in a script is miserable: you type three coordinates, save, watch the
+  reload, find the lantern half inside the wall, and type three more.
+
+  `/pose new <name>` opens a session; `block`, `item`, `text` and `mob` drop props exactly where you are
+  standing; `nudge` and `rotate` adjust; `undo` takes one back; `list` shows what you have. `save` hands
+  the props to the same `SceneManager` a script's `group.save(name)` writes to — no new format, no export
+  step, and the server stands the scene back up at every boot with no plugin involved. A scene authored by
+  hand and one authored in code are the same object. `cancel` takes the props away again, so an abandoned
+  session leaves the world as it was.
+
+- **`/about`** — version, the four protocols, TPS and MSPT, memory, uptime, players, worlds and plugins on
+  one screen. All of it existed in pieces (`/tps`, `/list`, the console banner nobody who joined later
+  saw); this is the piece that was missing, and the only command with no permission node, because "what is
+  this server" is a question a stranger should be able to ask.
+
+- **Outbound HTTP for scripts — the `http` global.** Until now everything a plugin could do stayed inside
+  this process; this is the one capability that reaches out, which is why it is **off by default**
+  (`plugins.http.enabled`) and why the global is simply *absent* when off rather than present and throwing —
+  a script can then check `typeof http === 'undefined'` and degrade.
+
+  **There is no synchronous form, deliberately.** Every script callback here runs under one shared lock and
+  `ServerTickEvent` is posted from the game-loop thread, so a call that waited for a reply would hold up
+  every other plugin and, from a tick handler, the tick itself. A webhook having a slow afternoon would
+  present as a laggy server with nothing in the logs pointing at the cause. Given a pleasant API and one
+  that cannot do that, this takes the second: a request is fired and forgotten, or fired with a callback,
+  and there is nothing to wait on.
+
+  Bounded the way the packet guards are, and for the same reason — the other end decides the timing and the
+  size: a host allowlist (a host covers its subdomains, matched on a label boundary so `discord.com` does
+  not also allow `notdiscord.com`), a timeout, a ceiling on the body, and a cap on requests in flight past
+  which a request is refused rather than queued. A failure is a *result* (`isOk()` / `getError()`) rather
+  than an exception, since a timeout, a refused host and a 500 all have to be handled anyway. A reply that
+  lands after its plugin has been reloaded is dropped.
+
+  Note what did **not** change: the script sandbox. Scripts never name a `java.net` class — they call a
+  `com.jedrock` object that does — so the ClassShutter allowlist stayed exactly as narrow as it was.
+
+### Changed
+
+- **Docs: the PE wire has nothing left waiting on a login.** The Known-limits caveat named two things as
+  unverified — the head/body yaw split and a custom item's identity carried through a drag inside a Bedrock
+  client's own window — and both have been in front of a real client since, as the clock now has. What the
+  entry keeps is the reasoning rather than the roster, because the reasoning is what applies to whatever
+  goes on that wire next: a byte test only proves the encoder agrees with itself, which item NBT
+  demonstrated by passing its own and still showing the vanilla name. An empty list is a fact about today,
+  not a property of the wire.
+
 ## [0.2.1] — 2026-08-02
 
 ### Fixed

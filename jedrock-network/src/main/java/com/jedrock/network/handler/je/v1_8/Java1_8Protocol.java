@@ -26,6 +26,7 @@ public final class Java1_8Protocol {
     public static final int CB_WORLD_PARTICLES = 0x2a;  // particle burst (id + pos + offsets + speed + count)
     public static final int CB_ENTITY_EQUIPMENT = 0x04; // eid (varint) + slot (short, 0 = held) + item
     public static final int CB_CHANGE_GAME_STATE = 0x2B; // reason byte + float value (gamemode switch)
+    public static final int CB_TIME_UPDATE = 0x03;       // world age + time of day, both longs
     public static final int CB_UPDATE_HEALTH = 0x06;     // float health + food varint + saturation float
     public static final int CB_SPAWN_POSITION = 0x05;
     public static final int CB_POSITION = 0x08;          // player position and look (no teleport id in 1.8)

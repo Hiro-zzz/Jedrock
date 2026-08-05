@@ -197,7 +197,7 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   Bedrock is handed an `AvailableCommands` manifest so its client parses the line and sends it back. The
   built-in set: `/help [cmd]`, `/list`, `/tps`, `/say`, `/me`, `/msg`, `/gamemode`, `/tp`, `/tphere`,
   `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/op`, `/deop`, `/perm`, `/region`, `/world`, `/pick`,
-  `/puppet`, `/hologram`, plus the [moderation set](#moderation). A deliberately minimal **survival inventory** (36 slots)
+  `/puppet`, `/hologram`, `/pose`, `/time`, `/about`, plus the [moderation set](#moderation). A deliberately minimal **survival inventory** (36 slots)
   tracks only what a survival player mines and places: mining a block drops it into the hotbar, placing
   consumes it, and the changed slot is pushed live so the HUD refreshes. On PE 1.1.5 the player window is
   serialized PMMP-exact (45 slots + a 9-entry hotbar-link array), without which mined items filled storage
@@ -413,8 +413,8 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
 
 - ✅ **Script plugins (JavaScript, hot-reloadable).** Custom gameplay lives in `plugins/*.js` on a Rhino
   backend, not the compiled core — see the **[scripting reference](docs/SCRIPTING.md)**. A script gets
-  fourteen globals — `server` / `events` / `scheduler` /
-  `commands` / `packets` / `world` / `worlds` / `entities` / `regions` / `items` / `permissions` / `menus` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
+  sixteen globals — `server` / `events` / `scheduler` /
+  `commands` / `packets` / `world` / `worlds` / `entities` / `regions` / `items` / `permissions` / `menus` / `punishments` / `http` / `storage` / `console` — and wires behaviour with `events.on('PlayerJoin', e => …)`,
   the handler receiving the real event to read and cancel. Every one of the events above is scriptable by
   name (40 of them, listed by `events.names()`), at a **priority** of its choosing — which is what lets a
   script overrule the core's own rules, since regions and item behaviours are enforced at `HIGH` and a
@@ -440,7 +440,7 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   bucketed per plugin name, so two scripts can both keep a `count` without meeting, and editing a script
   never costs it its memory. Written like the world is: a compact DEFLATE file (`plugin-storage.jdb`),
   atomic temp-and-move, a dirty flag that skips rewriting an untouched store, flushed by the same autosave
-  and once more at shutdown. Try `/seen` and `/forget` in `plugins/example.js`. It also closed a real
+  and once more at shutdown. Try `/visits` and `/forget` in `plugins/example.js`. It also closed a real
   scripting-layer bug on the way: a `String` returned *from Java* used to reach scripts wrapped, and a
   wrapper is never `===` a JS literal, so `player.getName() === 'Alice'` was silently false. Script scopes
   now hand Java strings, numbers and booleans over as JS primitives — which the command-args path had
@@ -465,6 +465,21 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   its equipment slots differently before and after 1.9, while both PE eras dress the avatar with a single
   `MobArmorEquipment`. Visual only — no protection is simulated. Try `/armor`.
 
+- ✅ **Time of day, cross-edition.** `/time set day|noon|night|midnight|<ticks>`, `add`, `query`, and
+  `freeze` / `resume` — or `world.setTime(6000)` from a script. Scenery in exactly the sense the weather
+  below is: the server holds a number and tells clients what it is, and the **client** animates the sun
+  between updates, so a day passes here with nothing on this side ticking to make it. Reading the time
+  answers what the clients are showing rather than what was last sent. Each world keeps its own hour, and
+  arriving in one means arriving at its hour. Freezing is the client's own mechanism where it has one —
+  Java reads a negative time as "stop counting", 0.14 has a flag — and 1.1.5, which has neither, is simply
+  told again. Not persisted, like the weather: a restart starts the morning over.
+- ✅ **Build a scene where you can see it — `/pose`.** Props go where a real block cannot: fractional
+  positions, unsupported, overlapping. Authoring that in a script means typing three coordinates, saving,
+  watching the reload and finding the lantern half inside the wall. `/pose new <name>`, then `block`,
+  `item`, `text` and `mob` drop props where you are standing, `nudge` and `rotate` adjust them, `undo`
+  takes one back, and `save` hands the arrangement to the same scene store a script's `group.save(name)`
+  writes — so the server stands it back up at every boot with no plugin involved. A scene authored by hand
+  and one authored in code are the same object.
 - ✅ **Weather, cross-edition.** `/weather clear|rain|thunder` (or `world.setWeather('rain')` from a
   script) changes the sky for every player — JE via Change Game State (+ the darkness fade for
   thunder), both PE eras via the LevelEvent 3001-series. Pure scenery: no timer, no simulation; a late
@@ -952,13 +967,14 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   sky, for the same reason travel there does.
 - **On the PE wire, a byte test is not the last word.** The surface itself has been walked through with
   real clients on both eras and works — join, movement, chat, edits, inventories, the illusion toolkit —
-  apart from the 1.1.5 client bugs listed above, which are the client's and not this server's. What
-  stays true is the epistemics: everything ground-truthed against PocketMine is byte-tested, and a byte
-  test only proves the encoder agrees with itself. The item-NBT dialect passed its own tests and still
-  showed the vanilla name on a real client. So anything *newly* added to that wire is unverified until
-  somebody logs in — which right now means the head/body yaw split (0.14's field order is the
-  serializer's own note rather than a fresh reading of PocketMine) and carrying a custom item's identity
-  through a drag inside a Bedrock client's own window.
+  apart from the 1.1.5 client bugs listed above, which are the client's and not this server's. Nothing is
+  waiting on a login right now: the head/body yaw split, a custom item's identity carried through a drag
+  inside a Bedrock client's own window, and the clock have each been in front of a real client since they
+  were written. What stays is the reasoning, because it applies to whatever is added next: everything
+  ground-truthed against PocketMine is byte-tested, and a byte test only proves the encoder agrees with
+  itself. The item-NBT dialect passed its own tests and still showed the vanilla name on a real client.
+  So anything newly added to that wire is unverified until somebody logs in, and this list being empty
+  today means only that somebody did.
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
   runtime world simulation or physics, no 1.13+ flattening. Knockback is excluded for the same reason —
   the server simulates no physics. Custom logic that wants any of these lives in a script as an
@@ -986,8 +1002,6 @@ promised; it's the list of what would be worth doing next, roughly in the order 
   interaction ray-cast, still cheap, still approximate. And the illusion toolkit (sidebar, boss bar,
   menus) wants a **real-client pass on Bedrock 1.1.5**, which is the only way anything on that wire
   becomes true.
-- **Authoring tools.** A `/pose` in-game editor that exports a scene as a committable file, so
-  decoration is built where it's seen rather than written blind and reloaded.
 - **A scripting reference generated from the contract** rather than kept in step by hand, since
   `plugins/example.js` is currently both the reference and the test.
 

@@ -94,7 +94,18 @@ public final class JedrockConfig {
                 new ServerProperties.Plugins(
                         bool(file, "plugins.enabled", def.plugins().enabled()),
                         bool(file, "plugins.hot-reload", def.plugins().hotReload()),
-                        positiveLong(file, "plugins.reload-millis", def.plugins().reloadMillis())),
+                        positiveLong(file, "plugins.reload-millis", def.plugins().reloadMillis()),
+                        new ServerProperties.Http(
+                                bool(file, "plugins.http.enabled", def.plugins().http().enabled()),
+                                str(file, "plugins.http.allowed-hosts", def.plugins().http().allowedHosts()),
+                                positiveLong(file, "plugins.http.timeout-millis",
+                                        def.plugins().http().timeoutMillis()),
+                                // A ceiling that can be raised without limit is not a ceiling; 64 MiB is
+                                // already far past any webhook reply worth reading into memory.
+                                boundedInt(file, "plugins.http.max-response-bytes",
+                                        def.plugins().http().maxResponseBytes(), 1024, 64 * 1024 * 1024),
+                                boundedInt(file, "plugins.http.max-concurrent",
+                                        def.plugins().http().maxConcurrent(), 1, 64))),
                 new ServerProperties.Logging(
                         bool(file, "logging.to-file", def.logging().toFile()),
                         nonNegativeInt(file, "logging.keep-files", def.logging().keepFiles()),
@@ -172,6 +183,30 @@ public final class JedrockConfig {
             int parsed = Integer.parseInt(v.trim());
             if (parsed <= 0) {
                 LOGGER.warn(key + " must be positive (got " + parsed + "); using default " + def);
+                return def;
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            LOGGER.warn(key + " is not a number ('" + v.trim() + "'); using default " + def);
+            return def;
+        }
+    }
+
+    /**
+     * A number that has to sit inside a range, for the settings that are ceilings. An obeyed nonsense
+     * value here is a limit somebody else chose, which is the same reasoning the pipeline guards use —
+     * so a value outside the range is refused and the default kept, with a line saying so.
+     */
+    private static int boundedInt(Properties file, String key, int def, int min, int max) {
+        String v = raw(file, key);
+        if (v == null || v.isBlank()) {
+            return def;
+        }
+        try {
+            int parsed = Integer.parseInt(v.trim());
+            if (parsed < min || parsed > max) {
+                LOGGER.warn(key + " must be between " + min + " and " + max + " (got " + parsed
+                        + "); using default " + def);
                 return def;
             }
             return parsed;

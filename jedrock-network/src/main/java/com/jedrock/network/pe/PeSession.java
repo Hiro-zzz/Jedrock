@@ -380,6 +380,14 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     }
 
     @Override
+    public void sendTime(long timeOfDay, boolean cycling) {
+        // This wire has no "and keep counting" flag: the client always advances the sky by itself. So a
+        // frozen sky has to be re-stated rather than declared once, which the core does by sending the
+        // same time again — see CoreWorld. Nothing here can make the client stop on its own.
+        sendGameBatch(b -> McpePackets.setTime(b, timeOfDay));
+    }
+
+    @Override
     public void sendBlockChange(int x, int y, int z, int state) {
         writeUpdateBlock(x, y, z, state);
         // A chest is a block-entity, and the retail 1.1.5 client materializes it ONLY from chunk data —

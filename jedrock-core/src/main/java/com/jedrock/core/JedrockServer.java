@@ -19,6 +19,7 @@ import com.jedrock.api.protocol.ProtocolVersion;
 import com.jedrock.api.world.Dimension;
 import com.jedrock.api.world.Location;
 import com.jedrock.api.world.World;
+import com.jedrock.core.command.AboutCommand;
 import com.jedrock.core.command.BanCommand;
 import com.jedrock.core.command.BanIpCommand;
 import com.jedrock.core.command.BanListCommand;
@@ -42,11 +43,13 @@ import com.jedrock.core.command.MsgCommand;
 import com.jedrock.core.command.OpCommand;
 import com.jedrock.core.command.DeopCommand;
 import com.jedrock.core.command.PermCommand;
+import com.jedrock.core.command.PoseCommand;
 import com.jedrock.core.command.PickCommand;
 import com.jedrock.core.command.RegionCommand;
 import com.jedrock.core.command.SayCommand;
 import com.jedrock.core.command.SpawnCommand;
 import com.jedrock.core.command.TeleportCommand;
+import com.jedrock.core.command.TimeCommand;
 import com.jedrock.core.command.TpAllCommand;
 import com.jedrock.core.command.TpHereCommand;
 import com.jedrock.core.command.TpsCommand;
@@ -274,6 +277,8 @@ public class JedrockServer implements Server {
         commandManager.register(new MsgCommand());
         commandManager.register(new GameModeCommand());
         commandManager.register(new WeatherCommand());
+        commandManager.register(new TimeCommand());
+        commandManager.register(new AboutCommand());
         commandManager.register(new TeleportCommand());
         commandManager.register(new TpHereCommand());
         commandManager.register(new TpAllCommand());
@@ -283,6 +288,7 @@ public class JedrockServer implements Server {
         commandManager.register(new ClearCommand());
         commandManager.register(new PuppetCommand());
         commandManager.register(new HologramCommand());
+        commandManager.register(new PoseCommand());
         commandManager.register(new OpCommand());
         commandManager.register(new DeopCommand());
         commandManager.register(new BanCommand());
@@ -318,6 +324,14 @@ public class JedrockServer implements Server {
     /** Bans, ip-bans, mutes, the whitelist and last-seen — used by the moderation commands and scripts. */
     public com.jedrock.core.moderation.Moderation getModeration() {
         return moderation;
+    }
+
+    /**
+     * The player cap this server advertises. A number to show, not a gate — nothing here refuses a login
+     * for being over it, which is why it lives next to the ping rather than next to the ban list.
+     */
+    public int getMaxPlayers() {
+        return config.maxPlayers();
     }
 
     /**
@@ -580,6 +594,9 @@ public class JedrockServer implements Server {
         // Load script plugins before ServerStartEvent, so a plugin can subscribe to it. A background
         // watcher (off the game-loop thread — the poll blocks on disk I/O) hot-reloads a saved edit.
         if (config.plugins().enabled()) {
+            // Before loadAll: a plugin that wants to call out on its very first line must find the global
+            // already there. Does nothing unless plugins.http.enabled says otherwise.
+            plugins.enableHttp(config.plugins().http());
             plugins.loadAll();
             if (config.plugins().hotReload()) {
                 plugins.startWatching(config.plugins().reloadMillis());
@@ -628,6 +645,9 @@ public class JedrockServer implements Server {
         // (their onDisable runs, their listeners are removed) before the world and loop go away.
         eventBus.post(new ServerStopEvent());
         plugins.unloadAll();
+        // After unloadAll, so an onDisable may still fire its last webhook; the pool is daemon-threaded,
+        // so an in-flight request that outlives this cannot hold the process open either way.
+        plugins.closeHttp();
         // After onDisable, so a script's last-moment write is included.
         plugins.storage().saveIfDirty(pluginStorageFile);
         scenes.saveIfDirty(sceneFile());

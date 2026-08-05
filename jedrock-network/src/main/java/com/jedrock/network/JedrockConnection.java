@@ -124,6 +124,11 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void sendTime(long timeOfDay, boolean cycling) {
+        protocolHandler.sendTime(this, timeOfDay, cycling);
+    }
+
+    @Override
     public void sendTabComplete(java.util.List<String> matches) {
         protocolHandler.sendTabComplete(this, matches);
     }
