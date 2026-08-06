@@ -34,6 +34,7 @@ import com.jedrock.core.command.CommandManager;
 import com.jedrock.core.command.GameModeCommand;
 import com.jedrock.core.command.GiveCommand;
 import com.jedrock.core.command.EffectCommand;
+import com.jedrock.core.command.EnchantCommand;
 import com.jedrock.core.command.WeatherCommand;
 import com.jedrock.core.command.WorldCommand;
 import com.jedrock.core.command.HealCommand;
@@ -158,6 +159,8 @@ public class JedrockServer implements Server {
     private final CombatService combat;
     /** Who is under what, and for how long — scenery the client animates, mostly. */
     private final com.jedrock.core.effect.EffectService effects;
+    /** Putting an enchantment on a stack — the one path, whoever asked. */
+    private final com.jedrock.core.item.EnchantService enchants;
     /** The one path from a world to another world, for a player standing in the first. */
     private final WorldTravel travel;
     /** Every world the server has, and the only thing allowed to make one. */
@@ -229,6 +232,7 @@ public class JedrockServer implements Server {
         // world there was when that file was saved.
         this.regions = new com.jedrock.core.region.RegionManager(eventBus, defaultWorld.getName());
         this.items = new com.jedrock.core.item.ItemRegistry(eventBus);
+        this.enchants = new com.jedrock.core.item.EnchantService(eventBus);
         this.containers = new ContainerService(playerRegistry, defaultWorld, eventBus, broadcast);
         this.containers.setItems(items);
         this.combat = new CombatService(playerRegistry, defaultWorld, eventBus, broadcast, entities, judge);
@@ -301,6 +305,7 @@ public class JedrockServer implements Server {
         commandManager.register(new ClearCommand());
         commandManager.register(new GiveCommand());
         commandManager.register(new EffectCommand());
+        commandManager.register(new EnchantCommand());
         commandManager.register(new PuppetCommand());
         commandManager.register(new HologramCommand());
         commandManager.register(new PoseCommand());
@@ -797,6 +802,11 @@ public class JedrockServer implements Server {
     /** Who is under what — the effect service, for commands and the script API. */
     public com.jedrock.core.effect.EffectService getEffects() {
         return effects;
+    }
+
+    /** Enchanting — for commands and the script API. */
+    public com.jedrock.core.item.EnchantService getEnchants() {
+        return enchants;
     }
 
     public com.jedrock.core.item.ItemRegistry getItems() {

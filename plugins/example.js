@@ -1185,6 +1185,32 @@ commands.register('venom', function (player, args) {
     }, 2000);
 });
 
+// ---------------------------------------------------------------------------------------------------
+// Enchantments belong to a STACK, not to a definition — so this enchants what is actually in your hand,
+// and the sword keeps it through every move, chest and restart.
+commands.register('sharpen', function (player, args) {
+    var level = args.length > 0 ? parseInt(args[0], 10) : 1;
+    if (!items.enchant(player, 'sharpness', level)) {
+        player.sendMessage('{red}Nothing in your hand to sharpen.');
+        return;
+    }
+    player.sendMessage('{aqua}Sharpness ' + level + '{gray} — now: ' + items.enchantmentsOf(player));
+});
+
+// A definition can hand them out, so a custom item arrives already enchanted.
+items.define('frostblade', 276)
+     .setName('{aqua}Frostblade')
+     .setLore(['{gray}Cold enough to matter'])
+     .setEnchantments({sharpness: 3, unbreaking: 1});
+
+// …and a listener gets to cap what anybody else hands out. Enchanting is a request, like everything else
+// the core routes through the bus.
+events.on('ItemEnchant', function (e) {
+    if (e.getLevel() > 5) {
+        e.setLevel(5);           // nothing above V on this server
+    }
+});
+
 // Optional: called when the plugin is unloaded or reloaded. Everything a script registered — listeners,
 // scheduled tasks, commands, packet taps — is torn down automatically; this is just for your own cleanup.
 function onDisable() {

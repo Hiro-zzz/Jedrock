@@ -617,8 +617,9 @@ public final class Mcpe014Packets {
         b.writeShort(id);
         b.writeByte(count);
         b.writeShort(state & 0x0F);                  // meta / damage
-        // Shared with 1.1.5: an item's NBT is little-endian on BOTH eras (see McpeItemNbt).
-        com.jedrock.network.pe.McpeItemNbt.writeSlotNbt(b, display);
+        // Shared with 1.1.5: an item's NBT is little-endian on BOTH eras (see McpeItemNbt). The era flag
+        // is the enchantment gate — this client knows ids up to 24 and crashes on what it doesn't.
+        com.jedrock.network.pe.McpeItemNbt.writeSlotNbt(b, display, true);
     }
 
     /** Single-block change. {@code id}/{@code meta} are the split canonical state. */

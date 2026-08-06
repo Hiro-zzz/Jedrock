@@ -13,6 +13,7 @@ import com.jedrock.api.event.player.PlayerChatEvent;
 import com.jedrock.api.event.player.PlayerCommandEvent;
 import com.jedrock.api.event.player.PlayerDamageEvent;
 import com.jedrock.api.event.player.PlayerEffectEvent;
+import com.jedrock.api.event.player.ItemEnchantEvent;
 import com.jedrock.api.event.player.PlayerDeathEvent;
 import com.jedrock.api.event.player.InventoryClickEvent;
 import com.jedrock.api.event.player.PlayerInteractEntityEvent;
@@ -78,6 +79,7 @@ public final class EventTypes {
         register("PlayerRespawn", PlayerRespawnEvent.class);
         register("PlayerDamage", PlayerDamageEvent.class);
         register("PlayerEffect", PlayerEffectEvent.class);
+        register("ItemEnchant", ItemEnchantEvent.class);
         register("PlayerDeath", PlayerDeathEvent.class);
         register("PlayerInteractEntity", PlayerInteractEntityEvent.class);
         register("PlayerPickupItem", PlayerPickupItemEvent.class);

@@ -16,6 +16,7 @@ public final class Cursor {
     private int count;
     private String customKey;
     private String customData;
+    private com.jedrock.api.item.Enchantments enchantments = com.jedrock.api.item.Enchantments.NONE;
 
     public int state() {
         return state;
@@ -35,17 +36,28 @@ public final class Cursor {
         return customData;
     }
 
+    /** What the carried stack is enchanted with; never null, {@code NONE} for a plain one. */
+    public com.jedrock.api.item.Enchantments enchantments() {
+        return enchantments;
+    }
+
     public boolean isEmpty() {
         return state == 0 || count <= 0;
     }
 
     /** Carry an ordinary stack. */
     public void set(int state, int count) {
-        set(state, count, null, null);
+        set(state, count, null, null, com.jedrock.api.item.Enchantments.NONE);
     }
 
-    /** Carry a stack, identity and all. */
+    /** Carry a stack with an identity but no enchantments — what most stacks are. */
     public void set(int state, int count, String customKey, String customData) {
+        set(state, count, customKey, customData, com.jedrock.api.item.Enchantments.NONE);
+    }
+
+    /** Carry a stack, identity and all — including what it is enchanted with. */
+    public void set(int state, int count, String customKey, String customData,
+                    com.jedrock.api.item.Enchantments enchantments) {
         if (state == 0 || count <= 0) {
             clear();
         } else {
@@ -53,6 +65,8 @@ public final class Cursor {
             this.count = count;
             this.customKey = customKey;
             this.customData = customData;
+            this.enchantments = enchantments == null
+                    ? com.jedrock.api.item.Enchantments.NONE : enchantments;
         }
     }
 
@@ -73,5 +87,6 @@ public final class Cursor {
         count = 0;
         customKey = null;
         customData = null;
+        enchantments = com.jedrock.api.item.Enchantments.NONE;
     }
 }

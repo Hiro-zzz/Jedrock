@@ -448,6 +448,16 @@ final class ConnectionBridge implements ConnectionListener {
                     return;
                 }
                 slot = editor.addToInventory(previous);
+                // Fortune: the server is what hands a drop out here, so this is one of the few
+                // enchantments it can honour rather than merely render. Vanilla's own shape — a chance
+                // at one extra per level — kept to the same one-block-at-a-time give.
+                int fortune = editor.getHeldEnchantments()
+                        .level(com.jedrock.api.item.Enchantment.FORTUNE);
+                for (int extra = 0; extra < fortune; extra++) {
+                    if (java.util.concurrent.ThreadLocalRandom.current().nextInt(fortune + 2) == 0) {
+                        editor.addToInventory(previous);
+                    }
+                }
             } else {
                 slot = editor.takeItem(state);
             }

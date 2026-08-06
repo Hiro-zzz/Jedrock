@@ -27,12 +27,19 @@ public final class CustomStackTrail {
             Long.getLong("jedrock.pe.stackTrailMs", 750L) * 1_000_000L;
 
     /** What a client report displaced: the item it was, and the identity that came with it. */
-    public record Displaced(String customKey, String customData) {}
+    public record Displaced(String customKey, String customData,
+                            com.jedrock.api.item.Enchantments enchantments) {
+
+        public Displaced {
+            enchantments = enchantments == null ? com.jedrock.api.item.Enchantments.NONE : enchantments;
+        }
+    }
 
     private final long windowNanos;
     private int state;
     private String customKey;
     private String customData;
+    private com.jedrock.api.item.Enchantments enchantments = com.jedrock.api.item.Enchantments.NONE;
     private long at;
 
     public CustomStackTrail() {
@@ -48,12 +55,22 @@ public final class CustomStackTrail {
      * worth carrying is remembered — an ordinary item has nothing the destination can't work out itself.
      */
     public void displaced(int state, String customKey, String customData, long now) {
-        if (windowNanos <= 0 || state == 0 || (customKey == null && customData == null)) {
+        displaced(state, customKey, customData, com.jedrock.api.item.Enchantments.NONE, now);
+    }
+
+    /** As above, for a stack whose identity includes what it is enchanted with. */
+    public void displaced(int state, String customKey, String customData,
+                          com.jedrock.api.item.Enchantments enchantments, long now) {
+        boolean plain = customKey == null && customData == null
+                && (enchantments == null || enchantments.isEmpty());
+        if (windowNanos <= 0 || state == 0 || plain) {
             return;
         }
         this.state = state;
         this.customKey = customKey;
         this.customData = customData;
+        this.enchantments = enchantments == null
+                ? com.jedrock.api.item.Enchantments.NONE : enchantments;
         this.at = now;
     }
 
@@ -66,7 +83,7 @@ public final class CustomStackTrail {
         if (windowNanos <= 0 || this.state == 0 || this.state != state || now - at >= windowNanos) {
             return null;
         }
-        Displaced claimed = new Displaced(customKey, customData);
+        Displaced claimed = new Displaced(customKey, customData, enchantments);
         clear();
         return claimed;
     }
@@ -76,6 +93,7 @@ public final class CustomStackTrail {
         state = 0;
         customKey = null;
         customData = null;
+        enchantments = com.jedrock.api.item.Enchantments.NONE;
         at = 0L;
     }
 }

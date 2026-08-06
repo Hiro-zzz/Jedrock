@@ -114,7 +114,8 @@ public final class ContainerService {
         Cursor cur = player.getCursor();
         // Return any carried item to storage; whatever doesn't fit is lost (no item entities to drop).
         while (!cur.isEmpty()
-                && player.addToInventory(cur.state(), cur.customKey(), cur.customData()) >= 0) {
+                && player.addToInventory(cur.state(), cur.customKey(), cur.customData(),
+                        cur.enchantments()) >= 0) {
             cur.setCount(cur.count() - 1);
         }
         cur.clear();
@@ -517,9 +518,10 @@ public final class ContainerService {
         int state = inv.stateAt(heldSlot);
         String key = inv.customKeyAt(heldSlot);
         String data = inv.customDataAt(heldSlot);
+        com.jedrock.api.item.Enchantments ench = inv.enchantmentsAt(heldSlot);
         int moved = 0;
         for (int c = 0; c < have; c++) {
-            if (container.give(state, 0, container.size(), key, data) < 0) break; // container full
+            if (container.give(state, 0, container.size(), key, data, ench) < 0) break; // container full
             moved++;
         }
         if (moved > 0 && !creative) { // survival consumes what was deposited; creative's hand is infinite
@@ -621,19 +623,19 @@ public final class ContainerService {
         for (int i = 0; i < chestSize; i++) {          // chest
             states[i] = chest.stateAt(i);
             counts[i] = chest.countAt(i);
-            display = withDisplay(display, states.length, i, player.displayForKey(chest.customKeyAt(i)));
+            display = withDisplay(display, states.length, i, player.displayFor(chest, i));
         }
         for (int i = 0; i < 27; i++) {                 // player main (core 9-35)
             states[chestSize + i] = ps[9 + i];
             counts[chestSize + i] = pc[9 + i];
             display = withDisplay(display, states.length, chestSize + i,
-                    player.displayForKey(inv.customKeyAt(9 + i)));
+                    player.displayFor(inv, 9 + i));
         }
         for (int i = 0; i < 9; i++) {                  // player hotbar (core 0-8)
             states[chestSize + 27 + i] = ps[i];
             counts[chestSize + 27 + i] = pc[i];
             display = withDisplay(display, states.length, chestSize + 27 + i,
-                    player.displayForKey(inv.customKeyAt(i)));
+                    player.displayFor(inv, i));
         }
         connection.setWindowItems(windowId, states, counts, display);
         connection.setCursorItem(player.getCursor().state(), player.getCursor().count());
@@ -731,11 +733,12 @@ public final class ContainerService {
         CustomStackTrail trail = player.getStackTrail();
         CustomStackTrail.Displaced arriving = state == 0 ? null : trail.claim(state, now);
         trail.displaced(container.stateAt(slot), container.customKeyAt(slot),
-                container.customDataAt(slot), now);
+                container.customDataAt(slot), container.enchantmentsAt(slot), now);
         if (arriving == null) {
             container.set(slot, state, count);
         } else {
-            container.set(slot, state, count, arriving.customKey(), arriving.customData());
+            container.set(slot, state, count, arriving.customKey(), arriving.customData(),
+                    arriving.enchantments());
         }
     }
 

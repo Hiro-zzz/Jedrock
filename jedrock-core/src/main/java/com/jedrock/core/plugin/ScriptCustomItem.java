@@ -76,6 +76,53 @@ public final class ScriptCustomItem {
         return this;
     }
 
+    /**
+     * What a freshly given stack of this item arrives enchanted with — {@code 'sharpness'} at one level,
+     * or a whole set at once. Returns this item, so calls chain.
+     *
+     * <pre>{@code
+     *   items.define('frostblade', 276)
+     *        .setEnchantment('sharpness', 3)
+     *        .setEnchantments({sharpness: 3, unbreaking: 1});   // …or all of them together
+     * }</pre>
+     *
+     * <p>Part of the definition, so a reload changes what the <em>next</em> one comes with; stacks already
+     * in the world keep what they were given, enchantments being per-stack once they exist.
+     */
+    public ScriptCustomItem setEnchantment(String name, int level) {
+        com.jedrock.api.item.Enchantment enchantment = requireEnchantment(name);
+        item.setEnchantments(item.getEnchantments().with(enchantment, level));
+        return this;
+    }
+
+    /** Every enchantment at once, as a plain object of {@code name: level}. */
+    public ScriptCustomItem setEnchantments(Object levels) {
+        com.jedrock.api.item.Enchantments set = com.jedrock.api.item.Enchantments.NONE;
+        if (levels instanceof org.mozilla.javascript.Scriptable object) {
+            for (Object id : object.getIds()) {
+                String key = String.valueOf(id);
+                Object value = object.get(key, object);
+                int level = value instanceof Number n ? n.intValue() : 0;
+                set = set.with(requireEnchantment(key), level);
+            }
+        }
+        item.setEnchantments(set);
+        return this;
+    }
+
+    /** What this definition hands out, as {@code {sharpness: 3}} would have set it. */
+    public String getEnchantments() {
+        return item.getEnchantments().toCompactString();
+    }
+
+    private static com.jedrock.api.item.Enchantment requireEnchantment(String name) {
+        com.jedrock.api.item.Enchantment enchantment = com.jedrock.api.item.Enchantment.fromString(name);
+        if (enchantment == null) {
+            throw new IllegalArgumentException("no such enchantment: '" + name + "'");
+        }
+        return enchantment;
+    }
+
     /** Right-clicked while held. {@code fn(player, ctx)}; return {@code true} to consume the use. */
     public ScriptCustomItem onUse(Function handler) {
         return hook(CoreCustomItem.Trigger.USE, handler);

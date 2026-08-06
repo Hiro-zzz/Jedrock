@@ -8,6 +8,46 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Enchantments — and the ids that don't line up.** `/enchant <player> <enchantment> [level]`, `clear`,
+  `list`; `items.enchant(player, 'sharpness', 3)` from a script; and `.setEnchantments({sharpness: 3})` on
+  a custom item's definition so it arrives enchanted.
+
+  Cheaper than it sounds, because the hard part was already built: an enchantment is item NBT — an `ench`
+  list at the root of the stack's compound, entries of `{id: short, lvl: short}` — and this server already
+  writes item NBT in three dialects it learned the hard way. One more tag beside `display`, and the client
+  draws the glint and the tooltip itself.
+
+  **The genuinely interesting part is that Java and Bedrock number enchantments differently.** Not by an
+  offset, either: sharpness is 16 on Java and 9 on Bedrock, and three of them are *reordered* across ids
+  both editions use for something — Java runs respiration 5, aqua affinity 6, thorns 7 where Bedrock runs
+  thorns 5, respiration 6, aqua affinity 8. A single shared table wouldn't have failed; it would have
+  handed a Bedrock player thorns where a Java player asked for respiration, with nothing anywhere saying
+  so. `EnchantmentIds` maps each side separately (as `EntityTypeIds` does for entities), quoting its
+  source, and a test pins the three that overlap.
+
+  An enchantment is **part of a stack's identity**, which is what most of the work went into: it rides
+  through every window click, every chest transfer, a Bedrock client's own drag (the trail that rescues a
+  custom item's key carries this too), persists in the level file — **v7**, which loads a v2–v6 world in
+  place — and keeps two otherwise identical stacks from merging. Without that last one, a sharpness sword
+  quietly dissolves into a pile of plain ones the first time they meet in a slot.
+
+  **What the server acts on is deliberately narrow**, and the docs say so rather than implying more: the
+  four decisions the core already owns. Sharpness (with smite and bane, which have nothing here to tell
+  apart) adds to a melee hit; protection takes a share off everything, feather falling off a fall; thorns
+  answers back through the same hurt path, so a thorns kill reads like any other death; fortune multiplies
+  what a mined block drops, the server being what hands it out. Efficiency needs nothing — legacy clients
+  time their own digging from the item's NBT.
+
+  Everything else renders, glints and reads correctly and changes nothing, because it is for a system this
+  server hasn't got: unbreaking wants durability, power and flame want projectiles, fire aspect wants
+  fire, knockback wants physics. Silk touch is decoration for a happier reason — a broken block already
+  drops itself. **No enchanting table and no XP**: a table would need levels this server doesn't keep and
+  a window the 1.1.5 client cannot raise.
+
+  On 0.14 the tag goes through the same crash gate blocks and items already do (its table stops at id 24),
+  and `-Djedrock.pe.enchantNbt=false` stops writing it at all — item NBT on that client is precisely where
+  a quiet failure has happened before.
+
 - **Status effects — `/effect`, and the whole notion of being under one.** There were none: no packet, no
   enum, nothing anywhere that knew a player could be affected by something.
 

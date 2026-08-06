@@ -109,7 +109,7 @@ public final class ScriptItems {
         if (item == null) {
             throw new IllegalArgumentException("no item is defined as '" + key + "'");
         }
-        return target.giveItem(item.getState(), count, item.getKey());
+        return target.giveItem(item.getState(), count, item.getKey(), item.getEnchantments());
     }
 
     /** Give one. */
@@ -129,6 +129,65 @@ public final class ScriptItems {
         }
         target.getInventory().set(slot, item.getState(), Math.max(1, count), item.getKey());
         target.syncSlot(slot);
+    }
+
+    // ===== Enchantments =====
+    //
+    // An enchantment belongs to a stack, not to a definition, so these act on what is in a slot. Most of
+    // them are decoration on this server, honestly so — see the readme for which ones it acts on.
+
+    /**
+     * Enchant what a player is holding: {@code items.enchant(player, 'sharpness', 3)}. A level of zero or
+     * less takes it off. Fires {@code ItemEnchant}, so another plugin may refuse or cap it.
+     *
+     * @return whether the stack changed
+     */
+    public boolean enchant(Object player, String name, int level) {
+        CorePlayer target = core(player);
+        return enchants() != null && enchants().enchantHeld(target, requireEnchantment(name), level);
+    }
+
+    public boolean enchant(Object player, String name) {
+        return enchant(player, name, 1);
+    }
+
+    /** The same, for a particular inventory slot rather than the hand. */
+    public boolean enchantAt(Object player, int slot, String name, int level) {
+        CorePlayer target = core(player);
+        return enchants() != null && enchants().enchant(target, slot, requireEnchantment(name), level);
+    }
+
+    /** Strip every enchantment from what a player is holding. @return whether it had any. */
+    public boolean disenchant(Object player) {
+        CorePlayer target = core(player);
+        return enchants() != null && enchants().disenchant(target, target.getHeldItemSlot());
+    }
+
+    /** The level of one enchantment on what a player is holding, or {@code 0}. */
+    public int enchantmentLevel(Object player, String name) {
+        return core(player).getHeldEnchantments().level(requireEnchantment(name));
+    }
+
+    /** Everything the held stack is enchanted with, as {@code 'sharpness:3,unbreaking:1'} ({@code ''} = none). */
+    public String enchantmentsOf(Object player) {
+        return core(player).getHeldEnchantments().toCompactString();
+    }
+
+    /** The same for one inventory slot. */
+    public String enchantmentsAt(Object player, int slot) {
+        return core(player).getInventory().enchantmentsAt(slot).toCompactString();
+    }
+
+    private static com.jedrock.api.item.Enchantment requireEnchantment(String name) {
+        com.jedrock.api.item.Enchantment enchantment = com.jedrock.api.item.Enchantment.fromString(name);
+        if (enchantment == null) {
+            throw new IllegalArgumentException("no such enchantment: '" + name + "'");
+        }
+        return enchantment;
+    }
+
+    private com.jedrock.core.item.EnchantService enchants() {
+        return manager.enchants();
     }
 
     /** The custom key in an inventory slot, or {@code null} for an ordinary item. */

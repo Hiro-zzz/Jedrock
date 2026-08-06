@@ -65,8 +65,8 @@ public final class LevelIO {
 
     /** Current on-disk format version; bump on any incompatible layout change. (v2 added the biome map,
      *  v3 the chest container contents, v4 the custom-item key each stack carries, v5 the dimension,
-     *  v6 the per-stack data a single stack carries on top of that key.) */
-    public static final int FORMAT_VERSION = 6;
+     *  v6 the per-stack data a single stack carries on top of that key, v7 its enchantments.) */
+    public static final int FORMAT_VERSION = 7;
 
     private static final byte[] MAGIC = {'J', 'D', 'W', 'L'};
     private static final int SECTION_SHORTS = 4096;
@@ -156,6 +156,10 @@ public final class LevelIO {
                         // whatever the script that wrote it decided, and this file only has to give it back.
                         String data = c.customDataAt(i);
                         body.writeUTF(data == null ? "" : data);
+                        // v7: what this stack is enchanted with, in the same compact "name:level" form a
+                        // script and a command use — a name rather than an id, so the file does not have
+                        // to pick one edition's numbering to be written in.
+                        body.writeUTF(c.enchantmentsAt(i).toCompactString());
                     }
                 }
             } finally {
@@ -273,8 +277,10 @@ public final class LevelIO {
                         // predate per-stack data, so every stack in one is a plain instance of its item.
                         String key = version < 4 ? "" : body.readUTF();
                         String data = version < 6 ? "" : body.readUTF();
+                        String ench = version < 7 ? "" : body.readUTF();
                         container.set(i, state, count, key.isEmpty() ? null : key,
-                                data.isEmpty() ? null : data);
+                                data.isEmpty() ? null : data,
+                                com.jedrock.api.item.Enchantments.parse(ench));
                     }
                     containers.put(pos, container);
                 }

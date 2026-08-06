@@ -89,9 +89,11 @@ public final class GiveCommand implements Command {
         int state;
         String key;
         String label;
+        com.jedrock.api.item.Enchantments enchantments = com.jedrock.api.item.Enchantments.NONE;
         if (custom != null) {
             state = custom.getState();
             key = custom.getKey();
+            enchantments = custom.getEnchantments();
             label = custom.getDisplayName() != null ? custom.getDisplayName() : custom.getKey();
         } else {
             state = ItemNames.parse(token);
@@ -104,7 +106,7 @@ public final class GiveCommand implements Command {
             label = ItemNames.name(state);
         }
 
-        int given = target.giveItem(state, count, key);
+        int given = target.giveItem(state, count, key, enchantments);
         if (given == 0) {
             sender.sendMessage("{red}" + ChatText.escape(target.getName())
                     + "{red}'s inventory is full — nothing was given.");

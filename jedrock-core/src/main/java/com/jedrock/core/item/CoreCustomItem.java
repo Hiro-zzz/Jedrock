@@ -48,6 +48,13 @@ public final class CoreCustomItem implements CustomItem {
     private volatile String displayName;
     private volatile String[] lore;
     private volatile long cooldownMillis;
+    /**
+     * What a stack of this item arrives enchanted with. Part of the <em>definition</em>, so a hot reload
+     * changes what the next one comes with — while a stack that is already somewhere keeps whatever it
+     * was given, enchantments being per-stack once they exist.
+     */
+    private volatile com.jedrock.api.item.Enchantments enchantments =
+            com.jedrock.api.item.Enchantments.NONE;
     private final Map<Trigger, ItemHook> hooks = new EnumMap<>(Trigger.class);
 
     public CoreCustomItem(String key, int state, String displayName, String[] lore) {
@@ -74,6 +81,16 @@ public final class CoreCustomItem implements CustomItem {
 
     public void setDisplayName(String displayName) {
         this.displayName = displayName == null ? key : displayName;
+    }
+
+    /** What a freshly given stack of this item is enchanted with; never null. */
+    public com.jedrock.api.item.Enchantments getEnchantments() {
+        return enchantments;
+    }
+
+    public void setEnchantments(com.jedrock.api.item.Enchantments enchantments) {
+        this.enchantments = enchantments == null
+                ? com.jedrock.api.item.Enchantments.NONE : enchantments;
     }
 
     @Override

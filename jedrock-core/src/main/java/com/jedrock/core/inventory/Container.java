@@ -1,5 +1,7 @@
 package com.jedrock.core.inventory;
 
+import com.jedrock.api.item.Enchantments;
+
 /**
  * A flat array of item slots — the shared backing for the player inventory and, later, block containers
  * (chests). Each slot is a canonical {@code (id << 4) | meta} state (0 = empty) plus a count. Only
@@ -28,12 +30,20 @@ public class Container {
      * stacks merge only if their data is equal, so a half-spent wand never dissolves into a full one.
      */
     protected final String[] customData;
+    /**
+     * Per slot, what that stack is enchanted with — never null, {@link Enchantments#NONE} for the
+     * overwhelming majority. Part of a stack's identity like the two above, and for the same reason: it
+     * has to survive every move, and two stacks that differ in it are different items.
+     */
+    protected final Enchantments[] enchantments;
 
     public Container(int size) {
         this.states = new int[size];
         this.counts = new int[size];
         this.customKeys = new String[size];
         this.customData = new String[size];
+        this.enchantments = new Enchantments[size];
+        java.util.Arrays.fill(this.enchantments, Enchantments.NONE);
     }
 
     public int size() {
@@ -68,6 +78,23 @@ public class Container {
     /** This slot's own per-stack data, or {@code null}. */
     public String customDataAt(int slot) {
         return slot >= 0 && slot < customData.length ? customData[slot] : null;
+    }
+
+    /** What the stack in this slot is enchanted with; never null. */
+    public Enchantments enchantmentsAt(int slot) {
+        return slot >= 0 && slot < enchantments.length && enchantments[slot] != null
+                ? enchantments[slot] : Enchantments.NONE;
+    }
+
+    /**
+     * Enchant whatever is already in {@code slot}, leaving the item itself alone — the counterpart of
+     * {@link #setCustomData}, and ignored for an empty slot for the same reason: an enchantment belongs
+     * to a stack, and there is no stack to belong to.
+     */
+    public void setEnchantments(int slot, Enchantments value) {
+        if (slot >= 0 && slot < enchantments.length && !isEmpty(slot)) {
+            enchantments[slot] = value == null ? Enchantments.NONE : value;
+        }
     }
 
     /**
@@ -121,8 +148,13 @@ public class Container {
         set(slot, state, count, customKey, null);
     }
 
-    /** Set a slot outright, identity and all — what every move of a whole stack goes through. */
+    /** Set a slot outright, keeping no enchantments — a stack that never had any. */
     public void set(int slot, int state, int count, String customKey, String data) {
+        set(slot, state, count, customKey, data, Enchantments.NONE);
+    }
+
+    /** Set a slot outright, identity and all — what every move of a whole stack goes through. */
+    public void set(int slot, int state, int count, String customKey, String data, Enchantments ench) {
         if (state == 0 || count <= 0) {
             clear(slot);
         } else {
@@ -130,6 +162,7 @@ public class Container {
             counts[slot] = count;
             customKeys[slot] = customKey;
             customData[slot] = data;
+            enchantments[slot] = ench == null ? Enchantments.NONE : ench;
         }
     }
 
@@ -154,6 +187,7 @@ public class Container {
         counts[slot] = 0;
         customKeys[slot] = null;
         customData[slot] = null;
+        enchantments[slot] = Enchantments.NONE;
     }
 
     /**
@@ -169,6 +203,11 @@ public class Container {
         return give(state, from, to, customKey, null);
     }
 
+    /** Add one item, identity and all — the form a move of an enchanted stack goes through. */
+    public int give(int state, int from, int to, String customKey, String data, Enchantments ench) {
+        return giveStack(state, from, to, customKey, data, ench);
+    }
+
     /**
      * Add one item into slots {@code [from, to)}. A stack only merges with one of the <b>same state, the
      * same custom key and the same per-stack data</b>, so a named sword never quietly stacks with an
@@ -178,11 +217,19 @@ public class Container {
      * @return the affected slot, or -1 if it didn't fit
      */
     public int give(int state, int from, int to, String customKey, String data) {
+        return giveStack(state, from, to, customKey, data, Enchantments.NONE);
+    }
+
+    /** The one implementation: everything above funnels here so the merge test is written once. */
+    private int giveStack(int state, int from, int to, String customKey, String data,
+                          Enchantments ench) {
         if (state == 0) {
             return -1;
         }
+        Enchantments enchant = ench == null ? Enchantments.NONE : ench;
         for (int i = from; i < to; i++) {
-            if (states[i] == state && counts[i] < MAX_STACK && sameStack(i, customKey, data)) {
+            if (states[i] == state && counts[i] < MAX_STACK && sameStack(i, customKey, data)
+                    && enchantmentsAt(i).equals(enchant)) {
                 counts[i]++;
                 return i;
             }
@@ -193,6 +240,7 @@ public class Container {
                 counts[i] = 1;
                 customKeys[i] = customKey;
                 customData[i] = data;
+                enchantments[i] = enchant;
                 return i;
             }
         }

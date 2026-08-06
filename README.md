@@ -196,7 +196,7 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   ever changes). **In-game commands** work cross-edition — Java sends `/…` straight through as chat, and
   Bedrock is handed an `AvailableCommands` manifest so its client parses the line and sends it back. The
   built-in set: `/help [cmd]`, `/list`, `/tps`, `/say`, `/me`, `/msg`, `/gamemode`, `/tp`, `/tphere`,
-  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/give`, `/effect`, `/op`, `/deop`, `/perm`, `/region`, `/world`, `/pick`,
+  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/give`, `/effect`, `/enchant`, `/op`, `/deop`, `/perm`, `/region`, `/world`, `/pick`,
   `/puppet`, `/hologram`, `/pose`, `/time`, `/about`, plus the [moderation set](#moderation). A deliberately minimal **survival inventory** (36 slots)
   tracks only what a survival player mines and places: mining a block drops it into the hotbar, placing
   consumes it, and the changed slot is pushed live so the HUD refreshes. On PE 1.1.5 the player window is
@@ -300,8 +300,9 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   armor and off-hand slots. **Chests** are a placeable block (right-click to open) backed by a 27-slot
   container: move items in and out, shift to quick-transfer, in survival <em>and</em> creative (the
   creative inventory is mirrored server-side so the chest's player half is tracked). Chest contents
-  **persist** in the level file (format v6, which loads a v2–v5 world in place and rewrites it on the
-  next save; v3 added chests, v4 the custom-item key each stack carries, v6 that stack's own data).
+  **persist** in the level file (format v7, which loads a v2–v6 world in place and rewrites it on the
+  next save; v3 added chests, v4 the custom-item key each stack carries, v6 that stack's own data, v7 its
+  enchantments).
   A custom item keeps its name, its lore and its own state through every one of those moves, and the
   window draws the name. Wired for JE 1.12.2 and 1.8.
   True to the model, the server only <em>stores and moves</em> items — no crafting or smelting simulation,
@@ -377,7 +378,7 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   cancelling the event the core already routes that decision through.
   Identity is the **key**, and a stack carries the key rather than a copy of the definition. That is what
   makes a custom item survive what a reference could not: a hot reload re-points every existing stack at
-  the new definition, the level file (v6) restores a chest full of them long before any plugin exists, and
+  the new definition, the level file (v7) restores a chest full of them long before any plugin exists, and
   an item whose plugin was removed simply behaves as the vanilla one it is drawn as until its script comes
   back. A custom stack never merges with an ordinary one of the same state. Dispatch listeners are
   registered only while some item actually has a behaviour, so a purely cosmetic item — or none at all —
@@ -400,6 +401,28 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   test: the 1.1.5 client neither crashed nor complained, it just kept showing the vanilla name. An ordinary
   item still writes the exact bytes it always did, so nothing changed for a server that defines no items.
   **Confirmed on a real client on every one of the four**, which is what it took to trust either dialect.
+
+- ✅ **Enchantments, cross-edition — and the ids that don't match.** `/enchant <player> <enchantment>
+  [level]`, `clear`, `list`, `items.enchant(player, 'sharpness', 3)` from a script, and
+  `.setEnchantments({sharpness: 3})` on a custom item's definition so it arrives enchanted. An
+  enchantment is item NBT — an `ench` list at the root of the stack's compound — which this server already
+  writes in three dialects, so the client draws the glint and the tooltip and the wire work is one more
+  tag beside the name.
+  **The interesting half is that Java and Bedrock number enchantments differently**, and not by an offset:
+  sharpness is 16 on Java and 9 on Bedrock, and three of them — respiration, thorns, aqua affinity — are
+  *reordered* across ids both editions use for something. A shared table wouldn't fail, it would quietly
+  give a Bedrock player thorns where a Java player asked for respiration, so `EnchantmentIds` maps each
+  side separately (as `EntityTypeIds` does for entities) and a test pins the divergence.
+  An enchantment is part of a **stack's identity**: it survives every move (window, chest, a Bedrock
+  client's own drag), persists in the level file (v7), and keeps two otherwise identical stacks from
+  merging — a sharpness sword never dissolves into a pile of plain ones.
+  **What the server acts on is honestly narrow**: sharpness (with smite and bane), protection, feather
+  falling, thorns and fortune — the four decisions the core already owns, being melee damage, damage
+  taken, a fall, and what a mined block drops. Everything else renders, glints and reads correctly and
+  changes nothing, because it is for a system this server doesn't have: unbreaking and mending want
+  durability, power and flame want projectiles, fire aspect wants fire, knockback wants physics, and
+  efficiency is the client's own arithmetic and works by arriving. **There is no enchanting table and no
+  XP** — an enchantment is given, by command, script or definition.
 
 - ✅ **Status effects, cross-edition.** `/effect <player> <effect> [seconds] [level]`, `clear`, `list`, and
   `player.addEffect('speed', 30, 2)` from a script. The whole legacy set of 23, on all four protocols —
@@ -971,6 +994,14 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   head-only packet on that wire), so a puppet that follows somebody every tick costs a move every tick
   there and one small packet on Java. 0.14 renders only the mobs it is old enough to know; anything
   younger silently doesn't appear.
+- **Half the enchantments are decoration, and the readme would rather say so.** They all render, glint
+  and read correctly on every edition — but this server has no durability, no projectiles, no fire and no
+  knockback, so unbreaking, mending, power, punch, flame, infinity, fire aspect and knockback change
+  nothing. Silk touch changes nothing either, for a happier reason: a broken block already drops itself,
+  there being no drop tables to bypass. What the server does act on is sharpness (with smite and bane),
+  protection, feather falling, thorns and fortune. There is also no enchanting table and no XP — an
+  enchantment is given, not earned, because a table would need levels this server doesn't keep and a
+  window the 1.1.5 client cannot raise.
 - **Per-stack state lives exactly as long as the stack does.** A wand's remaining charges persist in a
   chest, because chests are in the level file; the same wand in a player's backpack loses them at logout,
   because a player's inventory has never been persisted here at all. Nothing is lost that wasn't already
@@ -1007,8 +1038,11 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   reasoning that outlives any particular list: everything ground-truthed against PocketMine is
   byte-tested, and a byte test only proves the encoder agrees with itself. The item-NBT dialect passed
   its own tests and still showed the vanilla name on a real client. So anything newly added to that wire
-  is unverified until somebody logs in — and nothing is waiting on one right now: status effects
-  (`MobEffect`, `0x1d` at 1.1.5 and `0xa5` at 0.14) were confirmed on real clients on both eras.
+  is unverified until somebody logs in — which right now means the **`ench` tag on both Bedrock eras**.
+  Its shape and ids came from PocketMine and are pinned byte-for-byte, but the whole visible feature is a
+  glint and a tooltip, and no byte test can see either. (Status effects, the previous occupant of this
+  sentence, were confirmed on real clients on both eras.) `-Djedrock.pe.enchantNbt=false` stops writing
+  the tag, since item NBT on that client is exactly where a quiet failure has happened before.
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
   runtime world simulation or physics, no 1.13+ flattening. Knockback is excluded for the same reason —
   the server simulates no physics. Custom logic that wants any of these lives in a script as an
