@@ -1038,11 +1038,10 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   reasoning that outlives any particular list: everything ground-truthed against PocketMine is
   byte-tested, and a byte test only proves the encoder agrees with itself. The item-NBT dialect passed
   its own tests and still showed the vanilla name on a real client. So anything newly added to that wire
-  is unverified until somebody logs in — which right now means the **`ench` tag on both Bedrock eras**.
-  Its shape and ids came from PocketMine and are pinned byte-for-byte, but the whole visible feature is a
-  glint and a tooltip, and no byte test can see either. (Status effects, the previous occupant of this
-  sentence, were confirmed on real clients on both eras.) `-Djedrock.pe.enchantNbt=false` stops writing
-  the tag, since item NBT on that client is exactly where a quiet failure has happened before.
+  is unverified until somebody logs in, and nothing is waiting on one right now — status effects and the
+  `ench` tag, the two most recent additions to that wire, have each been in front of real clients on both
+  eras. `-Djedrock.pe.enchantNbt=false` stays as an escape hatch rather than a doubt, item NBT on that
+  client being where a quiet failure has happened before.
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
   runtime world simulation or physics, no 1.13+ flattening. Knockback is excluded for the same reason —
   the server simulates no physics. Custom logic that wants any of these lives in a script as an

@@ -48,6 +48,10 @@ unstable — anything may change between entries.
   and `-Djedrock.pe.enchantNbt=false` stops writing it at all — item NBT on that client is precisely where
   a quiet failure has happened before.
 
+  **Confirmed on real clients, all four**, which for this feature is more than the usual formality: the
+  entire visible half is a glint and a tooltip line, and no byte test can see either. A tag written to the
+  wrong dialect, or with the other edition's ids, would have passed every test in this repository.
+
 - **Status effects — `/effect`, and the whole notion of being under one.** There were none: no packet, no
   enum, nothing anywhere that knew a player could be affected by something.
 
