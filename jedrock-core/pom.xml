@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.jedrock</groupId>
         <artifactId>jedrock</artifactId>
-        <version>0.2.2-SNAPSHOT</version>
+        <version>0.2.2</version>
     </parent>
 
     <artifactId>jedrock-core</artifactId>
