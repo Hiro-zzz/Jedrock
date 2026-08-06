@@ -122,4 +122,41 @@ class McpeItemNbtEncodingTest {
         assertEquals(0, ByteBufUtils.readSignedVarInt(b));
         assertEquals(0, b.readableBytes(), "air carries no further fields, display or not");
     }
+
+    @Test
+    void anEnchantmentUsesBedrocksOwnIdAndLittleEndianShorts() {
+        ByteBuf b = Unpooled.buffer();
+
+        McpeItemNbt.writeSlotNbt(b, ItemDisplay.enchanted(
+                com.jedrock.api.item.Enchantments.of(com.jedrock.api.item.Enchantment.SHARPNESS, 2)));
+
+        int length = b.readShortLE() & 0xFFFF;
+        assertTrue(length > 0, "the compound is length-prefixed by the Slot's own LE short");
+        assertEquals(0x0A, b.readByte(), "root compound");
+        assertEquals("", readLeString(b), "…unnamed");
+        assertEquals(0x09, b.readByte(), "TAG_List");
+        assertEquals("ench", readLeString(b), "at the root, beside display — not inside it");
+        assertEquals(0x0A, b.readByte(), "…of compounds");
+        assertEquals(1, b.readIntLE(), "one entry, LE like everything else in this dialect");
+        assertEquals(0x02, b.readByte());
+        assertEquals("id", readLeString(b));
+        assertEquals(9, b.readShortLE(), "sharpness is 9 on BEDROCK — it is 16 on Java");
+        assertEquals(0x02, b.readByte());
+        assertEquals("lvl", readLeString(b));
+        assertEquals(2, b.readShortLE());
+        assertEquals(0x00, b.readByte(), "closes the entry");
+        assertEquals(0x00, b.readByte(), "closes the root");
+        b.release();
+    }
+
+    @Test
+    void anOrdinaryStackIsUnchangedByEnchantmentsExisting() {
+        ByteBuf b = Unpooled.buffer();
+
+        McpeItemNbt.writeSlotNbt(b, null, true);
+
+        assertEquals(2, b.readableBytes(), "the bare LE-short zero, exactly as before");
+        assertEquals(0, b.readShortLE());
+        b.release();
+    }
 }

@@ -296,6 +296,30 @@ final class McpePackets {
         ByteBufUtils.writeSignedVarInt(b, (int) timeOfDay);
     }
 
+    /** MobEffect events, verbatim from PMMP's {@code MobEffectPacket} at protocol 113. */
+    static final int EFFECT_EVENT_ADD = 1;
+    static final int EFFECT_EVENT_MODIFY = 2;
+    static final int EFFECT_EVENT_REMOVE = 3;
+
+    /**
+     * MobEffect (0x1D): {@code entityRuntimeId (uvarlong)}, {@code eventId (byte)}, then
+     * {@code effectId}, {@code amplifier}, a {@code particles} bool and {@code duration} — the three
+     * numbers all <b>signed</b> (zigzag) varints, as {@code putVarInt} writes them.
+     *
+     * <p>Removing one is the same packet with {@link #EFFECT_EVENT_REMOVE}, where only the effect id is
+     * read — the rest is written anyway, since the decoder reads the whole body regardless.
+     */
+    static void mobEffect(ByteBuf b, long runtimeId, int event, int effectId, int amplifier,
+                          boolean particles, int durationTicks) {
+        ByteBufUtils.writeVarInt(b, ID_MOB_EFFECT);
+        ByteBufUtils.writeVarLong(b, runtimeId);
+        b.writeByte(event);
+        ByteBufUtils.writeSignedVarInt(b, effectId);
+        ByteBufUtils.writeSignedVarInt(b, amplifier);
+        b.writeByte(particles ? 1 : 0);
+        ByteBufUtils.writeSignedVarInt(b, durationTicks);
+    }
+
     static void removeEntity(ByteBuf b, long entityId) {
         ByteBufUtils.writeVarInt(b, ID_REMOVE_ENTITY);
         ByteBufUtils.writeSignedVarLong(b, entityId);

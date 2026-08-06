@@ -39,6 +39,10 @@ public final class Java1_8Protocol {
     public static final int CB_ENTITY_HEAD_ROTATION = 0x19;
     public static final int CB_ENTITY_STATUS = 0x1A;     // int entityId + byte status (2 = hurt)
     public static final int CB_ENTITY_METADATA = 0x1C;
+    public static final int CB_ENTITY_EFFECT = 0x1D;        // give an entity a status effect
+    public static final int CB_REMOVE_ENTITY_EFFECT = 0x1E; // take one away again
+    /** The entity id Join Game gives the client for itself — the same 1 as 1.12.2. */
+    public static final int SELF_ENTITY_ID = 1;
     public static final int CB_OPEN_WINDOW = 0x2D;   // open a container GUI (chest)
     public static final int CB_WINDOW_ITEMS = 0x30; // replace a window's contents (player inventory)
     public static final int CB_SET_SLOT = 0x2F;      // update one window slot

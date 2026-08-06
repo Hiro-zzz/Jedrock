@@ -4,6 +4,7 @@ import com.jedrock.api.command.CommandSender;
 import com.jedrock.api.player.GameMode;
 import com.jedrock.api.player.Player;
 import com.jedrock.api.Server;
+import com.jedrock.core.JedrockServer;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -137,6 +138,35 @@ public interface ArgType<T> {
         }
         @Override public List<String> complete(Server s, CommandSender c, String partial) {
             return matching(partial, List.of("survival", "creative", "adventure", "spectator"));
+        }
+    };
+
+    /**
+     * An item, as a canonical {@code (id << 4) | meta} state — a name ({@code red_wool}), a family and a
+     * meta ({@code wool:14}) or the numeric forms, per {@link com.jedrock.api.item.ItemNames}.
+     *
+     * <p>Completion offers the <b>custom items defined right now</b> before the vanilla names, because a
+     * server that has defined a frostblade is a server where somebody is about to type it. Parsing does
+     * not resolve a custom key — a key names a definition, not a state, so the command that means to
+     * accept one (see {@code GiveCommand}) checks the registry itself before falling back here.
+     */
+    ArgType<Integer> ITEM = new ArgType<>() {
+        @Override public String label() { return "item"; }
+        @Override public Integer parse(Server s, CommandSender c, String t) throws ArgParseException {
+            int state = com.jedrock.api.item.ItemNames.parse(t);
+            if (state <= 0) {
+                throw new ArgParseException("'" + t + "' is not an item — try a name like "
+                        + "'red_wool', or an id like '35:14'");
+            }
+            return state;
+        }
+        @Override public List<String> complete(Server server, CommandSender c, String partial) {
+            List<String> options = new ArrayList<>();
+            if (server instanceof JedrockServer core) {
+                options.addAll(core.getItems().keys());
+            }
+            options.addAll(com.jedrock.api.item.ItemNames.names());
+            return matching(partial, options);
         }
     };
 

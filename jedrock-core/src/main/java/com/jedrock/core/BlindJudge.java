@@ -32,11 +32,27 @@ public final class BlindJudge {
 
     /** @return whether moving from {@code (fx,fy,fz)} to {@code (tx,ty,tz)} is a believable step. */
     public boolean allowsMove(double fx, double fy, double fz, double tx, double ty, double tz) {
+        return allowsMove(fx, fy, fz, tx, ty, tz, 1.0);
+    }
+
+    /**
+     * As {@link #allowsMove(double, double, double, double, double, double)}, but for a player who has
+     * been given permission to move further than usual — {@code allowance} is a multiplier on the limit,
+     * {@code 1.0} being an ordinary player.
+     *
+     * <p>This exists because of status effects: speed and jump boost are applied by the <em>client</em>
+     * (movement here is client-authoritative), so a sped-up player genuinely covers more ground between
+     * two reports and would otherwise be snapped back by this very check. The judge stays blind — it is
+     * told how much rope to give, not why.
+     */
+    public boolean allowsMove(double fx, double fy, double fz, double tx, double ty, double tz,
+                              double allowance) {
         if (!enabled) {
             return true;
         }
         double dx = tx - fx, dy = ty - fy, dz = tz - fz;
-        return dx * dx + dy * dy + dz * dz <= maxMoveDeltaSq;
+        double limit = maxMoveDeltaSq * (allowance <= 1.0 ? 1.0 : allowance * allowance);
+        return dx * dx + dy * dy + dz * dz <= limit;
     }
 
     /** @return whether the block at {@code (bx,by,bz)} is within reach of a player at {@code (px,py,pz)}. */

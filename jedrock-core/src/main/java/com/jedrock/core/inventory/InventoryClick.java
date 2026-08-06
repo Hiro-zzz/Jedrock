@@ -19,6 +19,7 @@ public final class InventoryClick {
         int sCount = c.countAt(slot);
         String sKey = c.customKeyAt(slot);
         String sData = c.customDataAt(slot);
+        com.jedrock.api.item.Enchantments sEnch = c.enchantmentsAt(slot);
 
         if (cur.isEmpty()) {
             if (sState == 0) {
@@ -26,10 +27,10 @@ public final class InventoryClick {
             }
             if (right) {
                 int take = (sCount + 1) / 2;          // pick up half (rounded up)
-                cur.set(sState, take, sKey, sData);   // a split leaves both halves the same item
+                cur.set(sState, take, sKey, sData, sEnch); // a split leaves both halves the same item
                 c.setCount(slot, sCount - take);
             } else {
-                cur.set(sState, sCount, sKey, sData); // pick up the whole stack
+                cur.set(sState, sCount, sKey, sData, sEnch); // pick up the whole stack
                 c.clear(slot);
             }
             return;
@@ -38,16 +39,19 @@ public final class InventoryClick {
         // Cursor holds items.
         if (sState == 0) {                             // place into an empty slot
             if (right) {
-                c.set(slot, cur.state(), 1, cur.customKey(), cur.customData());
+                c.set(slot, cur.state(), 1, cur.customKey(), cur.customData(), cur.enchantments());
                 cur.setCount(cur.count() - 1);
             } else {
-                c.set(slot, cur.state(), cur.count(), cur.customKey(), cur.customData());
+                c.set(slot, cur.state(), cur.count(), cur.customKey(), cur.customData(),
+                        cur.enchantments());
                 cur.clear();
             }
-        } else if (sState == cur.state() && c.sameStack(slot, cur.customKey(), cur.customData())) {
+        } else if (sState == cur.state() && c.sameStack(slot, cur.customKey(), cur.customData())
+                && sEnch.equals(cur.enchantments())) {
             // The same item in every sense that matters — merge up to a full stack. A named sword does
-            // not merge into an ordinary one drawn the same way, nor a spent charge into a full one:
-            // those fall through to the swap below, which is what they look like to a player.
+            // not merge into an ordinary one drawn the same way, nor a spent charge into a full one, nor
+            // a sharpness one into a plain one: those fall through to the swap below, which is what they
+            // look like to a player.
             int space = Container.MAX_STACK - sCount;
             if (space <= 0) {
                 return; // slot already full — a no-op (don't swap identical items)
@@ -57,8 +61,8 @@ public final class InventoryClick {
             c.setCount(slot, sCount + move);
             cur.setCount(cur.count() - move);
         } else {                                       // different item — swap slot and cursor
-            c.set(slot, cur.state(), cur.count(), cur.customKey(), cur.customData());
-            cur.set(sState, sCount, sKey, sData);
+            c.set(slot, cur.state(), cur.count(), cur.customKey(), cur.customData(), cur.enchantments());
+            cur.set(sState, sCount, sKey, sData, sEnch);
         }
     }
 
@@ -82,7 +86,8 @@ public final class InventoryClick {
         }
         String key = src.customKeyAt(slot);
         String data = src.customDataAt(slot);
-        while (count > 0 && dst.give(state, from, to, key, data) >= 0) {
+        com.jedrock.api.item.Enchantments ench = src.enchantmentsAt(slot);
+        while (count > 0 && dst.give(state, from, to, key, data, ench) >= 0) {
             count--;
         }
         src.setCount(slot, count); // whatever didn't fit stays, as the item it already was

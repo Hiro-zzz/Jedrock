@@ -743,6 +743,16 @@ public final class PluginManager {
         return server instanceof JedrockServer js ? js.getScenes().names() : java.util.List.of();
     }
 
+    /** Who is under what — for {@link ScriptPlayer}'s effect methods. Null on a server without one. */
+    com.jedrock.core.effect.EffectService effects() {
+        return server instanceof JedrockServer js ? js.getEffects() : null;
+    }
+
+    /** Putting an enchantment on a stack — for {@link ScriptItems}. Null on a server without one. */
+    com.jedrock.core.item.EnchantService enchants() {
+        return server instanceof JedrockServer js ? js.getEnchants() : null;
+    }
+
     boolean removeScene(String name) {
         return server instanceof JedrockServer js && js.getScenes().remove(name);
     }

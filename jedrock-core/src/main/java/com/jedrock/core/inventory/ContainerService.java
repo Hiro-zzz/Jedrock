@@ -35,12 +35,20 @@ public final class ContainerService {
     private final EventBus events;
     private final PlayerBroadcast broadcast;
 
+    /** Lets a listed stack say which custom item it is; null in tests that don't wire one. */
+    private com.jedrock.core.item.ItemRegistry items;
+
     public ContainerService(PlayerRegistry players, CoreWorld defaultWorld, EventBus events,
                             PlayerBroadcast broadcast) {
         this.players = players;
         this.defaultWorld = defaultWorld;
         this.events = events;
         this.broadcast = broadcast;
+    }
+
+    /** Wired after construction, since the item registry and the container service are built together. */
+    public void setItems(com.jedrock.core.item.ItemRegistry items) {
+        this.items = items;
     }
 
     /**
@@ -106,7 +114,8 @@ public final class ContainerService {
         Cursor cur = player.getCursor();
         // Return any carried item to storage; whatever doesn't fit is lost (no item entities to drop).
         while (!cur.isEmpty()
-                && player.addToInventory(cur.state(), cur.customKey(), cur.customData()) >= 0) {
+                && player.addToInventory(cur.state(), cur.customKey(), cur.customData(),
+                        cur.enchantments()) >= 0) {
             cur.setCount(cur.count() - 1);
         }
         cur.clear();
@@ -264,16 +273,33 @@ public final class ContainerService {
                 continue;
             }
             any = true;
-            // There is no item-name table in the core (a block is an id by design), so a stack is shown as
-            // its state and count and chosen by slot number — the number is the label, not the name.
+            // Chosen by slot number — that is the client's only way to point at one here — but named,
+            // since a stack can now say what it is: its custom item's name if it is one, otherwise the
+            // canonical name of its state (which falls back to id:meta for a state nothing names).
             player.sendMessage(" {gray}• {white}/pick " + (slot + 1)
-                    + " {dark_gray}— {gray}#" + container.stateAt(slot) + " ×" + container.countAt(slot));
+                    + " {dark_gray}— {gray}" + describe(container, slot) + " ×" + container.countAt(slot));
         }
         if (!any) {
             player.sendMessage(" {dark_gray}(empty)");
         }
         player.sendMessage(" {gray}• {white}/pick " + PUT_LABEL + " {dark_gray}— put the held item in");
         player.sendMessage(" {gray}• {white}/pick " + CLOSE_LABEL + " {dark_gray}— close");
+    }
+
+    /**
+     * What to call the stack in {@code slot}. A custom item answers with the name it was given; anything
+     * else with the canonical name of its state. Never null — {@code ItemNames.name} always says
+     * something, even for a state nothing names.
+     */
+    private String describe(Container container, int slot) {
+        String key = container.customKeyAt(slot);
+        if (key != null && items != null) {
+            String display = items.displayNameOf(key);
+            if (display != null && !display.isEmpty()) {
+                return display;
+            }
+        }
+        return com.jedrock.api.item.ItemNames.name(container.stateAt(slot));
     }
 
     /**
@@ -492,9 +518,10 @@ public final class ContainerService {
         int state = inv.stateAt(heldSlot);
         String key = inv.customKeyAt(heldSlot);
         String data = inv.customDataAt(heldSlot);
+        com.jedrock.api.item.Enchantments ench = inv.enchantmentsAt(heldSlot);
         int moved = 0;
         for (int c = 0; c < have; c++) {
-            if (container.give(state, 0, container.size(), key, data) < 0) break; // container full
+            if (container.give(state, 0, container.size(), key, data, ench) < 0) break; // container full
             moved++;
         }
         if (moved > 0 && !creative) { // survival consumes what was deposited; creative's hand is infinite
@@ -596,19 +623,19 @@ public final class ContainerService {
         for (int i = 0; i < chestSize; i++) {          // chest
             states[i] = chest.stateAt(i);
             counts[i] = chest.countAt(i);
-            display = withDisplay(display, states.length, i, player.displayForKey(chest.customKeyAt(i)));
+            display = withDisplay(display, states.length, i, player.displayFor(chest, i));
         }
         for (int i = 0; i < 27; i++) {                 // player main (core 9-35)
             states[chestSize + i] = ps[9 + i];
             counts[chestSize + i] = pc[9 + i];
             display = withDisplay(display, states.length, chestSize + i,
-                    player.displayForKey(inv.customKeyAt(9 + i)));
+                    player.displayFor(inv, 9 + i));
         }
         for (int i = 0; i < 9; i++) {                  // player hotbar (core 0-8)
             states[chestSize + 27 + i] = ps[i];
             counts[chestSize + 27 + i] = pc[i];
             display = withDisplay(display, states.length, chestSize + 27 + i,
-                    player.displayForKey(inv.customKeyAt(i)));
+                    player.displayFor(inv, i));
         }
         connection.setWindowItems(windowId, states, counts, display);
         connection.setCursorItem(player.getCursor().state(), player.getCursor().count());
@@ -706,11 +733,12 @@ public final class ContainerService {
         CustomStackTrail trail = player.getStackTrail();
         CustomStackTrail.Displaced arriving = state == 0 ? null : trail.claim(state, now);
         trail.displaced(container.stateAt(slot), container.customKeyAt(slot),
-                container.customDataAt(slot), now);
+                container.customDataAt(slot), container.enchantmentsAt(slot), now);
         if (arriving == null) {
             container.set(slot, state, count);
         } else {
-            container.set(slot, state, count, arriving.customKey(), arriving.customData());
+            container.set(slot, state, count, arriving.customKey(), arriving.customData(),
+                    arriving.enchantments());
         }
     }
 

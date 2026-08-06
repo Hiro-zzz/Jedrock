@@ -124,6 +124,17 @@ public class JedrockConnection implements Connection, PlayerConnection {
     }
 
     @Override
+    public void sendEffect(com.jedrock.api.entity.Effect effect, int amplifier,
+                           int durationTicks, boolean particles) {
+        protocolHandler.sendEffect(this, effect, amplifier, durationTicks, particles);
+    }
+
+    @Override
+    public void removeEffect(com.jedrock.api.entity.Effect effect) {
+        protocolHandler.removeEffect(this, effect);
+    }
+
+    @Override
     public void sendTime(long timeOfDay, boolean cycling) {
         protocolHandler.sendTime(this, timeOfDay, cycling);
     }

@@ -102,6 +102,37 @@ public final class CorePlayer implements Player {
         return visible.remove(other);
     }
 
+    // ===== Status effects =====
+    //
+    // What this player is under, and until when. The client is the one animating any of it — this is
+    // only what the server needs its own answers from (see EffectService): taking one away, re-stating
+    // it to a client that has just arrived somewhere, and the two decisions the core actually owns.
+    // Written from the applying thread and read from the game loop, so it is concurrent; an EnumMap
+    // would be smaller but is not, and this map is empty for almost every player almost always.
+
+    private final java.util.Map<com.jedrock.api.entity.Effect, com.jedrock.core.effect.ActiveEffect>
+            effects = new ConcurrentHashMap<>(4);
+
+    /** The live effect table. Owned by {@code EffectService} — nothing else should write to it. */
+    public java.util.Map<com.jedrock.api.entity.Effect, com.jedrock.core.effect.ActiveEffect> getEffects() {
+        return effects;
+    }
+
+    /**
+     * Whether this player's avatar is currently withheld from other clients. Invisibility is done by not
+     * spawning the avatar rather than by an entity flag, so it needs no wire support on any edition and
+     * behaves identically on all four. Maintained by {@code PlayerTracker}, which is also what reads it.
+     */
+    private volatile boolean invisible = false;
+
+    public boolean isInvisible() {
+        return invisible;
+    }
+
+    void setInvisible(boolean invisible) {
+        this.invisible = invisible;
+    }
+
     // ===== Survival inventory =====
     //
     // A deliberately minimal 36-slot inventory (0-8 hotbar, 9-35 main), tracked only so a survival
@@ -282,6 +313,12 @@ public final class CorePlayer implements Player {
         return inventory.give(state, 0, STORAGE_SLOTS, customKey, customData);
     }
 
+    /** As above, for a stack that is also enchanted — the identity a move must not drop. */
+    public int addToInventory(int state, String customKey, String customData,
+                              com.jedrock.api.item.Enchantments enchantments) {
+        return inventory.give(state, 0, STORAGE_SLOTS, customKey, customData, enchantments);
+    }
+
     /** Give one {@code state} and refresh that slot on the client. @return true if it fit. (api {@link Player}) */
     @Override
     public boolean giveItem(int state) {
@@ -341,9 +378,29 @@ public final class CorePlayer implements Player {
         this.items = items;
     }
 
-    /** The display for one slot: the custom item's name and lore, or {@code null} for an ordinary stack. */
+    /**
+     * The display for one slot: the custom item's name and lore, plus whatever <em>this</em> stack is
+     * enchanted with, or {@code null} for a plain ordinary one.
+     *
+     * <p>The two halves come from different places on purpose. A name belongs to the <b>definition</b> and
+     * is shared by every stack that names it; enchantments belong to the <b>stack</b>. So the key answers
+     * the first and the slot answers the second, and an ordinary sword that happens to be enchanted gets a
+     * display even though nothing defines it.
+     */
     private com.jedrock.api.item.ItemDisplay displayAt(int slot) {
-        return displayForKey(inventory.customKeyAt(slot));
+        return displayFor(inventory, slot);
+    }
+
+    /** The same, for any container — a chest window shows a stack the way its owner's inventory would. */
+    public com.jedrock.api.item.ItemDisplay displayFor(
+            com.jedrock.core.inventory.Container container, int slot) {
+        com.jedrock.api.item.Enchantments enchantments = container.enchantmentsAt(slot);
+        com.jedrock.api.item.ItemDisplay named = displayForKey(container.customKeyAt(slot));
+        if (named != null) {
+            return enchantments.isEmpty() ? named : named.withEnchantments(enchantments);
+        }
+        return enchantments.isEmpty()
+                ? null : com.jedrock.api.item.ItemDisplay.enchanted(enchantments);
     }
 
     /**
@@ -464,11 +521,29 @@ public final class CorePlayer implements Player {
 
     @Override
     public int giveItem(int state, int count) {
+        return giveItem(state, count, null);
+    }
+
+    /**
+     * As {@link #giveItem(int, int)}, but the stacks carry {@code customKey} — the identity that makes
+     * them a custom item rather than the ordinary one they are drawn as ({@code null} for a plain give).
+     * The one place stacks are handed to a player in bulk, so a script's {@code items.give} and
+     * {@code /give} put things in the inventory exactly the same way.
+     *
+     * @return how many actually fit
+     */
+    public int giveItem(int state, int count, String customKey) {
+        return giveItem(state, count, customKey, com.jedrock.api.item.Enchantments.NONE);
+    }
+
+    /** As above, for stacks that arrive enchanted — a defined item that comes with one, or {@code /enchant}. */
+    public int giveItem(int state, int count, String customKey,
+                        com.jedrock.api.item.Enchantments enchantments) {
         if (state <= 0 || count <= 0) {
             return 0;
         }
         int fit = 0;
-        while (fit < count && addToInventory(state) >= 0) {
+        while (fit < count && addToInventory(state, customKey, null, enchantments) >= 0) {
             fit++;
         }
         if (fit > 0) {
@@ -720,6 +795,24 @@ public final class CorePlayer implements Player {
     @Override
     public int getArmor(com.jedrock.api.player.ArmorSlot slot) {
         return inventory.stateAt(slot.inventorySlot());
+    }
+
+    /** What the stack in their hand is enchanted with; never null. */
+    public com.jedrock.api.item.Enchantments getHeldEnchantments() {
+        return inventory.enchantmentsAt(heldSlot);
+    }
+
+    /**
+     * The combined level of one enchantment across the four worn pieces — vanilla's own way of adding
+     * armor enchantments up, and the number protection and thorns are read from. {@code 0} when nothing
+     * worn carries it, which is the overwhelmingly common case and costs four array reads.
+     */
+    public int armorEnchantmentLevel(com.jedrock.api.item.Enchantment enchantment) {
+        int total = 0;
+        for (com.jedrock.api.player.ArmorSlot slot : com.jedrock.api.player.ArmorSlot.values()) {
+            total += inventory.enchantmentsAt(slot.inventorySlot()).level(enchantment);
+        }
+        return total;
     }
 
     /** Whether any piece is worn — lets a caller skip an all-empty armor packet. */

@@ -48,6 +48,26 @@ public final class ScriptItems {
     }
 
     /**
+     * The state a vanilla name stands for — {@code items.state('red_wool')} is {@code 574} — or
+     * {@code -1} for a word that names nothing. Accepts every form a command does ({@code wool:14},
+     * {@code 35:14}, {@code 276}), so a script and a player can spell an item the same way.
+     *
+     * <p>This is a convenience over the numbers, not a replacement for them: the API still speaks
+     * states, and a name is only ever resolved to one here.
+     */
+    public int state(String name) {
+        return com.jedrock.api.item.ItemNames.parse(name);
+    }
+
+    /**
+     * What to call a state — {@code items.nameOf(574)} is {@code 'red_wool'}. Falls back to
+     * {@code 'id:meta'} for a state nothing names, so it is always printable.
+     */
+    public String nameOf(int state) {
+        return com.jedrock.api.item.ItemNames.name(state);
+    }
+
+    /**
      * Declare an item drawn as {@code state}, replacing any definition already under {@code key}.
      *
      * @param key a short stable identity — letters, digits, {@code _ - .}, up to 64
@@ -89,25 +109,7 @@ public final class ScriptItems {
         if (item == null) {
             throw new IllegalArgumentException("no item is defined as '" + key + "'");
         }
-        int given = 0;
-        int lastSlot = -1;
-        for (int i = 0; i < Math.max(0, count); i++) {
-            int slot = target.getInventory().give(item.getState(), 0, CorePlayer.STORAGE_SLOTS, item.getKey());
-            if (slot < 0) {
-                break; // full
-            }
-            if (slot != lastSlot) {
-                if (lastSlot >= 0) {
-                    target.syncSlot(lastSlot);
-                }
-                lastSlot = slot;
-            }
-            given++;
-        }
-        if (lastSlot >= 0) {
-            target.syncSlot(lastSlot);
-        }
-        return given;
+        return target.giveItem(item.getState(), count, item.getKey(), item.getEnchantments());
     }
 
     /** Give one. */
@@ -127,6 +129,65 @@ public final class ScriptItems {
         }
         target.getInventory().set(slot, item.getState(), Math.max(1, count), item.getKey());
         target.syncSlot(slot);
+    }
+
+    // ===== Enchantments =====
+    //
+    // An enchantment belongs to a stack, not to a definition, so these act on what is in a slot. Most of
+    // them are decoration on this server, honestly so — see the readme for which ones it acts on.
+
+    /**
+     * Enchant what a player is holding: {@code items.enchant(player, 'sharpness', 3)}. A level of zero or
+     * less takes it off. Fires {@code ItemEnchant}, so another plugin may refuse or cap it.
+     *
+     * @return whether the stack changed
+     */
+    public boolean enchant(Object player, String name, int level) {
+        CorePlayer target = core(player);
+        return enchants() != null && enchants().enchantHeld(target, requireEnchantment(name), level);
+    }
+
+    public boolean enchant(Object player, String name) {
+        return enchant(player, name, 1);
+    }
+
+    /** The same, for a particular inventory slot rather than the hand. */
+    public boolean enchantAt(Object player, int slot, String name, int level) {
+        CorePlayer target = core(player);
+        return enchants() != null && enchants().enchant(target, slot, requireEnchantment(name), level);
+    }
+
+    /** Strip every enchantment from what a player is holding. @return whether it had any. */
+    public boolean disenchant(Object player) {
+        CorePlayer target = core(player);
+        return enchants() != null && enchants().disenchant(target, target.getHeldItemSlot());
+    }
+
+    /** The level of one enchantment on what a player is holding, or {@code 0}. */
+    public int enchantmentLevel(Object player, String name) {
+        return core(player).getHeldEnchantments().level(requireEnchantment(name));
+    }
+
+    /** Everything the held stack is enchanted with, as {@code 'sharpness:3,unbreaking:1'} ({@code ''} = none). */
+    public String enchantmentsOf(Object player) {
+        return core(player).getHeldEnchantments().toCompactString();
+    }
+
+    /** The same for one inventory slot. */
+    public String enchantmentsAt(Object player, int slot) {
+        return core(player).getInventory().enchantmentsAt(slot).toCompactString();
+    }
+
+    private static com.jedrock.api.item.Enchantment requireEnchantment(String name) {
+        com.jedrock.api.item.Enchantment enchantment = com.jedrock.api.item.Enchantment.fromString(name);
+        if (enchantment == null) {
+            throw new IllegalArgumentException("no such enchantment: '" + name + "'");
+        }
+        return enchantment;
+    }
+
+    private com.jedrock.core.item.EnchantService enchants() {
+        return manager.enchants();
     }
 
     /** The custom key in an inventory slot, or {@code null} for an ordinary item. */

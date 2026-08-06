@@ -1145,6 +1145,72 @@ events.on('PlayerWorldChange', function (e) {
     console.log(e.getPlayer().getName() + ' -> ' + e.getToWorld().getName());
 });
 
+// ---------------------------------------------------------------------------------------------------
+// Status effects: almost entirely the client's doing. The server says this once and the client draws the
+// swirl, tints the screen and — since it is the client that reports movement — really does run faster.
+// Nothing ticks on this side to keep it going.
+commands.register('dash', function (player, args) {
+    if (player.hasEffect('speed')) {
+        player.removeEffect('speed');
+        player.sendMessage('{gray}Back to walking pace.');
+        return;
+    }
+    player.addEffect('speed', 20, 2);          // Speed II for twenty seconds
+    player.sendMessage('{aqua}Go. {gray}(' + player.getEffectSeconds('speed') + 's)');
+});
+
+// Effects fire an event before they land, so another plugin can weaken, shorten or refuse one. A region
+// that halves potions is this listener, not a special case in the core.
+events.on('PlayerEffect', function (e) {
+    // getEffect() is the effect itself; getKey() is its lower-case name, which is what compares cleanly.
+    if (e.getEffect().getKey() === 'wither') {
+        e.setCancelled(true);          // nobody withers on this server
+        return;
+    }
+    console.log(e.getPlayer().getName() + ' -> ' + e.getEffect().getKey()
+        + ' ' + e.getDurationSeconds() + 's');
+});
+
+// What the server does NOT do: tick anybody's health. Poison and regeneration are pictures here. If you
+// want one that bites, it is a timer of your own — and this way the cost is visible in your plugin.
+commands.register('venom', function (player, args) {
+    player.addEffect('poison', 10);            // the look
+    var ticks = 0;
+    var bite = setInterval(function () {       // …and the bite
+        if (++ticks > 5 || !player.isOnline()) {
+            clearInterval(bite);
+            return;
+        }
+        player.setHealth(player.getHealth() - 1);
+    }, 2000);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Enchantments belong to a STACK, not to a definition — so this enchants what is actually in your hand,
+// and the sword keeps it through every move, chest and restart.
+commands.register('sharpen', function (player, args) {
+    var level = args.length > 0 ? parseInt(args[0], 10) : 1;
+    if (!items.enchant(player, 'sharpness', level)) {
+        player.sendMessage('{red}Nothing in your hand to sharpen.');
+        return;
+    }
+    player.sendMessage('{aqua}Sharpness ' + level + '{gray} — now: ' + items.enchantmentsOf(player));
+});
+
+// A definition can hand them out, so a custom item arrives already enchanted.
+items.define('frostblade', 276)
+     .setName('{aqua}Frostblade')
+     .setLore(['{gray}Cold enough to matter'])
+     .setEnchantments({sharpness: 3, unbreaking: 1});
+
+// …and a listener gets to cap what anybody else hands out. Enchanting is a request, like everything else
+// the core routes through the bus.
+events.on('ItemEnchant', function (e) {
+    if (e.getLevel() > 5) {
+        e.setLevel(5);           // nothing above V on this server
+    }
+});
+
 // Optional: called when the plugin is unloaded or reloaded. Everything a script registered — listeners,
 // scheduled tasks, commands, packet taps — is torn down automatically; this is just for your own cleanup.
 function onDisable() {

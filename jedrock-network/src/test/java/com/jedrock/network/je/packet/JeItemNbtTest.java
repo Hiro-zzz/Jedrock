@@ -98,4 +98,50 @@ class JeItemNbtTest {
         assertEquals("display", readString(b));
         assertEquals(0x09, b.readByte(), "straight to the list — no Name tag was written");
     }
+
+    @Test
+    void anEnchantmentIsAListAtTheRoot() {
+        ByteBuf b = Unpooled.buffer();
+
+        JeItemNbt.write(b, ItemDisplay.enchanted(
+                com.jedrock.api.item.Enchantments.of(com.jedrock.api.item.Enchantment.SHARPNESS, 3)));
+
+        assertEquals(0x0A, b.readByte(), "root compound");
+        assertEquals("", readString(b), "…unnamed");
+        assertEquals(0x09, b.readByte(), "TAG_List");
+        assertEquals("ench", readString(b), "the name vanilla reads — at the ROOT, not inside display");
+        assertEquals(0x0A, b.readByte(), "…of compounds");
+        assertEquals(1, b.readInt(), "one entry");
+        assertEquals(0x02, b.readByte(), "TAG_Short");
+        assertEquals("id", readString(b));
+        assertEquals(16, b.readShort(), "sharpness is 16 on JAVA — it is 9 on Bedrock");
+        assertEquals(0x02, b.readByte(), "TAG_Short");
+        assertEquals("lvl", readString(b));
+        assertEquals(3, b.readShort());
+        assertEquals(0x00, b.readByte(), "closes the entry");
+        assertEquals(0x00, b.readByte(), "closes the root — no display compound, since there is no name");
+        assertEquals(0, b.readableBytes());
+        b.release();
+    }
+
+    @Test
+    void aNamedAndEnchantedItemCarriesBoth() {
+        ByteBuf b = Unpooled.buffer();
+
+        JeItemNbt.write(b, new ItemDisplay("§bFrostblade", new String[0],
+                com.jedrock.api.item.Enchantments.of(com.jedrock.api.item.Enchantment.UNBREAKING, 1)));
+
+        b.readByte();                       // root compound
+        readString(b);
+        assertEquals(0x09, b.readByte(), "the enchantments come first…");
+        assertEquals("ench", readString(b));
+        b.readByte();                       // element type
+        b.readInt();                        // count
+        b.readByte(); readString(b); assertEquals(34, b.readShort(), "unbreaking, Java's id");
+        b.readByte(); readString(b); b.readShort();
+        b.readByte();                       // closes the entry
+        assertEquals(0x0A, b.readByte(), "…and the display compound after them");
+        assertEquals("display", readString(b));
+        b.release();
+    }
 }

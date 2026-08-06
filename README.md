@@ -196,7 +196,7 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   ever changes). **In-game commands** work cross-edition — Java sends `/…` straight through as chat, and
   Bedrock is handed an `AvailableCommands` manifest so its client parses the line and sends it back. The
   built-in set: `/help [cmd]`, `/list`, `/tps`, `/say`, `/me`, `/msg`, `/gamemode`, `/tp`, `/tphere`,
-  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/op`, `/deop`, `/perm`, `/region`, `/world`, `/pick`,
+  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/give`, `/effect`, `/enchant`, `/op`, `/deop`, `/perm`, `/region`, `/world`, `/pick`,
   `/puppet`, `/hologram`, `/pose`, `/time`, `/about`, plus the [moderation set](#moderation). A deliberately minimal **survival inventory** (36 slots)
   tracks only what a survival player mines and places: mining a block drops it into the hotbar, placing
   consumes it, and the changed slot is pushed live so the HUD refreshes. On PE 1.1.5 the player window is
@@ -300,8 +300,9 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   armor and off-hand slots. **Chests** are a placeable block (right-click to open) backed by a 27-slot
   container: move items in and out, shift to quick-transfer, in survival <em>and</em> creative (the
   creative inventory is mirrored server-side so the chest's player half is tracked). Chest contents
-  **persist** in the level file (format v6, which loads a v2–v5 world in place and rewrites it on the
-  next save; v3 added chests, v4 the custom-item key each stack carries, v6 that stack's own data).
+  **persist** in the level file (format v7, which loads a v2–v6 world in place and rewrites it on the
+  next save; v3 added chests, v4 the custom-item key each stack carries, v6 that stack's own data, v7 its
+  enchantments).
   A custom item keeps its name, its lore and its own state through every one of those moves, and the
   window draws the name. Wired for JE 1.12.2 and 1.8.
   True to the model, the server only <em>stores and moves</em> items — no crafting or smelting simulation,
@@ -377,7 +378,7 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   cancelling the event the core already routes that decision through.
   Identity is the **key**, and a stack carries the key rather than a copy of the definition. That is what
   makes a custom item survive what a reference could not: a hot reload re-points every existing stack at
-  the new definition, the level file (v6) restores a chest full of them long before any plugin exists, and
+  the new definition, the level file (v7) restores a chest full of them long before any plugin exists, and
   an item whose plugin was removed simply behaves as the vanilla one it is drawn as until its script comes
   back. A custom stack never merges with an ordinary one of the same state. Dispatch listeners are
   registered only while some item actually has a behaviour, so a purely cosmetic item — or none at all —
@@ -400,6 +401,63 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   test: the 1.1.5 client neither crashed nor complained, it just kept showing the vanilla name. An ordinary
   item still writes the exact bytes it always did, so nothing changed for a server that defines no items.
   **Confirmed on a real client on every one of the four**, which is what it took to trust either dialect.
+
+- ✅ **Enchantments, cross-edition — and the ids that don't match.** `/enchant <player> <enchantment>
+  [level]`, `clear`, `list`, `items.enchant(player, 'sharpness', 3)` from a script, and
+  `.setEnchantments({sharpness: 3})` on a custom item's definition so it arrives enchanted. An
+  enchantment is item NBT — an `ench` list at the root of the stack's compound — which this server already
+  writes in three dialects, so the client draws the glint and the tooltip and the wire work is one more
+  tag beside the name.
+  **The interesting half is that Java and Bedrock number enchantments differently**, and not by an offset:
+  sharpness is 16 on Java and 9 on Bedrock, and three of them — respiration, thorns, aqua affinity — are
+  *reordered* across ids both editions use for something. A shared table wouldn't fail, it would quietly
+  give a Bedrock player thorns where a Java player asked for respiration, so `EnchantmentIds` maps each
+  side separately (as `EntityTypeIds` does for entities) and a test pins the divergence.
+  An enchantment is part of a **stack's identity**: it survives every move (window, chest, a Bedrock
+  client's own drag), persists in the level file (v7), and keeps two otherwise identical stacks from
+  merging — a sharpness sword never dissolves into a pile of plain ones.
+  **What the server acts on is honestly narrow**: sharpness (with smite and bane), protection, feather
+  falling, thorns and fortune — the four decisions the core already owns, being melee damage, damage
+  taken, a fall, and what a mined block drops. Everything else renders, glints and reads correctly and
+  changes nothing, because it is for a system this server doesn't have: unbreaking and mending want
+  durability, power and flame want projectiles, fire aspect wants fire, knockback wants physics, and
+  efficiency is the client's own arithmetic and works by arriving. **There is no enchanting table and no
+  XP** — an enchantment is given, by command, script or definition.
+
+- ✅ **Status effects, cross-edition.** `/effect <player> <effect> [seconds] [level]`, `clear`, `list`, and
+  `player.addEffect('speed', 30, 2)` from a script. The whole legacy set of 23, on all four protocols —
+  which share the effect numbering, so the only difference is how each writes it (a byte on Java and 0.14,
+  a zigzag varint on 1.1.5; ids ground-truthed from PocketMine and ViaVersion, each cross-checked against
+  an id this project had already confirmed with a real client). 0.14 knows sixteen of them and is the
+  client that crashes rather than shrugs at an id it doesn't have, so the rest go through a
+  `Pe014Effects` gate, exactly as blocks and items already do.
+  **This is scenery in the sense the weather and the clock are**: the server says "speed II for thirty
+  seconds" once and the *client* draws the swirl, tints the screen and — since movement here is
+  client-authoritative — actually moves faster. Nothing ticks on this side, and a player under nothing
+  costs one empty-map check a second.
+  The core steps in at exactly the points where it already owns the answer: the **blind judge** widens
+  what it will believe about a sped-up player's movement (without which speed would present as
+  rubber-banding, so it is the bug inside the feature rather than an extra), **strength / weakness /
+  resistance** scale a hit through the damage event the core already routes every point through,
+  **instant health and damage** are applied outright because health is the server's, and **invisibility**
+  simply withholds the avatar from other clients — which needs no wire support and therefore behaves
+  identically on all four editions. Everything else is the client's own rendering.
+  **Poison, regeneration and wither are deliberately cosmetic** — ticking a player's health is the
+  server-side simulation this project doesn't do; a script that wants a poison that bites writes the
+  timer, and pays for it visibly. Not persisted, like the weather; re-stated on a world switch, since the
+  client is the one holding the countdown.
+
+- ✅ **Items have names you can type — and `/give`.** A block is an id and always will be, but nobody
+  should have to *say* 574 at a chat prompt. `ItemNames` names the canonical states — one table over
+  blocks and items alike, since there is one model for both — so `/give <player> <item> [count]` takes
+  `red_wool`, `wool:14`, `35:14` or `276`, tab-completes the lot, and hands over a **custom item** by its
+  key ahead of any of them. The table is written against the two creative palettes and a test in the
+  network module (the only place both are visible) fails if a palette gains a state nobody named.
+  It is deliberately *incomplete*: where the legacy Java and Bedrock numberings disagree about what an id
+  means — 158 is a dropper on one and a wooden slab on the other — the state stays unnamed rather than
+  carry a name that would be wrong on half the server, and remains reachable as `id:meta`. `/pose` parses
+  a prop's block the same way, `/pick` prints names instead of numbers, and a script can resolve either
+  direction (`items.state('red_wool')`, `items.nameOf(574)`).
 
 - ✅ **Permissions from a script.** A script could always *read* rights (`player.hasPermission`); now it can
   set them. The **`permissions`** global builds groups (`createGroup(n).inherit('default').add(node)
@@ -923,8 +981,9 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   built and tried on a real client, and changed nothing. So the claim that client stakes on a cell it edited
   does not expire when the burst does, and the column is not a workaround for bad timing but the only
   correction it honours. Recorded so the idea isn't rebuilt a third time.
-- **The `/pick` storage list still addresses stacks by slot number** and prints a raw block state. That
-  was the only honest option before items had names; now that they do, it's simply not wired up yet.
+- **The `/pick` storage list still addresses stacks by slot number.** The number is the only thing a
+  client here can point at, so that part stays; what it prints is now a name (a custom item's own, or the
+  canonical one for its state) rather than a raw number.
 - **Forms are out on both PE eras** — the legacy clients predate them, so a menu is a window (Java) or a
   list (Bedrock) and nothing richer.
 - **Entities can't be posed finely.** No armor stands in either PE era, no per-entity scale and no limb
@@ -935,6 +994,14 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   head-only packet on that wire), so a puppet that follows somebody every tick costs a move every tick
   there and one small packet on Java. 0.14 renders only the mobs it is old enough to know; anything
   younger silently doesn't appear.
+- **Half the enchantments are decoration, and the readme would rather say so.** They all render, glint
+  and read correctly on every edition — but this server has no durability, no projectiles, no fire and no
+  knockback, so unbreaking, mending, power, punch, flame, infinity, fire aspect and knockback change
+  nothing. Silk touch changes nothing either, for a happier reason: a broken block already drops itself,
+  there being no drop tables to bypass. What the server does act on is sharpness (with smite and bane),
+  protection, feather falling, thorns and fortune. There is also no enchanting table and no XP — an
+  enchantment is given, not earned, because a table would need levels this server doesn't keep and a
+  window the 1.1.5 client cannot raise.
 - **Per-stack state lives exactly as long as the stack does.** A wand's remaining charges persist in a
   chest, because chests are in the level file; the same wand in a player's backpack loses them at logout,
   because a player's inventory has never been persisted here at all. Nothing is lost that wasn't already
@@ -967,14 +1034,14 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   sky, for the same reason travel there does.
 - **On the PE wire, a byte test is not the last word.** The surface itself has been walked through with
   real clients on both eras and works — join, movement, chat, edits, inventories, the illusion toolkit —
-  apart from the 1.1.5 client bugs listed above, which are the client's and not this server's. Nothing is
-  waiting on a login right now: the head/body yaw split, a custom item's identity carried through a drag
-  inside a Bedrock client's own window, and the clock have each been in front of a real client since they
-  were written. What stays is the reasoning, because it applies to whatever is added next: everything
-  ground-truthed against PocketMine is byte-tested, and a byte test only proves the encoder agrees with
-  itself. The item-NBT dialect passed its own tests and still showed the vanilla name on a real client.
-  So anything newly added to that wire is unverified until somebody logs in, and this list being empty
-  today means only that somebody did.
+  apart from the 1.1.5 client bugs listed above, which are the client's and not this server's. The
+  reasoning that outlives any particular list: everything ground-truthed against PocketMine is
+  byte-tested, and a byte test only proves the encoder agrees with itself. The item-NBT dialect passed
+  its own tests and still showed the vanilla name on a real client. So anything newly added to that wire
+  is unverified until somebody logs in, and nothing is waiting on one right now — status effects and the
+  `ench` tag, the two most recent additions to that wire, have each been in front of real clients on both
+  eras. `-Djedrock.pe.enchantNbt=false` stays as an escape hatch rather than a doubt, item NBT on that
+  client being where a quiet failure has happened before.
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
   runtime world simulation or physics, no 1.13+ flattening. Knockback is excluded for the same reason —
   the server simulates no physics. Custom logic that wants any of these lives in a script as an
@@ -991,9 +1058,7 @@ verification run, and packaging the whole thing so it can be handed to someone. 
 promised; it's the list of what would be worth doing next, roughly in the order it would pay off.
 
 - **Small additions to the script API.** Regions want a **greeting / farewell** message and a
-  **priority** escape hatch for the case deny-wins can't express: an allow island inside a deny. And the
-  `/pick` storage list should show the names custom items now have, instead of a slot number and a raw
-  state.
+  **priority** escape hatch for the case deny-wins can't express: an allow island inside a deny.
 - **What worlds still want.** **Deleting** one, which is deliberately absent — unloading leaves the folder,
   and removing it is a decision that belongs to whoever can see the filesystem, not to a script. A
   **portal** is not on this list: noticing a player standing in a frame is the shape of simulation this

@@ -388,6 +388,19 @@ final class PeSession implements RakNetSessionListener, PlayerConnection {
     }
 
     @Override
+    public void sendEffect(com.jedrock.api.entity.Effect effect, int amplifier,
+                           int durationTicks, boolean particles) {
+        sendGameBatch(b -> McpePackets.mobEffect(b, SELF_ENTITY_ID, McpePackets.EFFECT_EVENT_ADD,
+                effect.getId(), amplifier, particles, durationTicks));
+    }
+
+    @Override
+    public void removeEffect(com.jedrock.api.entity.Effect effect) {
+        sendGameBatch(b -> McpePackets.mobEffect(b, SELF_ENTITY_ID, McpePackets.EFFECT_EVENT_REMOVE,
+                effect.getId(), 0, false, 0));
+    }
+
+    @Override
     public void sendBlockChange(int x, int y, int z, int state) {
         writeUpdateBlock(x, y, z, state);
         // A chest is a block-entity, and the retail 1.1.5 client materializes it ONLY from chunk data —

@@ -48,10 +48,13 @@ class TimeCommandTest {
     }
 
     @Test
-    void aBlockStateIsWrittenEitherWayPeopleWriteOne() {
+    void aBlockStateIsWrittenEveryWayPeopleWriteOne() {
         assertEquals(35 << 4, PoseCommand.state("35"));
         assertEquals((35 << 4) | 14, PoseCommand.state("35:14"), "red wool");
+        // Named, since /pose now parses a prop's block the same way /give parses an item.
+        assertEquals((35 << 4) | 14, PoseCommand.state("red_wool"));
+        assertEquals(35 << 4, PoseCommand.state("wool"), "a family word is its meta-0 member");
         assertNull(PoseCommand.state("35:16"), "meta is four bits");
-        assertNull(PoseCommand.state("wool"));
+        assertNull(PoseCommand.state("not_a_block"));
     }
 }

@@ -52,6 +52,14 @@ public final class CombatService {
         this.items = items;
     }
 
+    /** Lets an attacker's strength / weakness answer for a hit; null in tests that don't wire one. */
+    private com.jedrock.core.effect.EffectService effects;
+
+    /** Wired after construction — the two services know about each other and are built together. */
+    public void setEffects(com.jedrock.core.effect.EffectService effects) {
+        this.effects = effects;
+    }
+
     /** Interval (ticks) between environmental-damage sweeps — vanilla applies void damage every 10 ticks. */
     private static final int ENVIRONMENT_TICK_INTERVAL = 10;
     /** Void damage per sweep, in half-hearts (vanilla is 4 = two hearts). */
@@ -105,6 +113,13 @@ public final class CombatService {
         if (player.getGameMode() != GameMode.SURVIVAL || amount <= 0) {
             return;
         }
+        // Worn armor gets its say first: protection softens everything, feather falling only a fall.
+        // Read straight off the worn pieces rather than through an event, because armor is not a
+        // listener's opinion — it is the state of the player being hit.
+        amount = softenedByArmor(player, amount, cause);
+        if (amount <= 0) {
+            return;
+        }
         // Let listeners veto or rescale the damage before it lands (invulnerability, a difficulty tweak).
         // Zeroing the amount is the same as cancelling.
         if (events.hasListeners(PlayerDamageEvent.class)) {
@@ -138,6 +153,26 @@ public final class CombatService {
         } else {
             connection.setHealth(player.getHealth());
         }
+    }
+
+    /**
+     * What worn armor takes off a hit. Vanilla's own arithmetic, kept coarse: each level of protection is
+     * worth 4% off, capped at 80% so armour never makes anybody untouchable, and feather falling adds to
+     * it on a fall alone. Nothing here simulates armour <em>points</em> — this server has no armour value,
+     * only the enchantments people put on the pieces.
+     */
+    private int softenedByArmor(CorePlayer player, int amount, DamageCause cause) {
+        int protection = player.armorEnchantmentLevel(com.jedrock.api.item.Enchantment.PROTECTION);
+        if (cause == DamageCause.FALL) {
+            protection += player.armorEnchantmentLevel(
+                    com.jedrock.api.item.Enchantment.FEATHER_FALLING);
+        }
+        if (protection <= 0) {
+            return amount;
+        }
+        double kept = Math.max(0.20, 1.0 - 0.04 * protection);
+        // Round down, but never all the way to nothing: a hit that landed still lands.
+        return Math.max(1, (int) Math.floor(amount * kept));
     }
 
     /** Bare-hand melee damage, in half-hearts (vanilla is 2 = one heart). */
@@ -193,8 +228,39 @@ public final class CombatService {
         if (items != null && items.onHit(attacker, victim)) {
             return;
         }
-        hurt(victim, ATTACK_DAMAGE, DamageCause.ATTACK, "{gray}" + ChatText.escape(victim.getName())
+        // Strength and weakness belong to whoever is swinging, and no damage event carries that — the
+        // event knows who was hurt, not who did it — so this is the one place they can be applied. What
+        // the victim is under (resistance) is handled on the event, where it belongs.
+        int damage = ATTACK_DAMAGE + sharpnessBonus(attacker);
+        damage = effects == null ? damage : effects.scaleOutgoing(attacker, damage);
+        if (damage <= 0) {
+            return; // weakness can take a bare-handed hit down to nothing, as it does in vanilla
+        }
+        hurt(victim, damage, DamageCause.ATTACK, "{gray}" + ChatText.escape(victim.getName())
                 + " was slain by " + ChatText.escape(attacker.getName()));
+
+        // Thorns answers back. Applied after the hit rather than instead of it, and through the same
+        // funnel, so the attacker's own armour and effects get their say on the way in — and so a thorns
+        // kill reads like any other death.
+        int thorns = victim.armorEnchantmentLevel(com.jedrock.api.item.Enchantment.THORNS);
+        if (thorns > 0) {
+            hurt(attacker, Math.max(1, thorns / 2), DamageCause.MAGIC,
+                    "{gray}" + ChatText.escape(attacker.getName()) + " was killed trying to hurt "
+                            + ChatText.escape(victim.getName()));
+        }
+    }
+
+    /**
+     * What the weapon in the attacker's hand adds. Sharpness, smite and bane of arthropods are all read
+     * here and all worth the same, because the two that discriminate have nothing to discriminate
+     * against: every target in this server is a player, and puppets take no damage at all.
+     */
+    private static int sharpnessBonus(CorePlayer attacker) {
+        com.jedrock.api.item.Enchantments held = attacker.getHeldEnchantments();
+        int level = Math.max(held.level(com.jedrock.api.item.Enchantment.SHARPNESS),
+                Math.max(held.level(com.jedrock.api.item.Enchantment.SMITE),
+                        held.level(com.jedrock.api.item.Enchantment.BANE_OF_ARTHROPODS)));
+        return level;   // vanilla's sharpness is roughly a half-heart a level; one point is exactly that
     }
 
     /**
@@ -211,6 +277,27 @@ public final class CombatService {
         hurt(player, CorePlayer.MAX_HEALTH, DamageCause.KILL,
                 "{gray}" + ChatText.escape(player.getName()) + " died");
         return true;
+    }
+
+    /**
+     * Heal a survival player by {@code points} half-hearts, clamped at full. What instant health does —
+     * the partial counterpart of {@link #heal}, which restores everything.
+     */
+    public void healBy(CorePlayer player, int points) {
+        if (player.getGameMode() != GameMode.SURVIVAL || points <= 0) {
+            return;
+        }
+        player.setHealth(Math.min(CorePlayer.MAX_HEALTH, player.getHealth() + points));
+    }
+
+    /**
+     * Hurt a survival player by {@code points} half-hearts from an effect (instant damage). Goes through
+     * the same {@link #hurt} path as everything else, so it fires the damage event, flashes the avatar
+     * and can kill — an effect is not a special kind of damage, only a different source of it.
+     */
+    public void hurtByEffect(CorePlayer player, int points) {
+        hurt(player, points, DamageCause.MAGIC,
+                "{gray}" + ChatText.escape(player.getName()) + " was killed by magic");
     }
 
     /**

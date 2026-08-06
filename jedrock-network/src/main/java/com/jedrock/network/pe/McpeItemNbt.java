@@ -34,24 +34,45 @@ import java.nio.charset.StandardCharsets;
 public final class McpeItemNbt {
 
     private static final int TAG_END = 0x00;
+    private static final int TAG_SHORT = 0x02;
     private static final int TAG_STRING = 0x08;
     private static final int TAG_LIST = 0x09;
     private static final int TAG_COMPOUND = 0x0A;
 
+    /**
+     * The escape hatch for the one thing on this wire that has failed quietly before. Item NBT on a
+     * Bedrock client is where a wrong dialect once cost a client test, and enchantments are the newest
+     * thing written into it — so {@code -Djedrock.pe.enchantNbt=false} stops writing them at all, leaving
+     * the exact bytes that were already client-verified. Same shape as {@code jedrock.pe.changeDimension}.
+     */
+    private static final boolean ENCHANT_NBT =
+            !"false".equalsIgnoreCase(System.getProperty("jedrock.pe.enchantNbt", "true"));
+
     private McpeItemNbt() {}
 
     /**
-     * Write the Slot's NBT field: an LE-short length, then that many bytes of compound. An absent or empty
-     * display writes {@code 0} — byte-identical to what this server sent before custom items existed.
+     * Write the Slot's NBT field for a <b>1.1.5</b> client: an LE-short length, then that many bytes of
+     * compound. An absent or empty display writes {@code 0} — byte-identical to what this server sent
+     * before custom items existed.
      */
     public static void writeSlotNbt(ByteBuf b, ItemDisplay display) {
+        writeSlotNbt(b, display, false);
+    }
+
+    /**
+     * As {@link #writeSlotNbt(ByteBuf, ItemDisplay)}, but {@code era014} says this is going to an 0.14
+     * client, whose enchantment table stops at id 24 — anything above is left out rather than sent to a
+     * client that has no placeholder for what it doesn't know. The canonical set doesn't currently reach
+     * that far, so this is a guard for the day somebody widens it, not a filter that fires today.
+     */
+    public static void writeSlotNbt(ByteBuf b, ItemDisplay display, boolean era014) {
         if (display == null || display.isEmpty()) {
             b.writeShortLE(0);
             return;
         }
         ByteBuf nbt = Unpooled.buffer(64);
         try {
-            writeCompound(nbt, display);
+            writeCompound(nbt, display, era014);
             b.writeShortLE(nbt.readableBytes());
             b.writeBytes(nbt);
         } finally {
@@ -59,30 +80,73 @@ public final class McpeItemNbt {
         }
     }
 
-    private static void writeCompound(ByteBuf b, ItemDisplay display) {
+    private static void writeCompound(ByteBuf b, ItemDisplay display, boolean era014) {
         b.writeByte(TAG_COMPOUND);
         writeString(b, "");              // the root compound is unnamed
-        b.writeByte(TAG_COMPOUND);
-        writeString(b, "display");
 
-        if (!display.name().isEmpty()) {
-            b.writeByte(TAG_STRING);
-            writeString(b, "Name");
-            writeString(b, display.name());
-        }
+        writeEnchantments(b, display.enchantments(), era014);
+
+        // As on the Java side: only open "display" when there is something to put in it, so an enchanted
+        // but unnamed stack stays an ordinary item that happens to glint.
         String[] lore = display.lore();
-        if (lore.length > 0) {
-            b.writeByte(TAG_LIST);
-            writeString(b, "Lore");
-            b.writeByte(TAG_STRING);   // the list's element type
-            b.writeIntLE(lore.length); // little-endian NBT: an LE int length
-            for (String line : lore) {
-                writeString(b, line == null ? "" : line);
+        if (!display.name().isEmpty() || lore.length > 0) {
+            b.writeByte(TAG_COMPOUND);
+            writeString(b, "display");
+
+            if (!display.name().isEmpty()) {
+                b.writeByte(TAG_STRING);
+                writeString(b, "Name");
+                writeString(b, display.name());
             }
+            if (lore.length > 0) {
+                b.writeByte(TAG_LIST);
+                writeString(b, "Lore");
+                b.writeByte(TAG_STRING);   // the list's element type
+                b.writeIntLE(lore.length); // little-endian NBT: an LE int length
+                for (String line : lore) {
+                    writeString(b, line == null ? "" : line);
+                }
+            }
+            b.writeByte(TAG_END);          // closes "display"
         }
 
-        b.writeByte(TAG_END);            // closes "display"
         b.writeByte(TAG_END);            // closes the root
+    }
+
+    /**
+     * The {@code ench} list — a compound per enchantment of {@code short id} / {@code short lvl}, at the
+     * root beside {@code display}, little-endian like everything else here. Ids are <b>Bedrock's</b>,
+     * which are not Java's: see {@link com.jedrock.network.EnchantmentIds}.
+     */
+    private static void writeEnchantments(ByteBuf b, com.jedrock.api.item.Enchantments enchantments,
+                                          boolean era014) {
+        if (!ENCHANT_NBT || enchantments == null || enchantments.isEmpty()) {
+            return;
+        }
+        java.util.List<java.util.Map.Entry<com.jedrock.api.item.Enchantment, Integer>> entries =
+                new java.util.ArrayList<>(enchantments.size());
+        for (var entry : enchantments.asMap().entrySet()) {
+            if (era014 && !com.jedrock.network.EnchantmentIds.supportedBy014(entry.getKey())) {
+                continue;   // an id this era never had; it crashes rather than shrugs
+            }
+            entries.add(entry);
+        }
+        if (entries.isEmpty()) {
+            return;
+        }
+        b.writeByte(TAG_LIST);
+        writeString(b, "ench");
+        b.writeByte(TAG_COMPOUND);       // the list's element type
+        b.writeIntLE(entries.size());    // little-endian NBT: an LE int length
+        for (var entry : entries) {
+            b.writeByte(TAG_SHORT);
+            writeString(b, "id");
+            b.writeShortLE(com.jedrock.network.EnchantmentIds.bedrockId(entry.getKey()));
+            b.writeByte(TAG_SHORT);
+            writeString(b, "lvl");
+            b.writeShortLE(entry.getValue());
+            b.writeByte(TAG_END);        // closes this entry's compound
+        }
     }
 
     private static void writeString(ByteBuf b, String value) {

@@ -287,6 +287,13 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
     private static final int CB_NAMED_SOUND = 0x19;      // named sound effect (name + category + pos*8 + volume + pitch)
     private static final int CB_WORLD_PARTICLES = 0x22;  // particle burst (same body as 1.8's 0x2a)
     private static final int CB_TIME_UPDATE = 0x47;      // world age + time of day, both longs
+    private static final int CB_ENTITY_EFFECT = 0x4f;    // give an entity a status effect
+    private static final int CB_REMOVE_ENTITY_EFFECT = 0x33; // take one away again
+    /**
+     * The entity id the client knows itself by — Join Game hands it {@code 1}, so anything aimed at the
+     * player themselves (an effect on them) addresses that.
+     */
+    private static final int SELF_ENTITY_ID = 1;
     private static final int CB_ENTITY_EQUIPMENT = 0x3f; // eid (varint) + slot (varint, 0 = main hand) + item
     private static final int CB_SPAWN_OBJECT = 0x00;     // non-mob entities: item stacks, falling blocks…
 
@@ -435,6 +442,21 @@ public final class JavaEditionProtocolHandler implements JavaProtocol {
                               double x, double y, double z, int count, double spread) {
         int id = JeEffects.particleId(particle);
         send(c, CB_WORLD_PARTICLES, b -> JeEffects.writeParticleBody(b, id, x, y, z, count, spread));
+    }
+
+    @Override
+    public void sendEffect(JedrockConnection c, com.jedrock.api.entity.Effect effect, int amplifier,
+                           int durationTicks, boolean particles) {
+        // Entity Effect (0x4F). The trailing byte here says what to SHOW — the inverse of 1.8's "hide
+        // particles" bool, which is why the two versions pass a different one into the shared body.
+        send(c, CB_ENTITY_EFFECT, b -> JeEffects.writeEffectBody(b, SELF_ENTITY_ID, effect.getId(),
+                amplifier, durationTicks, JeEffects.particleFlags1_12(particles)));
+    }
+
+    @Override
+    public void removeEffect(JedrockConnection c, com.jedrock.api.entity.Effect effect) {
+        send(c, CB_REMOVE_ENTITY_EFFECT, b ->
+                JeEffects.writeRemoveEffectBody(b, SELF_ENTITY_ID, effect.getId()));
     }
 
     /** Wrap an already-rendered legacy (§) string as a JSON chat component. */

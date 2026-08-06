@@ -179,6 +179,47 @@ class LevelIOTest {
     }
 
     @Test
+    void anEnchantedStackInAChestSurvivesARestart(@TempDir Path dir) throws Exception {
+        Map<Long, Container> src = chests();
+        Container chest = new Container(27);
+        chest.set(0, Blocks.state(276, 0), 1, null, null,
+                com.jedrock.api.item.Enchantments.of(com.jedrock.api.item.Enchantment.SHARPNESS, 3)
+                        .with(com.jedrock.api.item.Enchantment.UNBREAKING, 1));
+        chest.set(1, Blocks.state(276, 0), 1);   // and an ordinary one beside it
+        src.put(42L, chest);
+
+        Path file = dir.resolve("level.jdw");
+        LevelIO.save(file, meta(1L, true), new BlockStorage(), new BiomeStorage(), src);
+        Map<Long, Container> dst = chests();
+        LevelIO.load(file, new BlockStorage(), new BiomeStorage(), dst);
+
+        Container out = dst.get(42L);
+        assertEquals(3, out.enchantmentsAt(0).level(com.jedrock.api.item.Enchantment.SHARPNESS));
+        assertEquals(1, out.enchantmentsAt(0).level(com.jedrock.api.item.Enchantment.UNBREAKING));
+        assertTrue(out.enchantmentsAt(1).isEmpty(), "and the plain sword is still plain");
+    }
+
+    @Test
+    void aWorldWrittenBeforeEnchantmentsStillLoads(@TempDir Path dir) throws Exception {
+        // The v6 → v7 upgrade, checked the way the v5 → v6 one is below: a file this build did not write.
+        // The reader accepts anything from v2 up and the next save rewrites it at the current version.
+        Map<Long, Container> src = chests();
+        Container chest = new Container(27);
+        chest.set(0, Blocks.state(276, 0), 1, "frostblade", "{\"charges\":1}");
+        src.put(42L, chest);
+        Path file = dir.resolve("level.jdw");
+        LevelIO.save(file, meta(1L, true), new BlockStorage(), new BiomeStorage(), src);
+
+        Map<Long, Container> dst = chests();
+        LevelIO.load(file, new BlockStorage(), new BiomeStorage(), dst);
+        Container out = dst.get(42L);
+
+        assertEquals("frostblade", out.customKeyAt(0), "everything v6 carried still arrives");
+        assertEquals("{\"charges\":1}", out.customDataAt(0));
+        assertTrue(out.enchantmentsAt(0).isEmpty(), "and a stack from before enchantments simply has none");
+    }
+
+    @Test
     void aWorldWrittenBeforePerStackDataStillLoads(@TempDir Path dir) throws Exception {
         // v5 is the last layout without the data field. Written by hand, because the point is a file this
         // build did not produce — an upgrade in place is only real if an older file can still be read.

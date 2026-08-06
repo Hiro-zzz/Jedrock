@@ -27,6 +27,7 @@ final class McpeProtocol {
     static final int ID_SET_TIME = 0x0a;          // outbound: time of day (PMMP 1.7dev-27, proto 113)
     static final int ID_MOVE_PLAYER = 0x13;
     static final int ID_UPDATE_BLOCK = 0x16;
+    static final int ID_MOB_EFFECT = 0x1D;        // outbound: add / modify / remove a status effect
     static final int ID_UPDATE_ATTRIBUTES = 0x1E; // outbound: movement-speed fix (PMMP 113: 0x1e — was 0x1D)
     static final int ID_ENTITY_FALL = 0x25;       // inbound: the client reports a fall (its distance)
     static final int ID_SET_HEALTH = 0x2A;        // outbound: set the player's health (0..20)

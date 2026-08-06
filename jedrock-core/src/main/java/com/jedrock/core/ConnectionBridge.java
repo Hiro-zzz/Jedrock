@@ -79,6 +79,15 @@ final class ConnectionBridge implements ConnectionListener {
     private final OpList opList;
     private final PermissionManager permissions;
     private final com.jedrock.core.region.RegionManager regions;
+    /**
+     * What a player is under, consulted only to widen the movement limit. Set after construction (the
+     * effect service is built from the same pieces this is) and null in tests that don't wire one.
+     */
+    private com.jedrock.core.effect.EffectService effects;
+
+    void setEffects(com.jedrock.core.effect.EffectService effects) {
+        this.effects = effects;
+    }
 
     ConnectionBridge(JedrockServer server, EventBus eventBus, PlayerRegistry playerRegistry,
                      PlayerBroadcast broadcast, PlayerTracker tracker, CoreWorld defaultWorld,
@@ -317,7 +326,10 @@ final class ConnectionBridge implements ConnectionListener {
 
         // Blind judge: refuse to believe a blatant teleport / speed jump and snap the client back to
         // its last valid spot (keeping its new look angles, which aren't cheating), then drop the move.
-        if (!judge.allowsMove(from.x(), from.y(), from.z(), x, y, z)) {
+        // A player under speed or jump boost really is faster — the client applies those itself — so the
+        // limit is widened by what they are under rather than by guessing (see EffectService).
+        if (!judge.allowsMove(from.x(), from.y(), from.z(), x, y, z,
+                effects == null ? 1.0 : effects.moveAllowance(player))) {
             connection.teleport(from.x(), from.y(), from.z(), yaw, pitch);
             return;
         }
@@ -436,6 +448,16 @@ final class ConnectionBridge implements ConnectionListener {
                     return;
                 }
                 slot = editor.addToInventory(previous);
+                // Fortune: the server is what hands a drop out here, so this is one of the few
+                // enchantments it can honour rather than merely render. Vanilla's own shape — a chance
+                // at one extra per level — kept to the same one-block-at-a-time give.
+                int fortune = editor.getHeldEnchantments()
+                        .level(com.jedrock.api.item.Enchantment.FORTUNE);
+                for (int extra = 0; extra < fortune; extra++) {
+                    if (java.util.concurrent.ThreadLocalRandom.current().nextInt(fortune + 2) == 0) {
+                        editor.addToInventory(previous);
+                    }
+                }
             } else {
                 slot = editor.takeItem(state);
             }

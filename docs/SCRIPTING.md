@@ -22,6 +22,7 @@ That is a complete plugin.
 ## Contents
 
 - [The basics](#the-basics) · [The JavaScript dialect](#the-javascript-dialect) · [Blocks and items are numbers](#blocks-and-items-are-numbers) · [Text markup](#text-markup)
+- [Status effects](#status-effects) · [Enchantments](#enchantments)
 - Globals: [`events`](#events) · [`commands`](#commands) · [`server`](#server) · [`world`](#world) · [`worlds`](#worlds) · [`entities`](#entities) · [`scheduler`](#scheduler) · [`storage`](#storage) · [`regions`](#regions) · [`permissions`](#permissions) · [`punishments`](#punishments) · [`items`](#items) · [`menus`](#menus) · [`http`](#http) · [`packets`](#packets) · [`console`](#console)
 - [Every event](#every-event) · [Custom events](#custom-events) · [Limits worth knowing](#limits-worth-knowing)
 
@@ -113,6 +114,20 @@ player.giveItem(35 * 16 + 14, 8);      // …or packed, when the API takes a sta
 
 Ids are the pre-1.13 numeric ones (the "legacy" set every target version of this server shares). `Blocks`
 constants exist on the Java side; from a script, use the numbers.
+
+The numbers stay the model — but there is a name table over them, the one `/give` and `/pose` parse with,
+and a script can use it in either direction:
+
+```js
+items.state('red_wool');    // 574   — also 'wool:14', '35:14', '276'
+items.state('nonsense');    // -1    — it names nothing
+items.nameOf(574);          // 'red_wool'
+items.nameOf(2528);         // '158' — nothing names that state, so you get the number back
+```
+
+It covers what the creative palettes offer and no more. Where the Java and Bedrock legacy numberings
+disagree about an id, the state is deliberately left unnamed rather than given a name that would be wrong
+on half the server — `items.nameOf` then hands back `id` or `id:meta`, which is always printable.
 
 ---
 
@@ -315,6 +330,106 @@ commands.register('arena', function (sender) {
     worlds.send(sender, 'arena');
 });
 ```
+
+---
+
+## Status effects
+
+Effects hang off a player rather than a global, because that is what they are attached to:
+
+```js
+player.addEffect('speed', 30, 2);       // Speed II for 30 seconds
+player.addEffect('night_vision', 600);  // level 1 by default
+player.addEffect('invisibility');       // 30 seconds by default
+
+player.hasEffect('speed');              // true
+player.getEffectLevel('speed');         // 2 — the way a person counts, not the wire's 0-based amplifier
+player.getEffectSeconds('speed');       // how much is left
+player.getEffects();                    // ['speed', 'night_vision']
+player.removeEffect('speed');           player.clearEffects();
+```
+
+Names are the vanilla ones, lower-case: `speed` `slowness` `haste` `mining_fatigue` `strength`
+`instant_health` `instant_damage` `jump_boost` `nausea` `regeneration` `resistance` `fire_resistance`
+`water_breathing` `invisibility` `blindness` `night_vision` `hunger` `weakness` `poison` `wither`
+`health_boost` `absorption` `saturation`.
+
+**Almost all of it is the client's doing**, which is what makes it cheap: the server says it once and the
+client draws the swirl, tints the screen and — since movement here is client-authoritative — actually
+moves faster. Nothing ticks on this side. The server acts on exactly five:
+
+| Effect | What the server does |
+|---|---|
+| `speed`, `jump_boost` | Widens how far you may plausibly have moved, so the anti-cheat doesn't snap a fast player back |
+| `strength`, `weakness` | Changes what your melee hit does |
+| `resistance` | Changes what a hit does to you |
+| `instant_health`, `instant_damage` | Applied outright — health is the server's |
+| `invisibility` | Your avatar is not sent to other clients at all, which works identically on all four editions |
+
+**`poison`, `regeneration` and `wither` are cosmetic here.** They look right and change no health: ticking
+somebody's hit points is the server-side simulation this project doesn't do. If you want a poison that
+bites, run a `scheduler.runTimer` and call `player.setHealth` yourself — that way the cost is visible in
+your plugin instead of hidden in the core.
+
+Two smaller things worth knowing: effects are **not persisted** (a restart clears them, like the weather),
+and MCPE **0.14 knows sixteen** of the list above — the rest are silently not sent there, because that
+client crashes on an id it doesn't have rather than ignoring it. Instant health and damage still land on
+0.14, since those are a number the server changes rather than a picture the client draws.
+
+---
+
+## Enchantments
+
+An enchantment belongs to a **stack**, not to a definition, so these act on what is in somebody's hand or
+in a slot:
+
+```js
+items.enchant(player, 'sharpness', 3);       // what they're holding
+items.enchant(player, 'sharpness');          // level 1
+items.enchantAt(player, 4, 'fortune', 2);    // a particular inventory slot
+items.enchant(player, 'sharpness', 0);       // …0 takes it off
+
+items.enchantmentLevel(player, 'sharpness'); // 3, or 0
+items.enchantmentsOf(player);                // 'sharpness:3,unbreaking:1'  ('' = none)
+items.disenchant(player);                    // strip the lot
+```
+
+A definition can hand them out too, so a custom item arrives already enchanted:
+
+```js
+items.define('frostblade', 276)
+     .setName('{aqua}Frostblade')
+     .setEnchantments({sharpness: 3, unbreaking: 1});
+```
+
+Names are the vanilla ones, lower-case: `protection` `fire_protection` `feather_falling`
+`blast_protection` `projectile_protection` `respiration` `aqua_affinity` `thorns` `depth_strider`
+`sharpness` `smite` `bane_of_arthropods` `knockback` `fire_aspect` `looting` `efficiency` `silk_touch`
+`unbreaking` `fortune` `power` `punch` `flame` `infinity` `luck_of_the_sea` `lure`. (The 1.9-era ones —
+mending, frost walker, the curses — are absent: half the target versions predate them.)
+
+**An enchantment is part of the stack's identity.** It survives every move, persists in a chest across a
+restart, and stops two otherwise identical stacks merging — so a sharpness sword never dissolves into a
+pile of plain ones.
+
+**Most of them are decoration here, and it is better to know which.** The server acts on five:
+
+| Enchantment | What the server does |
+|---|---|
+| `sharpness`, `smite`, `bane_of_arthropods` | Adds to a melee hit (all three alike — there are no undead to tell apart) |
+| `protection` | Takes off a share of everything you're hit by |
+| `feather_falling` | The same, for a fall |
+| `thorns` | Hurts whoever hit you |
+| `fortune` | More from a mined block — the server is what hands the drop out |
+
+`efficiency` needs nothing: legacy clients time their own digging from the item's NBT. Everything else —
+`unbreaking`, `mending`'s absent cousins, `power`, `punch`, `flame`, `infinity`, `fire_aspect`,
+`knockback`, `silk_touch`, `looting`, `luck_of_the_sea`, `lure`, `respiration`, `depth_strider`,
+`aqua_affinity` — renders, glints and reads correctly and changes nothing, because it is for durability,
+projectiles, fire, physics or drop tables, none of which this server has.
+
+There is **no enchanting table and no XP**: an enchantment is given. And the two editions number
+enchantments differently under the hood, which the server handles — you always use the name.
 
 ---
 
@@ -522,6 +637,9 @@ blade.setName('{aqua}Frostblade')
 
 items.give(player, 'frostblade');
 items.heldKey(player);               // the key of what they're holding, or null
+
+items.state('red_wool');             // 574 — the vanilla name table, both directions
+items.nameOf(574);                   // 'red_wool'
 ```
 
 **Identity is the key.** A stack carries `'frostblade'`, not a copy of the definition — so editing this
@@ -716,6 +834,8 @@ this once per client per list refresh.
 | `PlayerDeath` | — | `player`; `setDeathMessage(…)` |
 | `PlayerDamage` | ✅ | `player`, amount, cause — where a hit is vetoed or rescaled, and the only one that knows *why* |
 | `PlayerHealthChange` | ✅ | `player`, old / new health, `isDamage()`. **Any** change from any source, damage and healing alike; `setNewHealth(…)` rewrites the number. Fires after `PlayerDamage` on a hit. Cancelling on a lethal blow makes them unkillable — that is the feature and the footgun |
+| `PlayerEffect` | ✅ | `player`, `getEffect()` (its `getKey()` is the lower-case name), amplifier, duration — fired before an effect lands. `setAmplifier(…)` / `setDurationSeconds(…)` weaken or shorten it, so a region that halves potions is a listener rather than a special case. Not fired when one is removed or expires |
+| `ItemEnchant` | ✅ | `player`, slot, state, `getEnchantment()`, level — fired before an enchantment lands. `setLevel(…)` caps or weakens it; a level of 0 takes it off. Not fired for a stack that arrives enchanted from a definition |
 | `PlayerPickupItem` | ✅ | `player`, state |
 | `PlayerUseItem` | ✅ | `player`, state |
 | `PlayerHeldItemChange` | ✅ | `player`, slot |

@@ -8,6 +8,116 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Enchantments — and the ids that don't line up.** `/enchant <player> <enchantment> [level]`, `clear`,
+  `list`; `items.enchant(player, 'sharpness', 3)` from a script; and `.setEnchantments({sharpness: 3})` on
+  a custom item's definition so it arrives enchanted.
+
+  Cheaper than it sounds, because the hard part was already built: an enchantment is item NBT — an `ench`
+  list at the root of the stack's compound, entries of `{id: short, lvl: short}` — and this server already
+  writes item NBT in three dialects it learned the hard way. One more tag beside `display`, and the client
+  draws the glint and the tooltip itself.
+
+  **The genuinely interesting part is that Java and Bedrock number enchantments differently.** Not by an
+  offset, either: sharpness is 16 on Java and 9 on Bedrock, and three of them are *reordered* across ids
+  both editions use for something — Java runs respiration 5, aqua affinity 6, thorns 7 where Bedrock runs
+  thorns 5, respiration 6, aqua affinity 8. A single shared table wouldn't have failed; it would have
+  handed a Bedrock player thorns where a Java player asked for respiration, with nothing anywhere saying
+  so. `EnchantmentIds` maps each side separately (as `EntityTypeIds` does for entities), quoting its
+  source, and a test pins the three that overlap.
+
+  An enchantment is **part of a stack's identity**, which is what most of the work went into: it rides
+  through every window click, every chest transfer, a Bedrock client's own drag (the trail that rescues a
+  custom item's key carries this too), persists in the level file — **v7**, which loads a v2–v6 world in
+  place — and keeps two otherwise identical stacks from merging. Without that last one, a sharpness sword
+  quietly dissolves into a pile of plain ones the first time they meet in a slot.
+
+  **What the server acts on is deliberately narrow**, and the docs say so rather than implying more: the
+  four decisions the core already owns. Sharpness (with smite and bane, which have nothing here to tell
+  apart) adds to a melee hit; protection takes a share off everything, feather falling off a fall; thorns
+  answers back through the same hurt path, so a thorns kill reads like any other death; fortune multiplies
+  what a mined block drops, the server being what hands it out. Efficiency needs nothing — legacy clients
+  time their own digging from the item's NBT.
+
+  Everything else renders, glints and reads correctly and changes nothing, because it is for a system this
+  server hasn't got: unbreaking wants durability, power and flame want projectiles, fire aspect wants
+  fire, knockback wants physics. Silk touch is decoration for a happier reason — a broken block already
+  drops itself. **No enchanting table and no XP**: a table would need levels this server doesn't keep and
+  a window the 1.1.5 client cannot raise.
+
+  On 0.14 the tag goes through the same crash gate blocks and items already do (its table stops at id 24),
+  and `-Djedrock.pe.enchantNbt=false` stops writing it at all — item NBT on that client is precisely where
+  a quiet failure has happened before.
+
+  **Confirmed on real clients, all four**, which for this feature is more than the usual formality: the
+  entire visible half is a glint and a tooltip line, and no byte test can see either. A tag written to the
+  wrong dialect, or with the other edition's ids, would have passed every test in this repository.
+
+- **Status effects — `/effect`, and the whole notion of being under one.** There were none: no packet, no
+  enum, nothing anywhere that knew a player could be affected by something.
+
+  They turn out to fit this server unusually well. An effect is **scenery in the same sense the weather
+  and the clock are**: the server says "speed II for thirty seconds" once, and the client draws the
+  swirl, tints the screen and — because movement here is client-authoritative — genuinely runs faster.
+  Nothing on this side ticks to keep any of that going, and a player under nothing costs one empty-map
+  check a second.
+
+  All four protocols, and for once the editions agree about the *numbering* — the legacy 1–23 ids are
+  shared — so the id lives on the enum and only the writing differs: a byte on Java and 0.14, a zigzag
+  varint on 1.1.5. What they disagree about is which effects exist: **0.14 knows sixteen**, and is the
+  client that crashes rather than shrugs at an id it doesn't have, so the rest go through a
+  `Pe014Effects` gate exactly as blocks and items already do. Ids came from PocketMine (both trees) and
+  ViaVersion, each cross-checked against an id this project had already confirmed with a real client —
+  0.14's `0xa5` sits between `0xa4` and `0xa6`, and 1.1.5's `0x1d` in the one gap between EntityEvent and
+  UpdateAttributes. One inversion worth recording: the trailing byte of Java's Entity Effect *shows*
+  particles on 1.12.2 and *hides* them on 1.8. Same position, opposite meaning.
+
+  **The core steps in at exactly the points where it already owns the answer**, and nowhere else. The
+  blind judge widens what it will believe about a sped-up player — without which speed would present as
+  rubber-banding, making that the bug inside the feature rather than an extra. Strength, weakness and
+  resistance scale a hit through the damage event every point of damage already goes through. Instant
+  health and damage are applied outright, health being the one thing this server is authoritative for.
+  And invisibility simply withholds the avatar from other clients, which needs no wire support and so
+  behaves identically on all four editions rather than depending on four metadata layouts.
+
+  **Poison, regeneration and wither are deliberately cosmetic.** They look right and change no health:
+  ticking somebody's hit points is the server-side simulation this project doesn't do. A script that
+  wants a poison that bites writes the timer itself, and pays for it where the cost can be seen.
+
+  Not persisted, like the weather. Re-stated on a world switch, because the client is the one holding the
+  countdown and a dimension change is exactly the sort of thing it drops them on. Cancellable
+  `PlayerEffect` event, so a plugin can refuse or rescale one before it lands.
+
+  **Confirmed on real clients, all four.** Which for the two Bedrock eras is the only judge that counts:
+  the ids and bodies came from PocketMine and were pinned byte-for-byte, and a byte test would have said
+  exactly the same thing about an amplifier written one level out or a duration in the wrong unit.
+
+- **Items have names you can type, and `/give`.** A block is an id here and always will be — but nobody
+  should have to *say* 574 at a chat prompt, and until now there was no way to hand somebody a stack
+  without writing a script.
+
+  `ItemNames` names the canonical states. One table over blocks and items alike, because there is one
+  model for both, and `/give <player> <item> [count]` takes any way of writing one: `red_wool`,
+  `wool:14`, `35:14`, or `276`. A bare number is an **id**, not a packed state — that is what a person
+  means by 276, and a packed state was never something anyone typed. A **custom item's key wins over all
+  of it**, so `/give Steve frostblade` hands over the real thing, carrying the identity that makes it
+  one, rather than the diamond sword it is drawn as.
+
+  The table is written against the two creative palettes, and the guard against it drifting from them is
+  a test in the network module — the only place both are visible — which fails when a palette gains a
+  state nobody named. It is also deliberately **incomplete**: where the legacy Java and Bedrock
+  numberings disagree about what an id means (158 is a dropper on one and a wooden slab on the other),
+  the state stays unnamed rather than carry a name that would be wrong on half the server. Nothing
+  becomes unreachable by that — `id:meta` still addresses it, and `nameOf` hands the number back.
+
+  Three things that already existed got the table for free: `/pose` parses a prop's block the same way
+  (`/pose block red_wool`), `/pick` prints what a stack *is* — a custom item's own name, or the canonical
+  one for its state — instead of a raw number, which is the README's own listed leftover, and a script
+  can resolve either direction with `items.state` / `items.nameOf`.
+
+  Also folded together on the way: giving stacks in bulk had two implementations, one of which carried a
+  custom item's key and one of which didn't. There is one now (`CorePlayer.giveItem(state, count, key)`),
+  which is what both the command and `items.give` call.
+
 - **Time of day — `/time`, and the whole notion of it.** There was none: the only clock anywhere was a
   hardcoded zero 0.14 sends at spawn. A world now has an hour, `/time set|add|query|freeze|resume` moves
   it, and `world.setTime(6000)` does the same from a script.
