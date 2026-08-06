@@ -33,6 +33,7 @@ import com.jedrock.core.command.ClearCommand;
 import com.jedrock.core.command.CommandManager;
 import com.jedrock.core.command.GameModeCommand;
 import com.jedrock.core.command.GiveCommand;
+import com.jedrock.core.command.EffectCommand;
 import com.jedrock.core.command.WeatherCommand;
 import com.jedrock.core.command.WorldCommand;
 import com.jedrock.core.command.HealCommand;
@@ -155,6 +156,8 @@ public class JedrockServer implements Server {
     private final ContainerService containers;
     /** Fall, void and melee — the one path from a source of damage to a health bar. */
     private final CombatService combat;
+    /** Who is under what, and for how long — scenery the client animates, mostly. */
+    private final com.jedrock.core.effect.EffectService effects;
     /** The one path from a world to another world, for a player standing in the first. */
     private final WorldTravel travel;
     /** Every world the server has, and the only thing allowed to make one. */
@@ -234,10 +237,18 @@ public class JedrockServer implements Server {
         // draws its range from the same view distance the chunk stream uses.
         this.tracker = new PlayerTracker(playerRegistry, config.viewDistance());
         this.travel = new WorldTravel(tracker, entities, eventBus);
+        // Status effects. Built after the tracker because invisibility is done by withholding an avatar,
+        // and cross-wired with combat: instant health and damage are a health change, and an attacker's
+        // strength is the half of the damage arithmetic no damage event can carry.
+        this.effects = new com.jedrock.core.effect.EffectService(playerRegistry, tracker, eventBus);
+        this.effects.setCombat(combat);
+        this.combat.setEffects(effects);
+        this.travel.setEffects(effects);
         // Everything the protocol layer reports lands here, not on the server itself.
         this.bridge = new ConnectionBridge(this, eventBus, playerRegistry, broadcast, tracker, defaultWorld,
                 judge, combat, containers, entities, commandManager, packetTaps, opList, permissions,
                 regions);
+        this.bridge.setEffects(effects);
 
         // Attach scheduler + core tick to game loop
         gameLoop.addTickable(scheduler);
@@ -289,6 +300,7 @@ public class JedrockServer implements Server {
         commandManager.register(new KillCommand());
         commandManager.register(new ClearCommand());
         commandManager.register(new GiveCommand());
+        commandManager.register(new EffectCommand());
         commandManager.register(new PuppetCommand());
         commandManager.register(new HologramCommand());
         commandManager.register(new PoseCommand());
@@ -458,6 +470,10 @@ public class JedrockServer implements Server {
         // Environmental damage runs on the loop (not per move) so it fires even for a player who has
         // stopped sending position updates. The service gates itself to a coarse interval.
         combat.environmentTick(currentTick);
+
+        // Retire effects that have run out. Also gated to a coarse interval, and it visits only players
+        // who are actually under something — an unaffected server pays a handful of empty-map checks.
+        effects.expiryTick(currentTick);
 
         // Repaint the sidebar for clients that can't hold one (Bedrock borrows a HUD line that fades).
         // Free for everyone else: a player with no sidebar is one field read.
@@ -778,6 +794,11 @@ public class JedrockServer implements Server {
     }
 
     /** Custom items: a name, lore and behaviour hung on a vanilla item state, declared by scripts. */
+    /** Who is under what — the effect service, for commands and the script API. */
+    public com.jedrock.core.effect.EffectService getEffects() {
+        return effects;
+    }
+
     public com.jedrock.core.item.ItemRegistry getItems() {
         return items;
     }

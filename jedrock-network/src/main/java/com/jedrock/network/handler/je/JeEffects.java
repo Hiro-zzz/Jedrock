@@ -93,5 +93,39 @@ final class JeEffects {
         b.writeInt(Math.max(1, count));
     }
 
+    /**
+     * Write the Entity Effect body, which is the same five fields on both JE versions: entity id
+     * (VarInt), effect, amplifier, duration (VarInt ticks), and one trailing byte.
+     *
+     * <p>That last byte is where they part company, so the caller supplies it: on <b>1.8</b> it is a bool
+     * that <i>hides</i> the particles, on <b>1.12.2</b> a flags byte that <i>shows</i> them
+     * ({@code 0x01} ambient, {@code 0x02} particles). Same position, opposite meaning — which is exactly
+     * the field ViaVersion converts between the two, and the kind of thing that would otherwise be found
+     * by wondering why the swirl is missing on one client and not the other.
+     */
+    static void writeEffectBody(io.netty.buffer.ByteBuf b, int entityId, int effectId, int amplifier,
+                                int durationTicks, int trailingByte) {
+        com.jedrock.utils.ByteBufUtils.writeVarInt(b, entityId);
+        b.writeByte(effectId);
+        b.writeByte(amplifier);
+        com.jedrock.utils.ByteBufUtils.writeVarInt(b, durationTicks);
+        b.writeByte(trailingByte);
+    }
+
+    /** Write the Remove Entity Effect body — the entity and the effect, identical on both versions. */
+    static void writeRemoveEffectBody(io.netty.buffer.ByteBuf b, int entityId, int effectId) {
+        com.jedrock.utils.ByteBufUtils.writeVarInt(b, entityId);
+        b.writeByte(effectId);
+    }
+
+    /** The trailing byte's two spellings, so neither handler has to remember which way round it is. */
+    static int particleFlags1_12(boolean particles) {
+        return particles ? 0x02 : 0x00;
+    }
+
+    static int particleFlag1_8(boolean particles) {
+        return particles ? 0 : 1;   // the field is "hide particles"
+    }
+
     private JeEffects() {}
 }

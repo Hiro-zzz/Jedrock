@@ -231,6 +231,12 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
     /** A 0.14 day is 19200 ticks, not 24000 — the canonical time is rescaled on the way out. */
     private static final int DAY_TICKS_014 = 19200;
 
+    /**
+     * The entity id this client knows itself by: {@code 0}, which is what StartGame hands it (unlike
+     * 1.1.5, where the player is entity 1). Anything addressed at the player themselves uses it.
+     */
+    private static final long SELF_ENTITY_ID = 0L;
+
     @Override
     public void sendTime(long timeOfDay, boolean cycling) {
         // SetTime(0x94): int32 time, byte started. Ground truth PMMP at CURRENT_PROTOCOL 45, whose value
@@ -239,6 +245,29 @@ public final class PeSession014 implements RakNetSessionListener, PlayerConnecti
         // which is more than 1.1.5 offers and exactly what Java's negative time means.
         int scaled = (int) (Math.floorMod(timeOfDay, 24000L) * DAY_TICKS_014 / 24000L);
         sendWrapped(b -> Mcpe014Packets.setTime(b, scaled, cycling));
+    }
+
+    @Override
+    public void sendEffect(com.jedrock.api.entity.Effect effect, int amplifier,
+                           int durationTicks, boolean particles) {
+        // An effect this era never had is simply not sent: there is no placeholder on this client, and an
+        // unknown id crashes it the way an unknown block does. The core still applies whatever it owns
+        // (instant health and damage are a number, not a picture), so nothing is silently lost here that
+        // this client could have shown.
+        if (!Pe014Effects.supports(effect)) {
+            return;
+        }
+        sendWrapped(b -> Mcpe014Packets.mobEffect(b, SELF_ENTITY_ID, Mcpe014Packets.EFFECT_EVENT_ADD,
+                effect.getId(), amplifier, particles, durationTicks));
+    }
+
+    @Override
+    public void removeEffect(com.jedrock.api.entity.Effect effect) {
+        if (!Pe014Effects.supports(effect)) {
+            return;
+        }
+        sendWrapped(b -> Mcpe014Packets.mobEffect(b, SELF_ENTITY_ID, Mcpe014Packets.EFFECT_EVENT_REMOVE,
+                effect.getId(), 0, false, 0));
     }
 
     @Override

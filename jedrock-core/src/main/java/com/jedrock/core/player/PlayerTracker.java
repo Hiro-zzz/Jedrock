@@ -100,6 +100,30 @@ public final class PlayerTracker {
         return viewer == subject || viewer.sees(subject);
     }
 
+    /**
+     * Make a player's avatar vanish from — or come back to — every client that currently holds it.
+     *
+     * <p>This is how the invisibility effect is done, and it is worth saying why it isn't an entity flag:
+     * an unspawned avatar is invisible on <b>every</b> edition, with no metadata index to get wrong and
+     * nothing for 0.14 to fail to understand. The interest set is left alone, so range keeps being
+     * tracked the whole time an invisible player walks about and the avatar simply comes back where it
+     * would have been. The cost is that relays about them still address an entity their viewers don't
+     * hold — the same harmless writes as the moment before any avatar spawns.
+     */
+    public void setInvisible(CorePlayer subject, boolean invisible) {
+        if (subject.isInvisible() == invisible) {
+            return;
+        }
+        subject.setInvisible(invisible);
+        for (CorePlayer viewer : subject.getVisible()) {
+            if (invisible) {
+                hide(viewer, subject);
+            } else {
+                show(viewer, subject);
+            }
+        }
+    }
+
     // ===== The pair transitions =====
 
     /**
@@ -136,6 +160,9 @@ public final class PlayerTracker {
      * avatar that came into view stands there bare and upright until its owner does something.
      */
     private static void show(CorePlayer viewer, CorePlayer subject) {
+        if (subject.isInvisible()) {
+            return; // under invisibility there is no avatar to put up — see setInvisible
+        }
         PlayerConnection conn = viewer.getConnection();
         Location at = subject.getLocation();
         long entityId = subject.getEntityId();

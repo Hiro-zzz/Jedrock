@@ -34,9 +34,16 @@ import java.util.UUID;
 public final class ScriptPlayer {
 
     private final Player player;
+    /** The way to the server-wide services a player method needs (effects); null in a bare test wrap. */
+    private final PluginManager manager;
 
     ScriptPlayer(Player player) {
+        this(player, null);
+    }
+
+    ScriptPlayer(Player player, PluginManager manager) {
         this.player = player;
+        this.manager = manager;
     }
 
     /** The wrapped player, for the core's own use — not reachable from a script. */
@@ -181,6 +188,100 @@ public final class ScriptPlayer {
 
     public void kick(String reason) {
         player.kick(reason);
+    }
+
+    // ===== Status effects =====
+    //
+    // Mostly scenery: the client draws and applies these itself, and the server keeps only what it needs
+    // its own answers from. Levels are written the way a person says them — 1 is Speed I — and converted
+    // to the wire's zero-based amplifier here rather than in a script author's head.
+
+    /**
+     * Put this player under an effect: {@code player.addEffect('speed', 30, 2)} is Speed II for thirty
+     * seconds. The level defaults to 1 and the duration to 30 seconds. Fires {@code PlayerEffect}, so
+     * another plugin may refuse or rescale it.
+     *
+     * @return whether it landed
+     */
+    public boolean addEffect(String effect, int seconds, int level) {
+        com.jedrock.api.entity.Effect kind = requireEffect(effect);
+        com.jedrock.core.effect.EffectService effects = effects();
+        return effects != null && player instanceof com.jedrock.core.player.CorePlayer core
+                && effects.apply(core, kind, Math.max(1, level) - 1, Math.max(0, seconds), true);
+    }
+
+    public boolean addEffect(String effect, int seconds) {
+        return addEffect(effect, seconds, 1);
+    }
+
+    public boolean addEffect(String effect) {
+        return addEffect(effect, 30, 1);
+    }
+
+    /** Take one off. @return whether they were under it. */
+    public boolean removeEffect(String effect) {
+        com.jedrock.api.entity.Effect kind = requireEffect(effect);
+        com.jedrock.core.effect.EffectService effects = effects();
+        return effects != null && player instanceof com.jedrock.core.player.CorePlayer core
+                && effects.remove(core, kind);
+    }
+
+    /** Whether they are under it right now. */
+    public boolean hasEffect(String effect) {
+        return getEffectLevel(effect) > 0;
+    }
+
+    /** The level they are under, the way a person counts it (1 = Speed I), or {@code 0} for none. */
+    public int getEffectLevel(String effect) {
+        com.jedrock.api.entity.Effect kind = requireEffect(effect);
+        com.jedrock.core.effect.EffectService effects = effects();
+        if (effects == null || !(player instanceof com.jedrock.core.player.CorePlayer core)) {
+            return 0;
+        }
+        int amplifier = effects.amplifierOf(core, kind);
+        return amplifier < 0 ? 0 : amplifier + 1;
+    }
+
+    /** How many seconds are left of it, or {@code 0} if they aren't under it. */
+    public int getEffectSeconds(String effect) {
+        com.jedrock.api.entity.Effect kind = requireEffect(effect);
+        com.jedrock.core.effect.EffectService effects = effects();
+        if (effects == null || !(player instanceof com.jedrock.core.player.CorePlayer core)) {
+            return 0;
+        }
+        com.jedrock.core.effect.ActiveEffect active = effects.active(core).get(kind);
+        return active == null ? 0 : active.remainingSeconds(System.currentTimeMillis());
+    }
+
+    /** The names of everything they are under right now. */
+    public String[] getEffects() {
+        com.jedrock.core.effect.EffectService effects = effects();
+        if (effects == null || !(player instanceof com.jedrock.core.player.CorePlayer core)) {
+            return new String[0];
+        }
+        return effects.active(core).keySet().stream()
+                .map(com.jedrock.api.entity.Effect::getKey)
+                .toArray(String[]::new);
+    }
+
+    /** Take everything off. @return how many there were. */
+    public int clearEffects() {
+        com.jedrock.core.effect.EffectService effects = effects();
+        return effects != null && player instanceof com.jedrock.core.player.CorePlayer core
+                ? effects.clear(core) : 0;
+    }
+
+    /** An effect by name, or a thrown error a script can actually read. */
+    private static com.jedrock.api.entity.Effect requireEffect(String name) {
+        com.jedrock.api.entity.Effect effect = com.jedrock.api.entity.Effect.fromString(name);
+        if (effect == null) {
+            throw new IllegalArgumentException("no such effect: '" + name + "'");
+        }
+        return effect;
+    }
+
+    private com.jedrock.core.effect.EffectService effects() {
+        return manager == null ? null : manager.effects();
     }
 
     // ===== Inventory =====

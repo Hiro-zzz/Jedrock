@@ -437,6 +437,22 @@ public final class Java1_8ProtocolHandler implements JavaProtocol {
     }
 
     @Override
+    public void sendEffect(JedrockConnection c, com.jedrock.api.entity.Effect effect, int amplifier,
+                           int durationTicks, boolean particles) {
+        // Entity Effect (0x1D at 1.8): the same five fields 1.12.2 carries, but the trailing byte is a
+        // bool that HIDES the particles rather than a flags byte that shows them — so it is inverted,
+        // not merely renamed. (ViaVersion converts exactly that one field between the two.)
+        send(c, CB_ENTITY_EFFECT, b -> JeEffects.writeEffectBody(b, SELF_ENTITY_ID, effect.getId(),
+                amplifier, durationTicks, JeEffects.particleFlag1_8(particles)));
+    }
+
+    @Override
+    public void removeEffect(JedrockConnection c, com.jedrock.api.entity.Effect effect) {
+        send(c, CB_REMOVE_ENTITY_EFFECT, b ->
+                JeEffects.writeRemoveEffectBody(b, SELF_ENTITY_ID, effect.getId()));
+    }
+
+    @Override
     public void sendWeather(JedrockConnection c, com.jedrock.api.world.Weather weather) {
         // Change Game State (0x2B at 1.8): reason 1 = end rain, 2 = begin rain, then the strengths —
         // reason 7 is setRainStrength and 8 is setThunderStrength on the client, so full-strength

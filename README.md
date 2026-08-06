@@ -196,7 +196,7 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   ever changes). **In-game commands** work cross-edition — Java sends `/…` straight through as chat, and
   Bedrock is handed an `AvailableCommands` manifest so its client parses the line and sends it back. The
   built-in set: `/help [cmd]`, `/list`, `/tps`, `/say`, `/me`, `/msg`, `/gamemode`, `/tp`, `/tphere`,
-  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/give`, `/op`, `/deop`, `/perm`, `/region`, `/world`, `/pick`,
+  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/give`, `/effect`, `/op`, `/deop`, `/perm`, `/region`, `/world`, `/pick`,
   `/puppet`, `/hologram`, `/pose`, `/time`, `/about`, plus the [moderation set](#moderation). A deliberately minimal **survival inventory** (36 slots)
   tracks only what a survival player mines and places: mining a block drops it into the hotbar, placing
   consumes it, and the changed slot is pushed live so the HUD refreshes. On PE 1.1.5 the player window is
@@ -400,6 +400,29 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   test: the 1.1.5 client neither crashed nor complained, it just kept showing the vanilla name. An ordinary
   item still writes the exact bytes it always did, so nothing changed for a server that defines no items.
   **Confirmed on a real client on every one of the four**, which is what it took to trust either dialect.
+
+- ✅ **Status effects, cross-edition.** `/effect <player> <effect> [seconds] [level]`, `clear`, `list`, and
+  `player.addEffect('speed', 30, 2)` from a script. The whole legacy set of 23, on all four protocols —
+  which share the effect numbering, so the only difference is how each writes it (a byte on Java and 0.14,
+  a zigzag varint on 1.1.5; ids ground-truthed from PocketMine and ViaVersion, each cross-checked against
+  an id this project had already confirmed with a real client). 0.14 knows sixteen of them and is the
+  client that crashes rather than shrugs at an id it doesn't have, so the rest go through a
+  `Pe014Effects` gate, exactly as blocks and items already do.
+  **This is scenery in the sense the weather and the clock are**: the server says "speed II for thirty
+  seconds" once and the *client* draws the swirl, tints the screen and — since movement here is
+  client-authoritative — actually moves faster. Nothing ticks on this side, and a player under nothing
+  costs one empty-map check a second.
+  The core steps in at exactly the points where it already owns the answer: the **blind judge** widens
+  what it will believe about a sped-up player's movement (without which speed would present as
+  rubber-banding, so it is the bug inside the feature rather than an extra), **strength / weakness /
+  resistance** scale a hit through the damage event the core already routes every point through,
+  **instant health and damage** are applied outright because health is the server's, and **invisibility**
+  simply withholds the avatar from other clients — which needs no wire support and therefore behaves
+  identically on all four editions. Everything else is the client's own rendering.
+  **Poison, regeneration and wither are deliberately cosmetic** — ticking a player's health is the
+  server-side simulation this project doesn't do; a script that wants a poison that bites writes the
+  timer, and pays for it visibly. Not persisted, like the weather; re-stated on a world switch, since the
+  client is the one holding the countdown.
 
 - ✅ **Items have names you can type — and `/give`.** A block is an id and always will be, but nobody
   should have to *say* 574 at a chat prompt. `ItemNames` names the canonical states — one table over
@@ -980,14 +1003,13 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   sky, for the same reason travel there does.
 - **On the PE wire, a byte test is not the last word.** The surface itself has been walked through with
   real clients on both eras and works — join, movement, chat, edits, inventories, the illusion toolkit —
-  apart from the 1.1.5 client bugs listed above, which are the client's and not this server's. Nothing is
-  waiting on a login right now: the head/body yaw split, a custom item's identity carried through a drag
-  inside a Bedrock client's own window, and the clock have each been in front of a real client since they
-  were written. What stays is the reasoning, because it applies to whatever is added next: everything
-  ground-truthed against PocketMine is byte-tested, and a byte test only proves the encoder agrees with
-  itself. The item-NBT dialect passed its own tests and still showed the vanilla name on a real client.
-  So anything newly added to that wire is unverified until somebody logs in, and this list being empty
-  today means only that somebody did.
+  apart from the 1.1.5 client bugs listed above, which are the client's and not this server's. The
+  reasoning that outlives any particular list: everything ground-truthed against PocketMine is
+  byte-tested, and a byte test only proves the encoder agrees with itself. The item-NBT dialect passed
+  its own tests and still showed the vanilla name on a real client. So anything newly added to that wire
+  is unverified until somebody logs in — which right now means **status effects on both Bedrock eras**
+  (`MobEffect`, `0x1d` at 1.1.5 and `0xa5` at 0.14), whose ids and bodies are pinned byte-for-byte and
+  have not yet been in front of a client.
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
   runtime world simulation or physics, no 1.13+ flattening. Knockback is excluded for the same reason —
   the server simulates no physics. Custom logic that wants any of these lives in a script as an

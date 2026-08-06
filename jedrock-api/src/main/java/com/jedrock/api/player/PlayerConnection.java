@@ -343,6 +343,23 @@ public interface PlayerConnection {
     default void sendTime(long timeOfDay, boolean cycling) {}
 
     /**
+     * Tell this client it is under an effect — the swirl, the screen tint, and (for speed and jump) the
+     * movement the client then actually performs, since movement here is the client's to report.
+     *
+     * <p>{@code amplifier} is the level minus one, as every edition's wire has it: 0 is "Speed I".
+     * {@code durationTicks} is how long the client should count down for; it does the counting, which is
+     * why an effect costs one packet and nothing per tick afterwards.
+     *
+     * <p>An edition that doesn't know a given effect simply doesn't get it (MCPE 0.14 knows sixteen of
+     * them, and is the client that crashes on an id it can't place). Default: a no-op.
+     */
+    default void sendEffect(com.jedrock.api.entity.Effect effect, int amplifier,
+                            int durationTicks, boolean particles) {}
+
+    /** Take an effect away again, before its duration would have run out. Default: a no-op. */
+    default void removeEffect(com.jedrock.api.entity.Effect effect) {}
+
+    /**
      * Send tab-completion matches for a partially typed command line — the completions the client offers
      * for the token under the cursor. Java sends a serverbound request and shows these; Bedrock completes
      * client-side from its command manifest and never asks, so this is a no-op there. Default no-op.

@@ -102,6 +102,37 @@ public final class CorePlayer implements Player {
         return visible.remove(other);
     }
 
+    // ===== Status effects =====
+    //
+    // What this player is under, and until when. The client is the one animating any of it — this is
+    // only what the server needs its own answers from (see EffectService): taking one away, re-stating
+    // it to a client that has just arrived somewhere, and the two decisions the core actually owns.
+    // Written from the applying thread and read from the game loop, so it is concurrent; an EnumMap
+    // would be smaller but is not, and this map is empty for almost every player almost always.
+
+    private final java.util.Map<com.jedrock.api.entity.Effect, com.jedrock.core.effect.ActiveEffect>
+            effects = new ConcurrentHashMap<>(4);
+
+    /** The live effect table. Owned by {@code EffectService} — nothing else should write to it. */
+    public java.util.Map<com.jedrock.api.entity.Effect, com.jedrock.core.effect.ActiveEffect> getEffects() {
+        return effects;
+    }
+
+    /**
+     * Whether this player's avatar is currently withheld from other clients. Invisibility is done by not
+     * spawning the avatar rather than by an entity flag, so it needs no wire support on any edition and
+     * behaves identically on all four. Maintained by {@code PlayerTracker}, which is also what reads it.
+     */
+    private volatile boolean invisible = false;
+
+    public boolean isInvisible() {
+        return invisible;
+    }
+
+    void setInvisible(boolean invisible) {
+        this.invisible = invisible;
+    }
+
     // ===== Survival inventory =====
     //
     // A deliberately minimal 36-slot inventory (0-8 hotbar, 9-35 main), tracked only so a survival

@@ -18,6 +18,9 @@ public enum DamageCause {
     /** A {@code /kill} command or another administrative source. */
     KILL,
 
+    /** An instant-damage effect — the one damage source that is a status effect rather than an event. */
+    MAGIC,
+
     /** Anything else. */
     GENERIC
 }

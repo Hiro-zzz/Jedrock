@@ -43,6 +43,12 @@ final class WorldTravel {
     private final PlayerTracker tracker;
     private final EntityDirector entities;
     private final EventBus events;
+    /** Re-stated on arrival; set after construction and null in tests that don't wire one. */
+    private com.jedrock.core.effect.EffectService effects;
+
+    void setEffects(com.jedrock.core.effect.EffectService effects) {
+        this.effects = effects;
+    }
 
     WorldTravel(PlayerTracker tracker, EntityDirector entities, EventBus events) {
         this.tracker = tracker;
@@ -104,6 +110,12 @@ final class WorldTravel {
         }
         // Worlds keep their own time, so arriving in one means arriving at its hour, not carrying yours.
         player.getConnection().sendTime(target.getTime(), target.isDaylightCycle());
+        // Effects, unlike the weather and the hour, belong to the player rather than the world — so they
+        // travel with them, and are re-stated because the client is the one holding the countdown and a
+        // dimension change is exactly the sort of thing it drops them on.
+        if (effects != null) {
+            effects.resend(player);
+        }
 
         LOGGER.info(player.getName() + " travelled from '" + from.getName() + "' to '" + target.getName()
                 + "' (" + target.getDimension() + ")");

@@ -73,13 +73,13 @@ final class ScriptWrapFactory extends WrapFactory {
         if (javaObject instanceof CorePlayer core) {
             ScriptPlayer view = core.scriptView();
             if (view == null) {
-                view = new ScriptPlayer(core);
+                view = new ScriptPlayer(core, manager);
                 core.scriptView(view);
             }
             return view;
         }
         if (javaObject instanceof Player player) {
-            return new ScriptPlayer(player);   // a foreign Player implementation: no place to cache it
+            return new ScriptPlayer(player, manager);   // a foreign Player: no place to cache it
         }
         if (javaObject instanceof Server server) {
             return servers.computeIfAbsent(server, ScriptServer::new);

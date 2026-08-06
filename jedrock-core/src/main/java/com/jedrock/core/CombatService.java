@@ -52,6 +52,14 @@ public final class CombatService {
         this.items = items;
     }
 
+    /** Lets an attacker's strength / weakness answer for a hit; null in tests that don't wire one. */
+    private com.jedrock.core.effect.EffectService effects;
+
+    /** Wired after construction — the two services know about each other and are built together. */
+    public void setEffects(com.jedrock.core.effect.EffectService effects) {
+        this.effects = effects;
+    }
+
     /** Interval (ticks) between environmental-damage sweeps — vanilla applies void damage every 10 ticks. */
     private static final int ENVIRONMENT_TICK_INTERVAL = 10;
     /** Void damage per sweep, in half-hearts (vanilla is 4 = two hearts). */
@@ -193,7 +201,14 @@ public final class CombatService {
         if (items != null && items.onHit(attacker, victim)) {
             return;
         }
-        hurt(victim, ATTACK_DAMAGE, DamageCause.ATTACK, "{gray}" + ChatText.escape(victim.getName())
+        // Strength and weakness belong to whoever is swinging, and no damage event carries that — the
+        // event knows who was hurt, not who did it — so this is the one place they can be applied. What
+        // the victim is under (resistance) is handled on the event, where it belongs.
+        int damage = effects == null ? ATTACK_DAMAGE : effects.scaleOutgoing(attacker, ATTACK_DAMAGE);
+        if (damage <= 0) {
+            return; // weakness can take a bare-handed hit down to nothing, as it does in vanilla
+        }
+        hurt(victim, damage, DamageCause.ATTACK, "{gray}" + ChatText.escape(victim.getName())
                 + " was slain by " + ChatText.escape(attacker.getName()));
     }
 
@@ -211,6 +226,27 @@ public final class CombatService {
         hurt(player, CorePlayer.MAX_HEALTH, DamageCause.KILL,
                 "{gray}" + ChatText.escape(player.getName()) + " died");
         return true;
+    }
+
+    /**
+     * Heal a survival player by {@code points} half-hearts, clamped at full. What instant health does —
+     * the partial counterpart of {@link #heal}, which restores everything.
+     */
+    public void healBy(CorePlayer player, int points) {
+        if (player.getGameMode() != GameMode.SURVIVAL || points <= 0) {
+            return;
+        }
+        player.setHealth(Math.min(CorePlayer.MAX_HEALTH, player.getHealth() + points));
+    }
+
+    /**
+     * Hurt a survival player by {@code points} half-hearts from an effect (instant damage). Goes through
+     * the same {@link #hurt} path as everything else, so it fires the damage event, flashes the avatar
+     * and can kill — an effect is not a special kind of damage, only a different source of it.
+     */
+    public void hurtByEffect(CorePlayer player, int points) {
+        hurt(player, points, DamageCause.MAGIC,
+                "{gray}" + ChatText.escape(player.getName()) + " was killed by magic");
     }
 
     /**

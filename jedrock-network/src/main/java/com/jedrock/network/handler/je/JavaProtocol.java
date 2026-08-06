@@ -118,6 +118,18 @@ public interface JavaProtocol extends ProtocolHandler {
      */
     default void sendTime(JedrockConnection c, long timeOfDay, boolean cycling) {}
 
+    /**
+     * Entity Effect, aimed at the client's own player. Both Java versions carry the same fields — entity
+     * id, effect, amplifier, duration, and a trailing byte for the particles — and differ only in the
+     * packet id and in what that last byte means (a bool that <i>hides</i> particles on 1.8, a flags byte
+     * that <i>shows</i> them on 1.12.2, which is the kind of inversion worth writing down).
+     */
+    default void sendEffect(JedrockConnection c, com.jedrock.api.entity.Effect effect, int amplifier,
+                            int durationTicks, boolean particles) {}
+
+    /** Remove Entity Effect: the entity and the effect, and nothing else. */
+    default void removeEffect(JedrockConnection c, com.jedrock.api.entity.Effect effect) {}
+
     /** Set a puppet entity's floating name ({@code null} / empty hides it), in this version's metadata format. */
     void setEntityNameTag(JedrockConnection c, long entityId, String nameTag);
 

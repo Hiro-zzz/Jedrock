@@ -34,6 +34,42 @@ class JeEffectsTest {
     }
 
     @Test
+    void statusEffectBodyIsTheSameFiveFieldsOnBothEras() {
+        ByteBuf b = Unpooled.buffer();
+        // Speed II for 30 seconds, particles shown, on the client's own player (entity 1).
+        JeEffects.writeEffectBody(b, 1, 1, 1, 600, JeEffects.particleFlags1_12(true));
+
+        assertEquals(1, com.jedrock.utils.ByteBufUtils.readVarInt(b), "entity id (VarInt)");
+        assertEquals(1, b.readByte(), "effect id");
+        assertEquals(1, b.readByte(), "amplifier — 0 is level I");
+        assertEquals(600, com.jedrock.utils.ByteBufUtils.readVarInt(b), "duration in ticks");
+        assertEquals(0x02, b.readByte(), "1.12.2 flags: 0x02 shows particles");
+        assertEquals(0, b.readableBytes());
+        b.release();
+    }
+
+    @Test
+    void theTrailingByteIsInvertedBetweenTheTwoVersions() {
+        // Same request, opposite byte: 1.12.2 says "show these", 1.8 says "hide these". Getting it
+        // backwards is silent — an effect that works with no swirl, or a swirl nobody asked for.
+        assertEquals(0x02, JeEffects.particleFlags1_12(true));
+        assertEquals(0x00, JeEffects.particleFlags1_12(false));
+        assertEquals(0, JeEffects.particleFlag1_8(true));
+        assertEquals(1, JeEffects.particleFlag1_8(false));
+    }
+
+    @Test
+    void removingAnEffectIsTwoFields() {
+        ByteBuf b = Unpooled.buffer();
+        JeEffects.writeRemoveEffectBody(b, 1, 14);
+
+        assertEquals(1, com.jedrock.utils.ByteBufUtils.readVarInt(b), "entity id");
+        assertEquals(14, b.readByte(), "invisibility");
+        assertEquals(0, b.readableBytes());
+        b.release();
+    }
+
+    @Test
     void particleBodyLayoutMatchesMinecraftData() {
         ByteBuf b = Unpooled.buffer();
         JeEffects.writeParticleBody(b, 34, 1.0, 65.0, -1.0, 8, 0.5); // 8 hearts, ±0.5

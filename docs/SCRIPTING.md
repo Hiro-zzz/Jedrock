@@ -22,6 +22,7 @@ That is a complete plugin.
 ## Contents
 
 - [The basics](#the-basics) · [The JavaScript dialect](#the-javascript-dialect) · [Blocks and items are numbers](#blocks-and-items-are-numbers) · [Text markup](#text-markup)
+- [Status effects](#status-effects)
 - Globals: [`events`](#events) · [`commands`](#commands) · [`server`](#server) · [`world`](#world) · [`worlds`](#worlds) · [`entities`](#entities) · [`scheduler`](#scheduler) · [`storage`](#storage) · [`regions`](#regions) · [`permissions`](#permissions) · [`punishments`](#punishments) · [`items`](#items) · [`menus`](#menus) · [`http`](#http) · [`packets`](#packets) · [`console`](#console)
 - [Every event](#every-event) · [Custom events](#custom-events) · [Limits worth knowing](#limits-worth-knowing)
 
@@ -329,6 +330,51 @@ commands.register('arena', function (sender) {
     worlds.send(sender, 'arena');
 });
 ```
+
+---
+
+## Status effects
+
+Effects hang off a player rather than a global, because that is what they are attached to:
+
+```js
+player.addEffect('speed', 30, 2);       // Speed II for 30 seconds
+player.addEffect('night_vision', 600);  // level 1 by default
+player.addEffect('invisibility');       // 30 seconds by default
+
+player.hasEffect('speed');              // true
+player.getEffectLevel('speed');         // 2 — the way a person counts, not the wire's 0-based amplifier
+player.getEffectSeconds('speed');       // how much is left
+player.getEffects();                    // ['speed', 'night_vision']
+player.removeEffect('speed');           player.clearEffects();
+```
+
+Names are the vanilla ones, lower-case: `speed` `slowness` `haste` `mining_fatigue` `strength`
+`instant_health` `instant_damage` `jump_boost` `nausea` `regeneration` `resistance` `fire_resistance`
+`water_breathing` `invisibility` `blindness` `night_vision` `hunger` `weakness` `poison` `wither`
+`health_boost` `absorption` `saturation`.
+
+**Almost all of it is the client's doing**, which is what makes it cheap: the server says it once and the
+client draws the swirl, tints the screen and — since movement here is client-authoritative — actually
+moves faster. Nothing ticks on this side. The server acts on exactly five:
+
+| Effect | What the server does |
+|---|---|
+| `speed`, `jump_boost` | Widens how far you may plausibly have moved, so the anti-cheat doesn't snap a fast player back |
+| `strength`, `weakness` | Changes what your melee hit does |
+| `resistance` | Changes what a hit does to you |
+| `instant_health`, `instant_damage` | Applied outright — health is the server's |
+| `invisibility` | Your avatar is not sent to other clients at all, which works identically on all four editions |
+
+**`poison`, `regeneration` and `wither` are cosmetic here.** They look right and change no health: ticking
+somebody's hit points is the server-side simulation this project doesn't do. If you want a poison that
+bites, run a `scheduler.runTimer` and call `player.setHealth` yourself — that way the cost is visible in
+your plugin instead of hidden in the core.
+
+Two smaller things worth knowing: effects are **not persisted** (a restart clears them, like the weather),
+and MCPE **0.14 knows sixteen** of the list above — the rest are silently not sent there, because that
+client crashes on an id it doesn't have rather than ignoring it. Instant health and damage still land on
+0.14, since those are a number the server changes rather than a picture the client draws.
 
 ---
 
@@ -733,6 +779,7 @@ this once per client per list refresh.
 | `PlayerDeath` | — | `player`; `setDeathMessage(…)` |
 | `PlayerDamage` | ✅ | `player`, amount, cause — where a hit is vetoed or rescaled, and the only one that knows *why* |
 | `PlayerHealthChange` | ✅ | `player`, old / new health, `isDamage()`. **Any** change from any source, damage and healing alike; `setNewHealth(…)` rewrites the number. Fires after `PlayerDamage` on a hit. Cancelling on a lethal blow makes them unkillable — that is the feature and the footgun |
+| `PlayerEffect` | ✅ | `player`, `getEffect()` (its `getKey()` is the lower-case name), amplifier, duration — fired before an effect lands. `setAmplifier(…)` / `setDurationSeconds(…)` weaken or shorten it, so a region that halves potions is a listener rather than a special case. Not fired when one is removed or expires |
 | `PlayerPickupItem` | ✅ | `player`, state |
 | `PlayerUseItem` | ✅ | `player`, state |
 | `PlayerHeldItemChange` | ✅ | `player`, slot |

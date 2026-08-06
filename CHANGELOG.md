@@ -8,6 +8,41 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Status effects — `/effect`, and the whole notion of being under one.** There were none: no packet, no
+  enum, nothing anywhere that knew a player could be affected by something.
+
+  They turn out to fit this server unusually well. An effect is **scenery in the same sense the weather
+  and the clock are**: the server says "speed II for thirty seconds" once, and the client draws the
+  swirl, tints the screen and — because movement here is client-authoritative — genuinely runs faster.
+  Nothing on this side ticks to keep any of that going, and a player under nothing costs one empty-map
+  check a second.
+
+  All four protocols, and for once the editions agree about the *numbering* — the legacy 1–23 ids are
+  shared — so the id lives on the enum and only the writing differs: a byte on Java and 0.14, a zigzag
+  varint on 1.1.5. What they disagree about is which effects exist: **0.14 knows sixteen**, and is the
+  client that crashes rather than shrugs at an id it doesn't have, so the rest go through a
+  `Pe014Effects` gate exactly as blocks and items already do. Ids came from PocketMine (both trees) and
+  ViaVersion, each cross-checked against an id this project had already confirmed with a real client —
+  0.14's `0xa5` sits between `0xa4` and `0xa6`, and 1.1.5's `0x1d` in the one gap between EntityEvent and
+  UpdateAttributes. One inversion worth recording: the trailing byte of Java's Entity Effect *shows*
+  particles on 1.12.2 and *hides* them on 1.8. Same position, opposite meaning.
+
+  **The core steps in at exactly the points where it already owns the answer**, and nowhere else. The
+  blind judge widens what it will believe about a sped-up player — without which speed would present as
+  rubber-banding, making that the bug inside the feature rather than an extra. Strength, weakness and
+  resistance scale a hit through the damage event every point of damage already goes through. Instant
+  health and damage are applied outright, health being the one thing this server is authoritative for.
+  And invisibility simply withholds the avatar from other clients, which needs no wire support and so
+  behaves identically on all four editions rather than depending on four metadata layouts.
+
+  **Poison, regeneration and wither are deliberately cosmetic.** They look right and change no health:
+  ticking somebody's hit points is the server-side simulation this project doesn't do. A script that
+  wants a poison that bites writes the timer itself, and pays for it where the cost can be seen.
+
+  Not persisted, like the weather. Re-stated on a world switch, because the client is the one holding the
+  countdown and a dimension change is exactly the sort of thing it drops them on. Cancellable
+  `PlayerEffect` event, so a plugin can refuse or rescale one before it lands.
+
 - **Items have names you can type, and `/give`.** A block is an id here and always will be — but nobody
   should have to *say* 574 at a chat prompt, and until now there was no way to hand somebody a stack
   without writing a script.

@@ -37,6 +37,11 @@ public final class Mcpe014Packets {
     public static final int ID_ADD_ITEM_ENTITY = 0x9a;     // outbound: a dropped-item entity, carrying its item
     public static final int WINDOW_ID_ARMOR = 0x78;        // the wearer's own armor slots (SPECIAL_ARMOR)
     public static final int ID_ENTITY_EVENT = 0xa4; // outbound: one-shot entity event (hurt animation etc.)
+    public static final int ID_MOB_EFFECT = 0xa5;  // outbound: add / modify / remove a status effect
+    /** MobEffect events — the same three at both PE eras. */
+    public static final int EFFECT_EVENT_ADD = 1;
+    public static final int EFFECT_EVENT_MODIFY = 2;
+    public static final int EFFECT_EVENT_REMOVE = 3;
     public static final int ID_INTERACT = 0xa9;    // inbound: attack / interact with an entity
     public static final int ID_USE_ITEM = 0xaa;
     public static final int ID_PLAYER_ACTION = 0xab;
@@ -197,6 +202,26 @@ public final class Mcpe014Packets {
     }
 
     /** EntityEvent (0.14): {@code long eid} (BE) + {@code byte event}. No trailing data at protocol 45. */
+    /**
+     * MobEffect (0xa5), verbatim from PMMP at {@code CURRENT_PROTOCOL = 45}: {@code long eid},
+     * {@code byte eventId}, {@code byte effectId}, {@code byte amplifier}, {@code byte particles},
+     * {@code int duration} — all big-endian and fixed-width, and every field a <b>byte</b> where 1.1.5
+     * uses a varint. Events are the same three: 1 add, 2 modify, 3 remove.
+     *
+     * <p>The caller is expected to have checked {@link Pe014Effects#supports} first: this client has no
+     * placeholder for an effect it doesn't know, and it is the one that crashes rather than shrugs.
+     */
+    public static void mobEffect(ByteBuf b, long eid, int event, int effectId, int amplifier,
+                                 boolean particles, int durationTicks) {
+        b.writeByte(ID_MOB_EFFECT);
+        b.writeLong(eid);
+        b.writeByte(event);
+        b.writeByte(effectId);
+        b.writeByte(amplifier);
+        b.writeByte(particles ? 1 : 0);
+        b.writeInt(durationTicks);
+    }
+
     public static void entityEvent(ByteBuf b, long eid, int event) {
         b.writeByte(ID_ENTITY_EVENT);
         b.writeLong(eid);
