@@ -1007,9 +1007,8 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   reasoning that outlives any particular list: everything ground-truthed against PocketMine is
   byte-tested, and a byte test only proves the encoder agrees with itself. The item-NBT dialect passed
   its own tests and still showed the vanilla name on a real client. So anything newly added to that wire
-  is unverified until somebody logs in — which right now means **status effects on both Bedrock eras**
-  (`MobEffect`, `0x1d` at 1.1.5 and `0xa5` at 0.14), whose ids and bodies are pinned byte-for-byte and
-  have not yet been in front of a client.
+  is unverified until somebody logs in — and nothing is waiting on one right now: status effects
+  (`MobEffect`, `0x1d` at 1.1.5 and `0xa5` at 0.14) were confirmed on real clients on both eras.
 - **Non-goals (by design).** No mob AI / pathfinding, no redstone, no crafting / smelting mechanics, no
   runtime world simulation or physics, no 1.13+ flattening. Knockback is excluded for the same reason —
   the server simulates no physics. Custom logic that wants any of these lives in a script as an

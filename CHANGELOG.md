@@ -43,6 +43,10 @@ unstable — anything may change between entries.
   countdown and a dimension change is exactly the sort of thing it drops them on. Cancellable
   `PlayerEffect` event, so a plugin can refuse or rescale one before it lands.
 
+  **Confirmed on real clients, all four.** Which for the two Bedrock eras is the only judge that counts:
+  the ids and bodies came from PocketMine and were pinned byte-for-byte, and a byte test would have said
+  exactly the same thing about an amplifier written one level out or a duration in the wrong unit.
+
 - **Items have names you can type, and `/give`.** A block is an id here and always will be — but nobody
   should have to *say* 574 at a chat prompt, and until now there was no way to hand somebody a stack
   without writing a script.
