@@ -114,6 +114,20 @@ player.giveItem(35 * 16 + 14, 8);      // …or packed, when the API takes a sta
 Ids are the pre-1.13 numeric ones (the "legacy" set every target version of this server shares). `Blocks`
 constants exist on the Java side; from a script, use the numbers.
 
+The numbers stay the model — but there is a name table over them, the one `/give` and `/pose` parse with,
+and a script can use it in either direction:
+
+```js
+items.state('red_wool');    // 574   — also 'wool:14', '35:14', '276'
+items.state('nonsense');    // -1    — it names nothing
+items.nameOf(574);          // 'red_wool'
+items.nameOf(2528);         // '158' — nothing names that state, so you get the number back
+```
+
+It covers what the creative palettes offer and no more. Where the Java and Bedrock legacy numberings
+disagree about an id, the state is deliberately left unnamed rather than given a name that would be wrong
+on half the server — `items.nameOf` then hands back `id` or `id:meta`, which is always printable.
+
 ---
 
 ## Text markup
@@ -522,6 +536,9 @@ blade.setName('{aqua}Frostblade')
 
 items.give(player, 'frostblade');
 items.heldKey(player);               // the key of what they're holding, or null
+
+items.state('red_wool');             // 574 — the vanilla name table, both directions
+items.nameOf(574);                   // 'red_wool'
 ```
 
 **Identity is the key.** A stack carries `'frostblade'`, not a copy of the definition — so editing this

@@ -48,6 +48,26 @@ public final class ScriptItems {
     }
 
     /**
+     * The state a vanilla name stands for — {@code items.state('red_wool')} is {@code 574} — or
+     * {@code -1} for a word that names nothing. Accepts every form a command does ({@code wool:14},
+     * {@code 35:14}, {@code 276}), so a script and a player can spell an item the same way.
+     *
+     * <p>This is a convenience over the numbers, not a replacement for them: the API still speaks
+     * states, and a name is only ever resolved to one here.
+     */
+    public int state(String name) {
+        return com.jedrock.api.item.ItemNames.parse(name);
+    }
+
+    /**
+     * What to call a state — {@code items.nameOf(574)} is {@code 'red_wool'}. Falls back to
+     * {@code 'id:meta'} for a state nothing names, so it is always printable.
+     */
+    public String nameOf(int state) {
+        return com.jedrock.api.item.ItemNames.name(state);
+    }
+
+    /**
      * Declare an item drawn as {@code state}, replacing any definition already under {@code key}.
      *
      * @param key a short stable identity — letters, digits, {@code _ - .}, up to 64
@@ -89,25 +109,7 @@ public final class ScriptItems {
         if (item == null) {
             throw new IllegalArgumentException("no item is defined as '" + key + "'");
         }
-        int given = 0;
-        int lastSlot = -1;
-        for (int i = 0; i < Math.max(0, count); i++) {
-            int slot = target.getInventory().give(item.getState(), 0, CorePlayer.STORAGE_SLOTS, item.getKey());
-            if (slot < 0) {
-                break; // full
-            }
-            if (slot != lastSlot) {
-                if (lastSlot >= 0) {
-                    target.syncSlot(lastSlot);
-                }
-                lastSlot = slot;
-            }
-            given++;
-        }
-        if (lastSlot >= 0) {
-            target.syncSlot(lastSlot);
-        }
-        return given;
+        return target.giveItem(item.getState(), count, item.getKey());
     }
 
     /** Give one. */

@@ -464,11 +464,23 @@ public final class CorePlayer implements Player {
 
     @Override
     public int giveItem(int state, int count) {
+        return giveItem(state, count, null);
+    }
+
+    /**
+     * As {@link #giveItem(int, int)}, but the stacks carry {@code customKey} — the identity that makes
+     * them a custom item rather than the ordinary one they are drawn as ({@code null} for a plain give).
+     * The one place stacks are handed to a player in bulk, so a script's {@code items.give} and
+     * {@code /give} put things in the inventory exactly the same way.
+     *
+     * @return how many actually fit
+     */
+    public int giveItem(int state, int count, String customKey) {
         if (state <= 0 || count <= 0) {
             return 0;
         }
         int fit = 0;
-        while (fit < count && addToInventory(state) >= 0) {
+        while (fit < count && addToInventory(state, customKey, null) >= 0) {
             fit++;
         }
         if (fit > 0) {

@@ -8,6 +8,33 @@ unstable — anything may change between entries.
 
 ### Added
 
+- **Items have names you can type, and `/give`.** A block is an id here and always will be — but nobody
+  should have to *say* 574 at a chat prompt, and until now there was no way to hand somebody a stack
+  without writing a script.
+
+  `ItemNames` names the canonical states. One table over blocks and items alike, because there is one
+  model for both, and `/give <player> <item> [count]` takes any way of writing one: `red_wool`,
+  `wool:14`, `35:14`, or `276`. A bare number is an **id**, not a packed state — that is what a person
+  means by 276, and a packed state was never something anyone typed. A **custom item's key wins over all
+  of it**, so `/give Steve frostblade` hands over the real thing, carrying the identity that makes it
+  one, rather than the diamond sword it is drawn as.
+
+  The table is written against the two creative palettes, and the guard against it drifting from them is
+  a test in the network module — the only place both are visible — which fails when a palette gains a
+  state nobody named. It is also deliberately **incomplete**: where the legacy Java and Bedrock
+  numberings disagree about what an id means (158 is a dropper on one and a wooden slab on the other),
+  the state stays unnamed rather than carry a name that would be wrong on half the server. Nothing
+  becomes unreachable by that — `id:meta` still addresses it, and `nameOf` hands the number back.
+
+  Three things that already existed got the table for free: `/pose` parses a prop's block the same way
+  (`/pose block red_wool`), `/pick` prints what a stack *is* — a custom item's own name, or the canonical
+  one for its state — instead of a raw number, which is the README's own listed leftover, and a script
+  can resolve either direction with `items.state` / `items.nameOf`.
+
+  Also folded together on the way: giving stacks in bulk had two implementations, one of which carried a
+  custom item's key and one of which didn't. There is one now (`CorePlayer.giveItem(state, count, key)`),
+  which is what both the command and `items.give` call.
+
 - **Time of day — `/time`, and the whole notion of it.** There was none: the only clock anywhere was a
   hardcoded zero 0.14 sends at spawn. A world now has an hour, `/time set|add|query|freeze|resume` moves
   it, and `world.setTime(6000)` does the same from a script.

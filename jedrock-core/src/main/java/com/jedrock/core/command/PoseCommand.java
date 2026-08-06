@@ -318,24 +318,14 @@ public final class PoseCommand implements Command {
         return session;
     }
 
-    /** {@code 35} or {@code 35:14} — the two ways anybody writes a block. */
+    /**
+     * A block, however anybody writes one: {@code red_wool}, {@code wool:14}, {@code 35:14} or
+     * {@code 35}. The parsing lives in {@link com.jedrock.api.item.ItemNames} so a prop is named the
+     * same way an item given by {@code /give} is; {@code null} here for what that refuses.
+     */
     static Integer state(String value) {
-        String text = value.trim();
-        try {
-            int colon = text.indexOf(':');
-            if (colon < 0) {
-                int id = Integer.parseInt(text);
-                return id < 0 ? null : id << 4;
-            }
-            int id = Integer.parseInt(text.substring(0, colon));
-            int meta = Integer.parseInt(text.substring(colon + 1));
-            if (id < 0 || meta < 0 || meta > 15) {
-                return null;
-            }
-            return (id << 4) | meta;
-        } catch (NumberFormatException e) {
-            return null;
-        }
+        int state = com.jedrock.api.item.ItemNames.parse(value);
+        return state <= 0 ? null : state;
     }
 
     private static EntityType entityType(String value) {

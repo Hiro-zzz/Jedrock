@@ -196,7 +196,7 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   ever changes). **In-game commands** work cross-edition — Java sends `/…` straight through as chat, and
   Bedrock is handed an `AvailableCommands` manifest so its client parses the line and sends it back. The
   built-in set: `/help [cmd]`, `/list`, `/tps`, `/say`, `/me`, `/msg`, `/gamemode`, `/tp`, `/tphere`,
-  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/op`, `/deop`, `/perm`, `/region`, `/world`, `/pick`,
+  `/tpall`, `/spawn`, `/heal`, `/kill`, `/clear`, `/give`, `/op`, `/deop`, `/perm`, `/region`, `/world`, `/pick`,
   `/puppet`, `/hologram`, `/pose`, `/time`, `/about`, plus the [moderation set](#moderation). A deliberately minimal **survival inventory** (36 slots)
   tracks only what a survival player mines and places: mining a block drops it into the hotbar, placing
   consumes it, and the changed slot is pushed live so the HUD refreshes. On PE 1.1.5 the player window is
@@ -400,6 +400,18 @@ can't share a socket (they negotiate different RakNet versions), so **0.14** —
   test: the 1.1.5 client neither crashed nor complained, it just kept showing the vanilla name. An ordinary
   item still writes the exact bytes it always did, so nothing changed for a server that defines no items.
   **Confirmed on a real client on every one of the four**, which is what it took to trust either dialect.
+
+- ✅ **Items have names you can type — and `/give`.** A block is an id and always will be, but nobody
+  should have to *say* 574 at a chat prompt. `ItemNames` names the canonical states — one table over
+  blocks and items alike, since there is one model for both — so `/give <player> <item> [count]` takes
+  `red_wool`, `wool:14`, `35:14` or `276`, tab-completes the lot, and hands over a **custom item** by its
+  key ahead of any of them. The table is written against the two creative palettes and a test in the
+  network module (the only place both are visible) fails if a palette gains a state nobody named.
+  It is deliberately *incomplete*: where the legacy Java and Bedrock numberings disagree about what an id
+  means — 158 is a dropper on one and a wooden slab on the other — the state stays unnamed rather than
+  carry a name that would be wrong on half the server, and remains reachable as `id:meta`. `/pose` parses
+  a prop's block the same way, `/pick` prints names instead of numbers, and a script can resolve either
+  direction (`items.state('red_wool')`, `items.nameOf(574)`).
 
 - ✅ **Permissions from a script.** A script could always *read* rights (`player.hasPermission`); now it can
   set them. The **`permissions`** global builds groups (`createGroup(n).inherit('default').add(node)
@@ -923,8 +935,9 @@ purpose. Each one shaped a decision above, so they're recorded rather than hidde
   built and tried on a real client, and changed nothing. So the claim that client stakes on a cell it edited
   does not expire when the burst does, and the column is not a workaround for bad timing but the only
   correction it honours. Recorded so the idea isn't rebuilt a third time.
-- **The `/pick` storage list still addresses stacks by slot number** and prints a raw block state. That
-  was the only honest option before items had names; now that they do, it's simply not wired up yet.
+- **The `/pick` storage list still addresses stacks by slot number.** The number is the only thing a
+  client here can point at, so that part stays; what it prints is now a name (a custom item's own, or the
+  canonical one for its state) rather than a raw number.
 - **Forms are out on both PE eras** — the legacy clients predate them, so a menu is a window (Java) or a
   list (Bedrock) and nothing richer.
 - **Entities can't be posed finely.** No armor stands in either PE era, no per-entity scale and no limb
@@ -991,9 +1004,7 @@ verification run, and packaging the whole thing so it can be handed to someone. 
 promised; it's the list of what would be worth doing next, roughly in the order it would pay off.
 
 - **Small additions to the script API.** Regions want a **greeting / farewell** message and a
-  **priority** escape hatch for the case deny-wins can't express: an allow island inside a deny. And the
-  `/pick` storage list should show the names custom items now have, instead of a slot number and a raw
-  state.
+  **priority** escape hatch for the case deny-wins can't express: an allow island inside a deny.
 - **What worlds still want.** **Deleting** one, which is deliberately absent — unloading leaves the folder,
   and removing it is a decision that belongs to whoever can see the filesystem, not to a script. A
   **portal** is not on this list: noticing a player standing in a frame is the shape of simulation this

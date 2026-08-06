@@ -35,12 +35,20 @@ public final class ContainerService {
     private final EventBus events;
     private final PlayerBroadcast broadcast;
 
+    /** Lets a listed stack say which custom item it is; null in tests that don't wire one. */
+    private com.jedrock.core.item.ItemRegistry items;
+
     public ContainerService(PlayerRegistry players, CoreWorld defaultWorld, EventBus events,
                             PlayerBroadcast broadcast) {
         this.players = players;
         this.defaultWorld = defaultWorld;
         this.events = events;
         this.broadcast = broadcast;
+    }
+
+    /** Wired after construction, since the item registry and the container service are built together. */
+    public void setItems(com.jedrock.core.item.ItemRegistry items) {
+        this.items = items;
     }
 
     /**
@@ -264,16 +272,33 @@ public final class ContainerService {
                 continue;
             }
             any = true;
-            // There is no item-name table in the core (a block is an id by design), so a stack is shown as
-            // its state and count and chosen by slot number — the number is the label, not the name.
+            // Chosen by slot number — that is the client's only way to point at one here — but named,
+            // since a stack can now say what it is: its custom item's name if it is one, otherwise the
+            // canonical name of its state (which falls back to id:meta for a state nothing names).
             player.sendMessage(" {gray}• {white}/pick " + (slot + 1)
-                    + " {dark_gray}— {gray}#" + container.stateAt(slot) + " ×" + container.countAt(slot));
+                    + " {dark_gray}— {gray}" + describe(container, slot) + " ×" + container.countAt(slot));
         }
         if (!any) {
             player.sendMessage(" {dark_gray}(empty)");
         }
         player.sendMessage(" {gray}• {white}/pick " + PUT_LABEL + " {dark_gray}— put the held item in");
         player.sendMessage(" {gray}• {white}/pick " + CLOSE_LABEL + " {dark_gray}— close");
+    }
+
+    /**
+     * What to call the stack in {@code slot}. A custom item answers with the name it was given; anything
+     * else with the canonical name of its state. Never null — {@code ItemNames.name} always says
+     * something, even for a state nothing names.
+     */
+    private String describe(Container container, int slot) {
+        String key = container.customKeyAt(slot);
+        if (key != null && items != null) {
+            String display = items.displayNameOf(key);
+            if (display != null && !display.isEmpty()) {
+                return display;
+            }
+        }
+        return com.jedrock.api.item.ItemNames.name(container.stateAt(slot));
     }
 
     /**

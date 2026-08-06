@@ -32,6 +32,7 @@ import com.jedrock.core.command.WhitelistCommand;
 import com.jedrock.core.command.ClearCommand;
 import com.jedrock.core.command.CommandManager;
 import com.jedrock.core.command.GameModeCommand;
+import com.jedrock.core.command.GiveCommand;
 import com.jedrock.core.command.WeatherCommand;
 import com.jedrock.core.command.WorldCommand;
 import com.jedrock.core.command.HealCommand;
@@ -226,6 +227,7 @@ public class JedrockServer implements Server {
         this.regions = new com.jedrock.core.region.RegionManager(eventBus, defaultWorld.getName());
         this.items = new com.jedrock.core.item.ItemRegistry(eventBus);
         this.containers = new ContainerService(playerRegistry, defaultWorld, eventBus, broadcast);
+        this.containers.setItems(items);
         this.combat = new CombatService(playerRegistry, defaultWorld, eventBus, broadcast, entities, judge);
         this.combat.setItems(items);
         // An avatar is only worth showing to a client that has the terrain to stand it on, so the tracker
@@ -286,6 +288,7 @@ public class JedrockServer implements Server {
         commandManager.register(new HealCommand());
         commandManager.register(new KillCommand());
         commandManager.register(new ClearCommand());
+        commandManager.register(new GiveCommand());
         commandManager.register(new PuppetCommand());
         commandManager.register(new HologramCommand());
         commandManager.register(new PoseCommand());
